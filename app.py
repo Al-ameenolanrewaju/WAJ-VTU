@@ -192,6 +192,10 @@ def send_main_menu(user):
     )
     send_whatsapp_message(user.whatsapp_id, menu)
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    return "OK", 200
+
 
 # --- WHATSAPP BOT WEBHOOK ---
 @app.route("/whatsapp/webhook", methods=["POST"])

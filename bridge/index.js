@@ -13,6 +13,10 @@ const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || ''; // e.g., '2
 let sock;
 let whatsappConnected = false;
 let latestQrDataUrl = null;
+// Quick response for UptimeRobot
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
 
 function sendJson(response, statusCode, body) {
     response.writeHead(statusCode, { 'Content-Type': 'application/json' });
