@@ -12,6 +12,7 @@
   "type": "commonjs",
   "dependencies": {
     "@hapi/boom": "^10.0.1",
+    "@supabase/supabase-js": "^2.116.0",
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "axios": "^1.20.0",
     "pino": "^10.3.1",
