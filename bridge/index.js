@@ -1,19 +1,95 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, BufferJSON, initAuthCreds } = require('@whiskeysockets/baileys');
+const { createClient } = require('@supabase/supabase-js');
 const { Boom } = require('@hapi/boom');
 const qrcode = require('qrcode-terminal');
 const qrImage = require('qrcode');
 const axios = require('axios');
 const http = require('http');
-const path = require('path');
 
 const FLASK_WEBHOOK_URL = process.env.FLASK_WEBHOOK_URL || 'http://localhost:5000/whatsapp/webhook';
 const BRIDGE_API_TOKEN = process.env.BRIDGE_API_TOKEN || '';
 const PORT = Number(process.env.PORT || 3000);
-const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || ''; // e.g., '2348012345678'
+const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || '';
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 let sock;
 let whatsappConnected = false;
 let latestQrDataUrl = null;
+
+// --- SUPABASE AUTH STATE HANDLER ---
+async function useSupabaseAuthState(sessionId = 'main_session') {
+    const readData = async (type, id) => {
+        const key = `${type}-${id}`;
+        const { data } = await supabase
+            .from('whatsapp_sessions')
+            .select('data')
+            .eq('id', `${sessionId}_${key}`)
+            .maybeSingle();
+
+        if (data?.data) {
+            return JSON.parse(JSON.stringify(data.data), BufferJSON.reviver);
+        }
+        return null;
+    };
+
+    const writeData = async (type, id, val) => {
+        const key = `${type}-${id}`;
+        if (!val) {
+            await supabase
+                .from('whatsapp_sessions')
+                .delete()
+                .eq('id', `${sessionId}_${key}`);
+            return;
+        }
+
+        const valueJSON = JSON.parse(JSON.stringify(val, BufferJSON.replacer));
+        await supabase.from('whatsapp_sessions').upsert({
+            id: `${sessionId}_${key}`,
+            data: valueJSON,
+            updated_at: new Date().toISOString()
+        });
+    };
+
+    let creds = await readData('creds', 'main');
+    if (!creds) {
+        creds = initAuthCreds();
+    }
+
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data = {};
+                    await Promise.all(
+                        ids.map(async (id) => {
+                            const value = await readData(type, id);
+                            if (value) data[id] = value;
+                        })
+                    );
+                    return data;
+                },
+                set: async (data) => {
+                    const tasks = [];
+                    for (const category in data) {
+                        for (const id in data[category]) {
+                            const value = data[category][id];
+                            tasks.push(writeData(category, id, value));
+                        }
+                    }
+                    await Promise.all(tasks);
+                }
+            }
+        },
+        saveCreds: async () => {
+            await writeData('creds', 'main', creds);
+        }
+    };
+}
 
 function sendJson(response, statusCode, body) {
     response.writeHead(statusCode, { 'Content-Type': 'application/json' });
@@ -112,7 +188,7 @@ function startHttpServer() {
 }
 
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, 'auth_info'));
+    const { state, saveCreds } = await useSupabaseAuthState('main_session');
 
     sock = makeWASocket({
         auth: state,
