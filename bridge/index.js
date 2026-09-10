@@ -11,8 +11,18 @@ const BRIDGE_API_TOKEN = process.env.BRIDGE_API_TOKEN || '';
 const PORT = Number(process.env.PORT || 3000);
 const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || '';
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// --- ENVIRONMENT VARIABLE FALLBACKS ---
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    console.error('❌ ERROR: Missing Supabase environment variables on Render!');
+    console.error(`SUPABASE_URL present: ${Boolean(SUPABASE_URL)}`);
+    console.error(`SUPABASE_SERVICE_ROLE_KEY present: ${Boolean(SUPABASE_SERVICE_ROLE_KEY)}`);
+    process.exit(1);
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
