@@ -122,10 +122,6 @@ with app.app_context():
     db.create_all()
 
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({"status": "ok"}), 200
-
 
 def valid_bridge_request():
     authorization = request.headers.get('Authorization', '')
@@ -193,8 +189,8 @@ def send_main_menu(user):
     send_whatsapp_message(user.whatsapp_id, menu)
 
 @app.route('/health', methods=['GET'])
-def health_check():
-    return "OK", 200
+def health_check_endpoint():  # <-- Changed function name here
+    return {"status": "ok"}, 200
 
 
 # --- WHATSAPP BOT WEBHOOK ---
