@@ -11,14 +11,27 @@ const BRIDGE_API_TOKEN = process.env.BRIDGE_API_TOKEN || '';
 const PORT = Number(process.env.PORT || 3000);
 const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || '';
 
-// --- ENVIRONMENT VARIABLE FALLBACKS ---
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
+// --- ENVIRONMENT VARIABLE SANITIZATION & VALIDATION ---
+let rawSupabaseUrl = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/^["']|["']$/g, '');
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY || '').trim().replace(/^["']|["']$/g, '');
+
+// Auto-prepend https:// if protocol was omitted in environment variables
+if (rawSupabaseUrl && !rawSupabaseUrl.startsWith('http://') && !rawSupabaseUrl.startsWith('https://')) {
+    rawSupabaseUrl = `https://${rawSupabaseUrl}`;
+}
+
+const SUPABASE_URL = rawSupabaseUrl;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     console.error('❌ ERROR: Missing Supabase environment variables on Render!');
     console.error(`SUPABASE_URL present: ${Boolean(SUPABASE_URL)}`);
     console.error(`SUPABASE_SERVICE_ROLE_KEY present: ${Boolean(SUPABASE_SERVICE_ROLE_KEY)}`);
+    process.exit(1);
+}
+
+if (!SUPABASE_URL.startsWith('http://') && !SUPABASE_URL.startsWith('https://')) {
+    console.error(`❌ ERROR: SUPABASE_URL must be an HTTPS URL (e.g., https://xyz.supabase.co), but received: "${SUPABASE_URL}"`);
+    console.error('👉 Ensure you copy the Project API URL from Supabase Settings > API, NOT the Postgres connection string.');
     process.exit(1);
 }
 
