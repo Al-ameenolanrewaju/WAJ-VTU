@@ -1,0 +1,13 @@
+{% extends 'admin/base.html' %}
+
+{% block head_css %}
+    {{ super() }}
+    <!-- Load modern Darkly Bootstrap theme -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@4.6.2/dist/darkly/bootstrap.min.css">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .navbar { background-color: #1a1a1a !important; border-bottom: 2px solid #00bc8c; }
+        .table { border-radius: 8px; overflow: hidden; }
+        .btn-primary { background-color: #00bc8c; border-color: #00bc8c; }
+    </style>
+{% endblock %}

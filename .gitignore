@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.py[cod]
+venv/
+.idea/
+instance/*.db
+bridge/node_modules/
+bridge/auth_info/*
+!bridge/auth_info/.gitkeep

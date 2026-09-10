@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: waj-vtu-backend
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: FLASK_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false # Set manually in Render Dashboard using your Supabase URI
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: CLUBKONNECT_USERID
+        sync: false
+      - key: CLUBKONNECT_APIKEY
+        sync: false
+      - key: CLUBKONNECT_BASE_URL
+        value: https://www.clubkonnect.com/API
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: NODE_BRIDGE_URL
+        sync: false
+      - key: BRIDGE_API_TOKEN
+        sync: false
+  - type: web
+    name: waj-vtu-bridge
+    env: node
+    rootDir: bridge
+    buildCommand: npm ci
+    startCommand: node index.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: FLASK_WEBHOOK_URL
+        sync: false
+      - key: BRIDGE_API_TOKEN
+        sync: false
+    disk:
+      name: whatsapp-auth
+      mountPath: /opt/render/project/src/bridge/auth_info
+      sizeGB: 1
