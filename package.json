@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "qrcode": "^1.5.4"
   }
 }
