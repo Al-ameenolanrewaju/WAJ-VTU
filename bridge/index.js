@@ -9,6 +9,7 @@ const path = require('path');
 const FLASK_WEBHOOK_URL = process.env.FLASK_WEBHOOK_URL || 'http://localhost:5000/whatsapp/webhook';
 const BRIDGE_API_TOKEN = process.env.BRIDGE_API_TOKEN || '';
 const PORT = Number(process.env.PORT || 3000);
+const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || ''; // e.g., '2348012345678'
 let sock;
 let whatsappConnected = false;
 let latestQrDataUrl = null;
@@ -18,40 +19,49 @@ function sendJson(response, statusCode, body) {
     response.end(JSON.stringify(body));
 }
 
-function isAuthorized(request) {
-    const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
-    return Boolean(BRIDGE_API_TOKEN) && (
-        request.headers.authorization === `Bearer ${BRIDGE_API_TOKEN}`
-        || url.searchParams.get('token') === BRIDGE_API_TOKEN
-    );
-}
-
 function sendQrPage(response) {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end(`<!doctype html>
 <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WhatsApp Pairing QR</title>
-<style>body{font-family:Arial,sans-serif;text-align:center;padding:24px}img{width:min(90vw,420px);image-rendering:auto}p{color:#555}</style>
-</head><body><h1>WhatsApp Pairing</h1><p id="status">Waiting for a QR code...</p>
-<img id="qr" alt="WhatsApp pairing QR code" hidden>
+<style>
+  body{font-family:Arial,sans-serif;text-align:center;padding:24px;background-color:#f9f9f9}
+  .card{background:#fff;padding:20px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.1);display:inline-block}
+  img{width:min(80vw,360px);height:auto;border-radius:8px}
+  p{color:#555;font-size:16px}
+</style>
+</head><body>
+<div class="card">
+  <h1>WhatsApp Pairing</h1>
+  <p id="status">Waiting for QR code generation...</p>
+  <img id="qr" alt="WhatsApp pairing QR code" hidden>
+</div>
 <script>
 async function refreshQr(){
-  const response=await fetch('/qr/image'+location.search);
-  const image=document.getElementById('qr');
-  const status=document.getElementById('status');
-  if(response.ok){image.src=URL.createObjectURL(await response.blob());image.hidden=false;status.textContent='Scan this QR code with WhatsApp';}
-  else{image.hidden=true;status.textContent=response.status===409?'Already connected or waiting for a new QR code':'Waiting for the bridge...';}
+  const response = await fetch('/qr/image');
+  const image = document.getElementById('qr');
+  const status = document.getElementById('status');
+  if(response.ok){
+    image.src = URL.createObjectURL(await response.blob());
+    image.hidden = false;
+    status.textContent = 'Scan this QR code with WhatsApp Linked Devices';
+  } else {
+    image.hidden = true;
+    status.textContent = response.status === 409 ? 'WhatsApp is already connected!' : 'Waiting for connection...';
+  }
 }
-refreshQr();setInterval(refreshQr,3000);
+refreshQr();
+setInterval(refreshQr, 4000);
 </script></body></html>`);
 }
 
 function startHttpServer() {
     const server = http.createServer((request, response) => {
         const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+
+        // PUBLIC QR DISPLAY ENDPOINTS (Unprotected for easy browser scanning)
         if (request.method === 'GET' && (url.pathname === '/qr' || url.pathname === '/qr/image')) {
-            if (!isAuthorized(request)) return sendJson(response, 401, { error: 'Unauthorized' });
-            if (!latestQrDataUrl) return sendJson(response, 409, { error: 'QR code is not currently available' });
+            if (!latestQrDataUrl) return sendJson(response, 409, { error: 'QR code is not currently available or already connected' });
             if (url.pathname === '/qr/image') {
                 const image = Buffer.from(latestQrDataUrl.split(',')[1], 'base64');
                 response.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
@@ -59,10 +69,12 @@ function startHttpServer() {
             }
             return sendQrPage(response);
         }
+
+        // PROTECTED API ENDPOINTS FOR FLASK BACKEND
         if (request.method !== 'POST' || request.url !== '/api/sendText') {
             return sendJson(response, 404, { error: 'Not found' });
         }
-        if (!BRIDGE_API_TOKEN || request.headers.authorization !== `Bearer ${BRIDGE_API_TOKEN}`) {
+        if (BRIDGE_API_TOKEN && request.headers.authorization !== `Bearer ${BRIDGE_API_TOKEN}`) {
             return sendJson(response, 401, { error: 'Unauthorized' });
         }
 
@@ -94,12 +106,27 @@ function startHttpServer() {
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, 'auth_info'));
+
     sock = makeWASocket({
         auth: state,
         printQRInTerminal: false
     });
 
     sock.ev.on('creds.update', saveCreds);
+
+    // PAIRING CODE FALLBACK (If phone number environment variable is set)
+    if (PAIRING_PHONE_NUMBER && !sock.authState.creds.registered) {
+        setTimeout(async () => {
+            try {
+                const pairingCode = await sock.requestPairingCode(PAIRING_PHONE_NUMBER.replace(/[^0-9]/g, ''));
+                console.log('\n=============================================');
+                console.log(`PAIRING CODE: ${pairingCode}`);
+                console.log('=============================================\n');
+            } catch (err) {
+                console.error('Error generating pairing code:', err.message);
+            }
+        }, 4000);
+    }
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
@@ -131,13 +158,12 @@ async function startBot() {
 
         if (text) {
             try {
-                // Forward incoming message to Flask backend
                 await axios.post(FLASK_WEBHOOK_URL, {
                     from: sender,
                     body: text,
                     fromMe: false
                 }, {
-                    headers: { Authorization: `Bearer ${BRIDGE_API_TOKEN}` }
+                    headers: BRIDGE_API_TOKEN ? { Authorization: `Bearer ${BRIDGE_API_TOKEN}` } : {}
                 });
             } catch (error) {
                 console.error('Error contacting Flask backend:', error.message);
