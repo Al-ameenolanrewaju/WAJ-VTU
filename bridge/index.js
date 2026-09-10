@@ -10,13 +10,10 @@ const FLASK_WEBHOOK_URL = process.env.FLASK_WEBHOOK_URL || 'http://localhost:500
 const BRIDGE_API_TOKEN = process.env.BRIDGE_API_TOKEN || '';
 const PORT = Number(process.env.PORT || 3000);
 const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || ''; // e.g., '2348012345678'
+
 let sock;
 let whatsappConnected = false;
 let latestQrDataUrl = null;
-// Quick response for UptimeRobot
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
-});
 
 function sendJson(response, statusCode, body) {
     response.writeHead(statusCode, { 'Content-Type': 'application/json' });
@@ -63,7 +60,13 @@ function startHttpServer() {
     const server = http.createServer((request, response) => {
         const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
 
-        // PUBLIC QR DISPLAY ENDPOINTS (Unprotected for easy browser scanning)
+        // 1. HEALTH CHECK & ROOT ENDPOINTS FOR UPTIMEROBOT
+        if (request.method === 'GET' && (url.pathname === '/health' || url.pathname === '/')) {
+            response.writeHead(200, { 'Content-Type': 'text/plain' });
+            return response.end('OK');
+        }
+
+        // 2. PUBLIC QR DISPLAY ENDPOINTS
         if (request.method === 'GET' && (url.pathname === '/qr' || url.pathname === '/qr/image')) {
             if (!latestQrDataUrl) return sendJson(response, 409, { error: 'QR code is not currently available or already connected' });
             if (url.pathname === '/qr/image') {
@@ -74,8 +77,8 @@ function startHttpServer() {
             return sendQrPage(response);
         }
 
-        // PROTECTED API ENDPOINTS FOR FLASK BACKEND
-        if (request.method !== 'POST' || request.url !== '/api/sendText') {
+        // 3. PROTECTED API ENDPOINTS FOR FLASK BACKEND
+        if (request.method !== 'POST' || url.pathname !== '/api/sendText') {
             return sendJson(response, 404, { error: 'Not found' });
         }
         if (BRIDGE_API_TOKEN && request.headers.authorization !== `Bearer ${BRIDGE_API_TOKEN}`) {
@@ -118,7 +121,6 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // PAIRING CODE FALLBACK (If phone number environment variable is set)
     if (PAIRING_PHONE_NUMBER && !sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
