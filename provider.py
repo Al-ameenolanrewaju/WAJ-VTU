@@ -1,6 +1,7 @@
 import logging
 import os
 import uuid
+import hashlib
 import requests
 from urllib.parse import urlencode
 from dotenv import load_dotenv
@@ -96,6 +97,16 @@ def fetch_data_variations(network: str):
     if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
         logger.error("Cannot fetch data plans: ClubKonnect credentials are missing")
         return []
+
+    credential_fingerprint = hashlib.sha256(
+        f"{CLUBKONNECT_USERID}:{CLUBKONNECT_APIKEY}".encode("utf-8")
+    ).hexdigest()[:8]
+    logger.info(
+        "Using ClubKonnect credentials: userid=%s key_length=%d fingerprint=%s",
+        CLUBKONNECT_USERID,
+        len(CLUBKONNECT_APIKEY),
+        credential_fingerprint,
+    )
 
     try:
         data = _provider_request("APIDatabundlePlansV2.asp", {})
