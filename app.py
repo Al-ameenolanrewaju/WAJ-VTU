@@ -38,6 +38,8 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///vtu
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "vtu-default-secret-key-change-in-production")
 NODE_BRIDGE_URL = os.getenv("NODE_BRIDGE_URL", "https://waj-vtu-bridge.onrender.com").rstrip("/")
+if NODE_BRIDGE_URL.endswith("/api/sendText"):
+    NODE_BRIDGE_URL = NODE_BRIDGE_URL[:-len("/api/sendText")]
 BRIDGE_API_TOKEN = os.getenv("BRIDGE_API_TOKEN", "")
 
 db = SQLAlchemy(app)
