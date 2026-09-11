@@ -71,28 +71,41 @@ def fetch_data_variations(network: str):
             {"name": f"{network} Night Awoof Promo", "variation_code": "2gb_awoof", "variation_amount": 200},
         ]
 
-    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY or not network_code:
+    if not network_code:
+        logger.error("Cannot fetch data plans: unsupported network %s", network)
         return []
 
-    if network_code:
-        try:
-            data = _provider_request("APIDatabundlePlansV2.asp", {})
-            plans = []
-            raw_plans = data.get("MOBILE_NETWORK", {}).get(NETWORK_NAMES.get(network_code, ""), [])
-            if raw_plans and isinstance(raw_plans[0], dict) and "PRODUCT" in raw_plans[0]:
-                raw_plans = raw_plans[0]["PRODUCT"]
-            for item in raw_plans:
-                plans.append(
-                    {
-                        "name": item.get("PRODUCT_NAME"),
-                        "variation_code": item.get("PRODUCT_ID", item.get("PRODUCT_CODE")),
-                        "variation_amount": float(item.get("PRODUCT_AMOUNT", 0)),
-                    }
-                )
-            return plans
-        except Exception as e:
-            logger.error(f"Failed to fetch live data plans for {network}: {e}")
-    return []
+    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
+        logger.error("Cannot fetch data plans: ClubKonnect credentials are missing")
+        return []
+
+    try:
+        data = _provider_request("APIDatabundlePlansV2.asp", {})
+        mobile_networks = data.get("MOBILE_NETWORK", {})
+        raw_plans = mobile_networks.get(NETWORK_NAMES[network_code], [])
+        if raw_plans and isinstance(raw_plans[0], dict) and "PRODUCT" in raw_plans[0]:
+            raw_plans = raw_plans[0]["PRODUCT"]
+
+        plans = []
+        for item in raw_plans:
+            if not isinstance(item, dict):
+                continue
+            code = item.get("PRODUCT_ID") or item.get("PRODUCT_CODE")
+            name = item.get("PRODUCT_NAME")
+            if not code or not name:
+                continue
+            plans.append(
+                {
+                    "name": name,
+                    "variation_code": code,
+                    "variation_amount": float(item.get("PRODUCT_AMOUNT", 0)),
+                }
+            )
+        logger.info("Fetched %d %s data plans from ClubKonnect", len(plans), network)
+        return plans
+    except Exception:
+        logger.exception("Failed to fetch live data plans for %s", network)
+        return []
 
 
 def process_data_purchase(
