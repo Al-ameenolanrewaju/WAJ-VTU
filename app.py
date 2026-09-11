@@ -290,7 +290,11 @@ def categorize_data_plans(plans):
 @app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint for Render monitoring."""
-    return jsonify({"status": "online", "service": "WhatsApp VTU Platform"}), 200
+    return jsonify({
+        "status": "online",
+        "service": "WhatsApp VTU Platform",
+        "build": "2454ed3",
+    }), 200
 
 
 # --- MAIN WEBHOOK ENDPOINT ---
