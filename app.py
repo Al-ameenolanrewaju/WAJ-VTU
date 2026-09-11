@@ -57,6 +57,7 @@ def ensure_database_schema():
             "paystack_customer_code": "VARCHAR(100)",
             "dva_account_number": "VARCHAR(20)",
             "dva_bank_name": "VARCHAR(50)",
+            "version_id": "INTEGER NOT NULL DEFAULT 1",
         },
         "transactions": {
             "meta_data": json_type,
