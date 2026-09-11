@@ -21,14 +21,6 @@ services:
         sync: false
       - key: CLUBKONNECT_BASE_URL
         value: https://www.nellobytesystems.com
-      - key: VTPASS_API_KEY
-        sync: false
-      - key: VTPASS_PUBLIC_KEY
-        sync: false
-      - key: VTPASS_SECRET_KEY
-        sync: false
-      - key: VTPASS_BASE_URL
-        value: https://vtpass.com/api
       - key: ADMIN_USERNAME
         sync: false
       - key: ADMIN_PASSWORD
