@@ -55,6 +55,28 @@ let whatsappConnected = false;
 let latestQrDataUrl = null;
 let resettingSession = false;
 
+// Safely extracts text content across plain text, ephemeral wrappers, interactive buttons, and list replies
+function extractMessageContent(message) {
+    if (!message) return '';
+
+    // Step 1: Unwrap container layers
+    let content = message.ephemeralMessage?.message ||
+                  message.viewOnceMessage?.message ||
+                  message.viewOnceMessageV2?.message ||
+                  message;
+
+    // Step 2: Extract text from standard, button, list, and interactive responses
+    return (
+        content.conversation ||
+        content.extendedTextMessage?.text ||
+        content.buttonsResponseMessage?.selectedButtonId ||
+        content.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        content.templateButtonReplyMessage?.selectedId ||
+        content.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+        ''
+    ).trim();
+}
+
 // Supabase session handler
 async function useSupabaseAuthState(sessionId = 'main_session') {
     const readData = async (type, id) => {
@@ -329,33 +351,37 @@ async function startBot() {
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
-        const msg = messages[0];
-        if (!msg || !msg.message || msg.key.fromMe) return;
 
-        const sender = msg.key.remoteJid;
-        if (!sender || sender.endsWith('@g.us') || sender.endsWith('@broadcast')) return;
+        for (const msg of messages) {
+            // Filter invalid, system, group, status broadcasts, or self-sent messages
+            if (!msg || !msg.message || msg.key.fromMe) continue;
+            const sender = msg.key.remoteJid;
+            if (!sender || sender.endsWith('@g.us') || sender.endsWith('@broadcast')) continue;
 
-        // Extracts content from text, button responses, and list selections
-        const text =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            msg.message.buttonsResponseMessage?.selectedButtonId ||
-            msg.message.listResponseMessage?.singleSelectReply?.selectedRowId ||
-            msg.message.templateButtonReplyMessage?.selectedId ||
-            '';
+            const text = extractMessageContent(msg.message);
+            console.log(`📩 Incoming from ${sender}: "${text}"`);
 
-        if (text) {
+            if (!text) continue;
+
             try {
-                const response = await axios.post(FLASK_WEBHOOK_URL, {
-                    from: sender,
-                    body: text,
-                    fromMe: false
-                }, {
-                    headers: BRIDGE_API_TOKEN ? { Authorization: `Bearer ${BRIDGE_API_TOKEN}` } : {}
-                });
-                console.log(`Delivered message from ${sender} to Flask (${response.status})`);
+                const response = await axios.post(
+                    FLASK_WEBHOOK_URL,
+                    {
+                        from: sender,
+                        body: text,
+                        fromMe: false,
+                        messageId: msg.key.id,
+                        pushName: msg.pushName || '',
+                        timestamp: msg.messageTimestamp
+                    },
+                    {
+                        headers: BRIDGE_API_TOKEN ? { Authorization: `Bearer ${BRIDGE_API_TOKEN}` } : {},
+                        timeout: 10000 // 10s request timeout
+                    }
+                );
+                console.log(`✅ Delivered message from ${sender} to Flask (${response.status})`);
             } catch (error) {
-                console.error(`Error contacting Flask backend at ${FLASK_WEBHOOK_URL}:`, error.message);
+                console.error(`❌ Error contacting Flask backend at ${FLASK_WEBHOOK_URL}:`, error.response?.data || error.message);
             }
         }
     });

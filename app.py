@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import requests
 from decimal import Decimal
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
@@ -21,14 +22,15 @@ app = Flask(__name__)
 # --- CONFIGURATION ---
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///vtu_bot.db")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+BRIDGE_URL = os.getenv("BRIDGE_URL", "http://localhost:10000/send-message")
 db = SQLAlchemy(app)
 
 
 # --- MODELS ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    phone_number = db.Column(db.String(20), unique=True, nullable=False)
-    wallet_balance = db.Column(db.Numeric(10, 2), default=0.00)  # Default demo balance
+    phone_number = db.Column(db.String(50), unique=True, nullable=False)
+    wallet_balance = db.Column(db.Numeric(10, 2), default=0.00)
     current_state = db.Column(db.String(50), default="IDLE")
     session_data = db.Column(db.Text, default="{}")
 
@@ -85,24 +87,20 @@ def get_user_session_data(user):
         return {}
 
 
-def send_whatsapp_message(chat_id, text):
+def send_whatsapp_message(recipient, text):
     """
-    Placeholder/Wrapper function for Meta Cloud API or your WhatsApp provider SDK.
-    Replace print statement with your HTTP POST request to your Meta Cloud API endpoint.
+    Sends outgoing message to the WhatsApp Bridge service (Node.js/Baileys).
     """
-    print(f"\n[OUTGOING WHATSAPP TO {chat_id}]:\n{text}\n")
+    try:
+        payload = {"to": recipient, "message": text}
+        response = requests.post(BRIDGE_URL, json=payload, timeout=10)
+        return response.ok
+    except Exception as e:
+        print(f"Failed to deliver WhatsApp message to bridge: {e}")
+        return False
 
 
 def categorize_data_plans(plans):
-    """
-    Categorizes raw data variations into validity & promo tiers:
-    - DAILY (1 Day / 24hrs / Daily)
-    - TWO_DAYS (2 Days / 48hrs)
-    - WEEKLY (7 Days / 14 Days)
-    - MONTHLY (30 Days / SME / Corporate)
-    - AWOOF (Promo / Night / Social / Streaming)
-    - OTHERS (Fallback)
-    """
     categorized = {
         "DAILY": [],
         "TWO_DAYS": [],
@@ -131,22 +129,32 @@ def categorize_data_plans(plans):
     return categorized
 
 
+
+@app.route("/", methods=["GET"])
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint for Render monitoring."""
+    return jsonify({"status": "online", "service": "WhatsApp VTU Platform"}), 200
+
+
 # --- MAIN WEBHOOK ENDPOINT ---
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
     req_data = request.get_json() or {}
 
-    # Extract phone number and incoming message text
-    chat_id = req_data.get("from") or req_data.get("phone") or "2348000000000"
-    text = (req_data.get("text") or req_data.get("message") or "").strip()
+    # Extract recipient/sender ID and incoming message text from varying bridge payload structures
+    chat_id = req_data.get("sender") or req_data.get("from") or req_data.get("phone")
+    text = (req_data.get("message") or req_data.get("text") or "").strip()
+
+    if not chat_id:
+        return jsonify({"status": "error", "reason": "No sender specified"}), 400
 
     user = get_or_create_user(chat_id)
     current_state = user.current_state or STATES["IDLE"]
     session_data = get_user_session_data(user)
 
-    # Global Cancel / Menu Command
-    if text.upper() in ["0", "MENU", "CANCEL"]:
-        set_user_session(user, STATES["IDLE"], {})
+    # Main menu definition template
+    def send_main_menu_response():
         main_menu = (
             "📌 *MAIN SERVICES MENU*\n"
             "────────────────────\n"
@@ -157,13 +165,18 @@ def whatsapp_webhook():
             "5. ⚽ Betting Wallet Topup\n"
             "6. 🎓 Education PINs (WAEC/JAMB)\n"
             "7. 💳 Check Wallet Balance\n\n"
-            "💳 *Balance:* ₦{:,.2f}\n"
-            "_Reply with a service number (1-7)_".format(user.wallet_balance)
+            f"💳 *Balance:* ₦{user.wallet_balance:,.2f}\n"
+            "_Reply with a service number (1-7)_"
         )
         send_whatsapp_message(chat_id, main_menu)
+
+    # Global Cancel / Reset Command
+    if text.upper() in ["0", "MENU", "*MENU*", "CANCEL"]:
+        set_user_session(user, STATES["IDLE"], {})
+        send_main_menu_response()
         return jsonify({"status": "ok"}), 200
 
-    # --- IDLE STATE (MAIN MENU) ---
+    # --- IDLE STATE (ANY UNKNOWN TEXT OR FIRST MESSAGE SHOWS MAIN MENU) ---
     if current_state == STATES["IDLE"]:
         if text == "1":
             set_user_session(user, STATES["AWAITING_DATA_NETWORK"], {})
@@ -201,8 +214,7 @@ def whatsapp_webhook():
             send_whatsapp_message(chat_id, "⚽ *Betting Wallet Topup*\nFeature coming soon! Type *MENU* to return.")
 
         elif text == "6":
-            send_whatsapp_message(chat_id,
-                                  "🎓 *Education PINs (WAEC/JAMB)*\nFeature coming soon! Type *MENU* to return.")
+            send_whatsapp_message(chat_id, "🎓 *Education PINs (WAEC/JAMB)*\nFeature coming soon! Type *MENU* to return.")
 
         elif text == "7":
             send_whatsapp_message(
@@ -211,8 +223,8 @@ def whatsapp_webhook():
             )
 
         else:
-            send_whatsapp_message(chat_id,
-                                  "❌ Invalid option selected. Reply with a service number (1-7) or type *MENU*.")
+            # Replaced "Invalid option" with sending the Main Menu directly
+            send_main_menu_response()
 
     # --- DATA BUNDLE FLOW ---
     elif current_state == STATES["AWAITING_DATA_NETWORK"]:
@@ -268,8 +280,7 @@ def whatsapp_webhook():
                 filtered_plans = categorized_plans.get(selected_cat, [])
 
             if not filtered_plans:
-                send_whatsapp_message(chat_id,
-                                      f"ℹ️ No specific plans found under that category. Displaying all available {network_name} plans:")
+                send_whatsapp_message(chat_id, f"ℹ️ No specific plans found under that category. Displaying all available {network_name} plans:")
                 filtered_plans = [p for cat in categorized_plans.values() for p in cat]
 
             plan_menu = f"📊 *Select {network_name} Data Plan*\n────────────────────\n"
