@@ -47,6 +47,14 @@ def _provider_request(endpoint: str, params: dict):
         logger.warning("ClubKonnect URL returned 404; retrying canonical endpoint")
         url = f"{base_urls[1]}{path}"
         response = requests.get(url, timeout=15)
+    if not response.ok:
+        logger.error(
+            "ClubKonnect request failed: endpoint=%s status=%s base_url=%s response=%s",
+            endpoint,
+            response.status_code,
+            url.split("?")[0],
+            response.text[:200],
+        )
     response.raise_for_status()
     return response.json()
 
@@ -92,6 +100,12 @@ def fetch_data_variations(network: str):
     try:
         data = _provider_request("APIDatabundlePlansV2.asp", {})
         mobile_networks = data.get("MOBILE_NETWORK", {})
+        if not isinstance(mobile_networks, dict):
+            logger.error(
+                "ClubKonnect plans response has unexpected MOBILE_NETWORK type: %s",
+                type(mobile_networks).__name__,
+            )
+            return []
         raw_plans = mobile_networks.get(NETWORK_NAMES[network_code], [])
         if raw_plans and isinstance(raw_plans[0], dict) and "PRODUCT" in raw_plans[0]:
             raw_plans = raw_plans[0]["PRODUCT"]
