@@ -108,6 +108,9 @@ STATES = {
     # Education Flow
     "AWAITING_EDUCATION_PACKAGE": "AWAITING_EDUCATION_PACKAGE",
     "AWAITING_EDUCATION_QUANTITY": "AWAITING_EDUCATION_QUANTITY",
+    # Wallet funding flow
+    "AWAITING_TOPUP_AMOUNT": "AWAITING_TOPUP_AMOUNT",
+    "AWAITING_TOPUP_EMAIL": "AWAITING_TOPUP_EMAIL",
 }
 
 
@@ -345,7 +348,10 @@ def whatsapp_webhook():
         "internet data": "1",
         "buy airtime": "2",
         "airtime": "2",
-        "top up": "2",
+        "top up balance": "8",
+        "top up": "8",
+        "fund wallet": "8",
+        "deposit": "8",
         "cable tv": "3",
         "tv subscription": "3",
         "dstv": "3",
@@ -384,8 +390,9 @@ def whatsapp_webhook():
             "5. ⚽ Betting Top-up\n"
             "6. 🎓 Education PINs\n"
             "7. 💳 Check Wallet\n\n"
+            "8. 💰 Top Up Balance\n\n"
             f"💰 *Available Balance:* ₦{user.wallet_balance:,.2f}\n"
-            "_Reply with a number from 1 to 7_"
+            "_Reply with a number from 1 to 8_"
         )
         send_whatsapp_message(chat_id, main_menu)
 
@@ -475,8 +482,56 @@ def whatsapp_webhook():
                 "Type *MENU* to view more services."
             )
 
+        elif text == "8":
+            set_user_session(user, STATES["AWAITING_TOPUP_AMOUNT"], {})
+            send_whatsapp_message(
+                chat_id,
+                "💰 *TOP UP WALLET*\n"
+                "────────────────────────\n"
+                "Enter the amount you want to add to your wallet in Naira.\n"
+                "Minimum amount: ₦100"
+            )
+
         else:
             send_main_menu_response()
+
+    elif current_state == STATES["AWAITING_TOPUP_AMOUNT"]:
+        try:
+            amount = Decimal(text.replace(",", "")).quantize(Decimal("0.01"))
+        except Exception:
+            amount = Decimal("0")
+
+        if amount < Decimal("100.00"):
+            send_whatsapp_message(chat_id, "❌ Please enter a valid amount of at least ₦100, for example: 1000")
+        else:
+            session_data["topup_amount"] = str(amount)
+            set_user_session(user, STATES["AWAITING_TOPUP_EMAIL"], session_data)
+            send_whatsapp_message(
+                chat_id,
+                "📧 Enter your email address to continue with the Paystack payment."
+            )
+
+    elif current_state == STATES["AWAITING_TOPUP_EMAIL"]:
+        if "@" not in text or "." not in text.rsplit("@", 1)[-1]:
+            send_whatsapp_message(chat_id, "❌ Please enter a valid email address.")
+        else:
+            amount = Decimal(session_data.get("topup_amount", "0"))
+            result = generate_payment_link(text, amount, provider_phone, pass_fee_to_user=True)
+            set_user_session(user, STATES["IDLE"], {})
+            if result.get("status") == "SUCCESS":
+                send_whatsapp_message(
+                    chat_id,
+                    f"✅ *PAYMENT LINK READY*\n"
+                    f"Amount to credit: ₦{amount:,.2f}\n"
+                    f"Amount to pay: ₦{result['gross_amount']:,.2f}\n\n"
+                    f"Complete your payment here:\n{result['payment_url']}\n\n"
+                    "Your wallet will be credited automatically after payment."
+                )
+            else:
+                send_whatsapp_message(
+                    chat_id,
+                    f"❌ Unable to create the payment link: {result.get('reason', 'Please try again later.')}"
+                )
 
     elif current_state == STATES["AWAITING_DATA_NETWORK"]:
         networks = {"1": "MTN", "2": "AIRTEL", "3": "GLO", "4": "9MOBILE"}
