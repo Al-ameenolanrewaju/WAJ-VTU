@@ -5,6 +5,7 @@ import requests
 from decimal import Decimal
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
+from models import db, User, Transaction
 
 # Import provider functions from your clubkonnect/provider module
 from provider import (
@@ -27,24 +28,7 @@ db = SQLAlchemy(app)
 
 
 # --- MODELS ---
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    phone_number = db.Column(db.String(50), unique=True, nullable=False)
-    wallet_balance = db.Column(db.Numeric(10, 2), default=0.00)
-    current_state = db.Column(db.String(50), default="IDLE")
-    session_data = db.Column(db.Text, default="{}")
-
-
-class Transaction(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    reference = db.Column(db.String(50), unique=True, nullable=False)
-    amount = db.Column(db.Numeric(10, 2), nullable=False)
-    type = db.Column(db.String(20), nullable=False)
-    recipient = db.Column(db.String(50), nullable=False)
-    status = db.Column(db.String(20), nullable=False)
-    description = db.Column(db.String(200))
-
+db.init_app(app)
 
 with app.app_context():
     db.create_all()
@@ -92,8 +76,19 @@ def send_whatsapp_message(recipient, text):
     Sends outgoing message to the WhatsApp Bridge service (Node.js/Baileys).
     """
     try:
-        payload = {"to": recipient, "message": text}
+        # Include all common property names so Node receives what it expects
+        payload = {
+            "to": recipient,
+            "chatId": recipient,
+            "message": text,
+            "text": text
+        }
         response = requests.post(BRIDGE_URL, json=payload, timeout=10)
+
+        # Log error in Render logs if Node bridge fails
+        if not response.ok:
+            print(f"Bridge HTTP Error ({response.status_code}): {response.text}")
+
         return response.ok
     except Exception as e:
         print(f"Failed to deliver WhatsApp message to bridge: {e}")

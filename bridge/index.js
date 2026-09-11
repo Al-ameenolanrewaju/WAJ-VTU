@@ -355,13 +355,15 @@ async function startBot() {
         for (const msg of messages) {
             if (!msg || !msg.message || msg.key.fromMe) continue;
 
-            // Resolve remote JID (prefer phone jid over LID if available)
+            // Prefer phone number JID (@s.whatsapp.net) over LID (@lid) if available
             let sender = msg.key.remoteJid;
+            if (sender && sender.endsWith('@lid') && msg.key.participant && msg.key.participant.endsWith('@s.whatsapp.net')) {
+                sender = msg.key.participant;
+            }
+
             if (!sender || sender.endsWith('@g.us') || sender.endsWith('@broadcast')) continue;
 
             const text = extractMessageContent(msg.message);
-
-            // Ignore empty strings, protocol sync frames, or reactions
             if (!text || text.trim() === '') continue;
 
             console.log(`📩 Incoming from ${sender}: "${text}"`);
@@ -379,7 +381,7 @@ async function startBot() {
                     },
                     {
                         headers: BRIDGE_API_TOKEN ? { Authorization: `Bearer ${BRIDGE_API_TOKEN}` } : {},
-                        timeout: 30000 // 30s request timeout to comfortably tolerate Render cold starts
+                        timeout: 30000
                     }
                 );
                 console.log(`✅ Delivered message from ${sender} to Flask (${response.status})`);
