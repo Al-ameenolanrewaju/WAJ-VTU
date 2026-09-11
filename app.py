@@ -102,7 +102,7 @@ with app.app_context():
         "state_data": "TEXT",
         "phone_number": "VARCHAR(30)",
         "session_data": "TEXT",
-        "updated_at": "DATETIME",
+        "updated_at": "TIMESTAMP",
     }
     with db.engine.begin() as connection:
         for column_name, column_type in legacy_columns.items():
