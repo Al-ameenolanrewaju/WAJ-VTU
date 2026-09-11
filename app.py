@@ -4,8 +4,8 @@ import logging
 from decimal import Decimal, InvalidOperation
 from flask import Flask, request, jsonify, render_template, render_template_string
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func, inspect, text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy import func, inspect, or_, text
 
 # Import provider functions from your clubkonnect/provider module
 from provider import (
@@ -160,7 +160,11 @@ def get_or_create_user(phone_number):
     """Retrieves an existing user or creates a new account with a starting balance."""
     clean_phone = phone_number.replace("whatsapp:", "").strip()
     try:
-        user = User.query.filter_by(phone_number=clean_phone).first()
+        user = User.query.filter(or_(
+            User.phone_number == clean_phone,
+            User.whatsapp_id == clean_phone,
+            User.phone == clean_phone
+        )).first()
         if not user:
             logger.info(f"Creating new user account for: {clean_phone}")
             user = User(
@@ -174,7 +178,23 @@ def get_or_create_user(phone_number):
             )
             db.session.add(user)
             db.session.commit()
+        else:
+            if user.phone_number != clean_phone or user.whatsapp_id != clean_phone or user.phone != clean_phone:
+                user.phone_number = clean_phone
+                user.whatsapp_id = clean_phone
+                user.phone = clean_phone
+                db.session.commit()
         return user
+    except IntegrityError:
+        db.session.rollback()
+        user = User.query.filter(or_(
+            User.phone_number == clean_phone,
+            User.whatsapp_id == clean_phone,
+            User.phone == clean_phone
+        )).first()
+        if user:
+            return user
+        raise
     except SQLAlchemyError as e:
         db.session.rollback()
         logger.error(f"Database error during get_or_create_user: {e}")
