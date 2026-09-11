@@ -5,6 +5,10 @@ const qrcode = require('qrcode-terminal');
 const qrImage = require('qrcode');
 const axios = require('axios');
 const http = require('http');
+const NodeCache = require('node-cache');
+
+// Retry counter cache for Baileys E2EE decryption
+const msgRetryCounterCache = new NodeCache();
 
 function normalizeWebhookUrl(value) {
     const configuredUrl = value || 'http://localhost:5000/webhook';
@@ -29,11 +33,10 @@ let reconnectTimer = null;
 let reconnectAttempt = 0;
 let startingBot = false;
 
-// --- ENVIRONMENT VARIABLE SANITIZATION & VALIDATION ---
+// Environment variable sanitization
 let rawSupabaseUrl = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/^["']|["']$/g, '');
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY || '').trim().replace(/^["']|["']$/g, '');
 
-// Auto-prepend https:// if protocol was omitted in environment variables
 if (rawSupabaseUrl && !rawSupabaseUrl.startsWith('http://') && !rawSupabaseUrl.startsWith('https://')) {
     rawSupabaseUrl = `https://${rawSupabaseUrl}`;
 }
@@ -41,15 +44,7 @@ if (rawSupabaseUrl && !rawSupabaseUrl.startsWith('http://') && !rawSupabaseUrl.s
 const SUPABASE_URL = rawSupabaseUrl;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    console.error('❌ ERROR: Missing Supabase environment variables on Render!');
-    console.error(`SUPABASE_URL present: ${Boolean(SUPABASE_URL)}`);
-    console.error(`SUPABASE_SERVICE_ROLE_KEY present: ${Boolean(SUPABASE_SERVICE_ROLE_KEY)}`);
-    process.exit(1);
-}
-
-if (!SUPABASE_URL.startsWith('http://') && !SUPABASE_URL.startsWith('https://')) {
-    console.error(`❌ ERROR: SUPABASE_URL must be an HTTPS URL (e.g., https://xyz.supabase.co), but received: "${SUPABASE_URL}"`);
-    console.error('👉 Ensure you copy the Project API URL from Supabase Settings > API, NOT the Postgres connection string.');
+    console.error('❌ ERROR: Missing Supabase environment variables!');
     process.exit(1);
 }
 
@@ -60,7 +55,7 @@ let whatsappConnected = false;
 let latestQrDataUrl = null;
 let resettingSession = false;
 
-// --- SUPABASE AUTH STATE HANDLER ---
+// Supabase session handler
 async function useSupabaseAuthState(sessionId = 'main_session') {
     const readData = async (type, id) => {
         const key = `${type}-${id}`;
@@ -146,7 +141,7 @@ async function resetWhatsAppSession() {
         try {
             sock.end(new Error('WhatsApp session reset requested'));
         } catch (error) {
-            console.warn('Unable to close WhatsApp socket during reset:', error.message);
+            console.warn('Unable to close socket:', error.message);
         }
         sock = null;
     }
@@ -206,18 +201,13 @@ function startHttpServer() {
     const server = http.createServer(async (request, response) => {
         const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
 
-        // 1. HEALTH CHECK & ROOT ENDPOINTS FOR UPTIMEROBOT (Allows GET and HEAD)
         if ((request.method === 'GET' || request.method === 'HEAD') && (url.pathname === '/health' || url.pathname === '/')) {
-            response.writeHead(200, {
-                'Content-Type': 'text/plain',
-                'Cache-Control': 'no-cache'
-            });
+            response.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-cache' });
             return response.end('OK');
         }
 
-        // 2. PUBLIC QR DISPLAY ENDPOINTS
         if (request.method === 'GET' && (url.pathname === '/qr' || url.pathname === '/qr/image')) {
-            if (!latestQrDataUrl) return sendJson(response, 409, { error: 'QR code is not currently available or already connected' });
+            if (!latestQrDataUrl) return sendJson(response, 409, { error: 'QR code not available or already connected' });
             if (url.pathname === '/qr/image') {
                 const image = Buffer.from(latestQrDataUrl.split(',')[1], 'base64');
                 response.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
@@ -234,12 +224,10 @@ function startHttpServer() {
                 await resetWhatsAppSession();
                 return sendJson(response, 200, { status: 'session_reset', message: 'Scan the new QR code at /qr' });
             } catch (error) {
-                console.error('Error resetting WhatsApp session:', error.message);
                 return sendJson(response, 500, { error: 'Unable to reset WhatsApp session' });
             }
         }
 
-        // 3. PROTECTED API ENDPOINTS FOR FLASK BACKEND
         if (request.method !== 'POST' || url.pathname !== '/api/sendText') {
             return sendJson(response, 404, { error: 'Not found' });
         }
@@ -262,7 +250,7 @@ function startHttpServer() {
                 await sock.sendMessage(chatId, { text });
                 return sendJson(response, 200, { status: 'sent' });
             } catch (error) {
-                console.error('Error sending WhatsApp message:', error.message);
+                console.error('Error sending message:', error.message);
                 return sendJson(response, 500, { error: 'Failed to send message' });
             }
         });
@@ -281,6 +269,7 @@ async function startBot() {
 
     sock = makeWASocket({
         auth: state,
+        msgRetryCounterCache,
         printQRInTerminal: false,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
@@ -296,9 +285,7 @@ async function startBot() {
         setTimeout(async () => {
             try {
                 const pairingCode = await sock.requestPairingCode(PAIRING_PHONE_NUMBER.replace(/[^0-9]/g, ''));
-                console.log('\n=============================================');
-                console.log(`PAIRING CODE: ${pairingCode}`);
-                console.log('=============================================\n');
+                console.log(`\n=============================================\nPAIRING CODE: ${pairingCode}\n=============================================\n`);
             } catch (err) {
                 console.error('Error generating pairing code:', err.message);
             }
@@ -311,7 +298,7 @@ async function startBot() {
             qrcode.generate(qr, { small: true });
             qrImage.toDataURL(qr, { margin: 2, width: 600 })
                 .then((dataUrl) => { latestQrDataUrl = dataUrl; })
-                .catch((error) => console.error('Unable to render QR image:', error.message));
+                .catch((error) => console.error('Unable to render QR:', error.message));
         }
         if (connection === 'close') {
             whatsappConnected = false;
@@ -340,12 +327,22 @@ async function startBot() {
         }
     });
 
-    sock.ev.on('messages.upsert', async ({ messages }) => {
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return;
         const msg = messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+        if (!msg || !msg.message || msg.key.fromMe) return;
 
         const sender = msg.key.remoteJid;
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+        if (!sender || sender.endsWith('@g.us') || sender.endsWith('@broadcast')) return;
+
+        // Extracts content from text, button responses, and list selections
+        const text =
+            msg.message.conversation ||
+            msg.message.extendedTextMessage?.text ||
+            msg.message.buttonsResponseMessage?.selectedButtonId ||
+            msg.message.listResponseMessage?.singleSelectReply?.selectedRowId ||
+            msg.message.templateButtonReplyMessage?.selectedId ||
+            '';
 
         if (text) {
             try {
@@ -356,7 +353,7 @@ async function startBot() {
                 }, {
                     headers: BRIDGE_API_TOKEN ? { Authorization: `Bearer ${BRIDGE_API_TOKEN}` } : {}
                 });
-                console.log(`Delivered WhatsApp message from ${sender} to Flask (${response.status})`);
+                console.log(`Delivered message from ${sender} to Flask (${response.status})`);
             } catch (error) {
                 console.error(`Error contacting Flask backend at ${FLASK_WEBHOOK_URL}:`, error.message);
             }
