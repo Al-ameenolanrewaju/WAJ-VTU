@@ -106,7 +106,14 @@ def fetch_data_variations(network: str):
                 type(mobile_networks).__name__,
             )
             return []
-        raw_plans = mobile_networks.get(NETWORK_NAMES[network_code], [])
+        network_name = NETWORK_NAMES[network_code]
+        raw_plans = mobile_networks.get(network_name, [])
+        if not raw_plans:
+            logger.error(
+                "ClubKonnect returned no plans for %s; available network keys=%s",
+                network_name,
+                list(mobile_networks.keys()),
+            )
         if raw_plans and isinstance(raw_plans[0], dict) and "PRODUCT" in raw_plans[0]:
             raw_plans = raw_plans[0]["PRODUCT"]
 
