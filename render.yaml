@@ -26,7 +26,7 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
       - key: NODE_BRIDGE_URL
-        sync: false
+        value: https://waj-vtu-bridge.onrender.com
       - key: BRIDGE_API_TOKEN
         sync: false
   - type: web

@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from decimal import Decimal, InvalidOperation
+import requests
 from flask import Flask, request, jsonify, render_template, render_template_string
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -36,6 +37,8 @@ app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///vtu_bot.db")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "vtu-default-secret-key-change-in-production")
+NODE_BRIDGE_URL = os.getenv("NODE_BRIDGE_URL", "https://waj-vtu-bridge.onrender.com").rstrip("/")
+BRIDGE_API_TOKEN = os.getenv("BRIDGE_API_TOKEN", "")
 
 db = SQLAlchemy(app)
 
@@ -212,11 +215,25 @@ def reset_user_to_idle(user):
 
 
 def send_whatsapp_message(chat_id, text):
-    """
-    Wrapper function for sending WhatsApp messages via Meta Cloud API or provider gateway.
-    Replace the log output below with your HTTP client request (e.g., requests.post).
-    """
+    """Send a response through the WhatsApp bridge."""
     logger.info(f"OUTGOING MESSAGE TO [{chat_id}]:\n{text}")
+    headers = {"Content-Type": "application/json"}
+    if BRIDGE_API_TOKEN:
+        headers["Authorization"] = f"Bearer {BRIDGE_API_TOKEN}"
+
+    try:
+        response = requests.post(
+            f"{NODE_BRIDGE_URL}/api/sendText",
+            json={"chatId": chat_id, "text": text},
+            headers=headers,
+            timeout=15
+        )
+        response.raise_for_status()
+        logger.info(f"WhatsApp message delivered to [{chat_id}] via bridge")
+        return True
+    except requests.RequestException as error:
+        logger.error(f"Failed to send WhatsApp message to [{chat_id}]: {error}")
+        return False
 
 
 def format_currency(amount):
@@ -284,6 +301,7 @@ def build_main_menu_text(user_balance):
 
 
 # --- HEALTH CHECK & WEB ROUTES ---
+@app.route('/', methods=['GET', 'HEAD'])
 @app.route('/health', methods=['GET', 'HEAD'])
 def health_check():
     return {"status": "healthy", "service": "waj-vtu"}, 200
