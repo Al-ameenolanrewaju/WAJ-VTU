@@ -12,8 +12,8 @@ from flask import Flask, request, jsonify, render_template_string, redirect, url
 from models import db, User, Transaction
 from wallet_service import generate_payment_link
 
-# Import provider functions from your clubkonnect/provider module
-from provider import (
+# Import provider functions from the VTPass adapter.
+from vtpass_provider import (
     fetch_data_variations,
     process_data_purchase,
     process_airtime_purchase,
