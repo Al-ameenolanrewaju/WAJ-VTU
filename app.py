@@ -28,7 +28,7 @@ db = SQLAlchemy(app)
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     phone_number = db.Column(db.String(20), unique=True, nullable=False)
-    wallet_balance = db.Column(db.Numeric(10, 2), default=1000.00)  # Default demo balance
+    wallet_balance = db.Column(db.Numeric(10, 2), default=0.00)  # Default demo balance
     current_state = db.Column(db.String(50), default="IDLE")
     session_data = db.Column(db.Text, default="{}")
 
@@ -66,7 +66,7 @@ STATES = {
 def get_or_create_user(phone_number):
     user = User.query.filter_by(phone_number=phone_number).first()
     if not user:
-        user = User(phone_number=phone_number, wallet_balance=Decimal("1000.00"))
+        user = User(phone_number=phone_number, wallet_balance=Decimal("0.00"))
         db.session.add(user)
         db.session.commit()
     return user
