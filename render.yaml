@@ -39,7 +39,7 @@ services:
       - key: NODE_VERSION
         value: 20
       - key: FLASK_WEBHOOK_URL
-        sync: false
+        value: https://waj-vtu-backend.onrender.com/webhook
       - key: BRIDGE_API_TOKEN
         sync: false
     disk:

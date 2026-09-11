@@ -6,10 +6,14 @@ const qrImage = require('qrcode');
 const axios = require('axios');
 const http = require('http');
 
-const FLASK_WEBHOOK_URL = process.env.FLASK_WEBHOOK_URL || 'http://localhost:5000/whatsapp/webhook';
+const FLASK_WEBHOOK_URL = process.env.FLASK_WEBHOOK_URL || 'http://localhost:5000/webhook';
 const BRIDGE_API_TOKEN = process.env.BRIDGE_API_TOKEN || '';
 const PORT = Number(process.env.PORT || 3000);
 const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || '';
+
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+let startingBot = false;
 
 // --- ENVIRONMENT VARIABLE SANITIZATION & VALIDATION ---
 let rawSupabaseUrl = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/^["']|["']$/g, '');
@@ -212,11 +216,20 @@ function startHttpServer() {
 }
 
 async function startBot() {
+    if (startingBot) return;
+    startingBot = true;
+
     const { state, saveCreds } = await useSupabaseAuthState('main_session');
 
     sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false
+        printQRInTerminal: false,
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
+        keepAliveIntervalMs: 25000,
+        retryRequestDelayMs: 5000,
+        markOnlineOnConnect: false,
+        syncFullHistory: false
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -247,9 +260,23 @@ async function startBot() {
             const shouldReconnect = (lastDisconnect?.error instanceof Boom)
                 ? lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut
                 : true;
-            if (shouldReconnect) startBot();
+            startingBot = false;
+            if (shouldReconnect && !reconnectTimer) {
+                const delay = Math.min(60000, 5000 * (2 ** reconnectAttempt));
+                reconnectAttempt += 1;
+                console.log(`WhatsApp disconnected. Reconnecting in ${delay}ms...`);
+                reconnectTimer = setTimeout(() => {
+                    reconnectTimer = null;
+                    startBot().catch((error) => {
+                        startingBot = false;
+                        console.error('Unable to restart WhatsApp bridge:', error.message);
+                    });
+                }, delay);
+            }
         } else if (connection === 'open') {
             whatsappConnected = true;
+            startingBot = false;
+            reconnectAttempt = 0;
             latestQrDataUrl = null;
             console.log('✅ WhatsApp Bridge Connected Successfully!');
         }
@@ -264,15 +291,16 @@ async function startBot() {
 
         if (text) {
             try {
-                await axios.post(FLASK_WEBHOOK_URL, {
+                const response = await axios.post(FLASK_WEBHOOK_URL, {
                     from: sender,
                     body: text,
                     fromMe: false
                 }, {
                     headers: BRIDGE_API_TOKEN ? { Authorization: `Bearer ${BRIDGE_API_TOKEN}` } : {}
                 });
+                console.log(`Delivered WhatsApp message from ${sender} to Flask (${response.status})`);
             } catch (error) {
-                console.error('Error contacting Flask backend:', error.message);
+                console.error(`Error contacting Flask backend at ${FLASK_WEBHOOK_URL}:`, error.message);
             }
         }
     });
