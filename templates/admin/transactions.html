@@ -1,0 +1,36 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Transactions Ledger{% endblock %}
+
+{% block extra_css %}
+<style>
+    table { width: 100%; background: white; border-collapse: collapse; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+    th { background: #1e293b; color: white; }
+    .badge-success { color: #16a34a; font-weight: bold; }
+    .badge-failed { color: #dc2626; font-weight: bold; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>💳 System Transaction Ledger</h2>
+<br>
+<table>
+    <thead>
+        <tr><th>Reference</th><th>User ID</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        {% for tx in transactions %}
+        <tr>
+            <td><code>{{ tx.reference }}</code></td>
+            <td>#{{ tx.user_id }}</td>
+            <td>{{ tx.type }}</td>
+            <td>₦{{ "{:,.2f}".format(tx.amount) }}</td>
+            <td>{{ tx.recipient }}</td>
+            <td class="badge-{{ tx.status|lower }}">{{ tx.status }}</td>
+            <td><small>{{ tx.description or '' }}</small></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
