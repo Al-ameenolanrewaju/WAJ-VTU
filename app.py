@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import requests
 from decimal import Decimal
+from sqlalchemy import inspect, text
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 
 # 1. Import db, User, and Transaction directly from models.py
@@ -45,8 +46,36 @@ PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
 # 2. Bind the single db instance from models.py to app
 db.init_app(app)
 
+
+def ensure_database_schema():
+    """Add model columns to existing deployments that predate the current schema."""
+    inspector = inspect(db.engine)
+    dialect = db.engine.dialect.name
+    json_type = "JSONB" if dialect == "postgresql" else "JSON"
+    required_columns = {
+        "users": {
+            "paystack_customer_code": "VARCHAR(100)",
+            "dva_account_number": "VARCHAR(20)",
+            "dva_bank_name": "VARCHAR(50)",
+        },
+        "transactions": {
+            "meta_data": json_type,
+        },
+    }
+
+    for table_name, columns in required_columns.items():
+        existing = {column["name"] for column in inspector.get_columns(table_name)}
+        for column_name, column_type in columns.items():
+            if column_name not in existing:
+                db.session.execute(
+                    text(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_type}')
+                )
+    db.session.commit()
+
+
 with app.app_context():
     db.create_all()
+    ensure_database_schema()
 
 # --- STATE DEFINITIONS ---
 STATES = {
