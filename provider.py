@@ -10,8 +10,8 @@ load_dotenv()
 logger = logging.getLogger("vtu_provider")
 
 # Environment Credentials (Optional - fallback to mock if empty)
-CLUBKONNECT_USERID = os.getenv("CLUBKONNECT_USERID", "")
-CLUBKONNECT_APIKEY = os.getenv("CLUBKONNECT_APIKEY", "")
+CLUBKONNECT_USERID = os.getenv("CLUBKONNECT_USERID", "").strip()
+CLUBKONNECT_APIKEY = os.getenv("CLUBKONNECT_APIKEY", "").strip()
 CLUBKONNECT_BASE_URL = os.getenv(
     "CLUBKONNECT_BASE_URL", "https://www.nellobytesystems.com"
 )
@@ -110,9 +110,12 @@ def fetch_data_variations(network: str):
         raw_plans = mobile_networks.get(network_name, [])
         if not raw_plans:
             logger.error(
-                "ClubKonnect returned no plans for %s; available network keys=%s",
+                "ClubKonnect returned no plans for %s; available network keys=%s top-level keys=%s status=%s message=%s",
                 network_name,
                 list(mobile_networks.keys()),
+                list(data.keys()),
+                data.get("status", data.get("statuscode", "")),
+                data.get("msg", data.get("message", "")),
             )
         if raw_plans and isinstance(raw_plans[0], dict) and "PRODUCT" in raw_plans[0]:
             raw_plans = raw_plans[0]["PRODUCT"]
