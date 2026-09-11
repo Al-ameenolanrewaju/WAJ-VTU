@@ -353,15 +353,18 @@ async function startBot() {
         if (type !== 'notify') return;
 
         for (const msg of messages) {
-            // Filter invalid, system, group, status broadcasts, or self-sent messages
             if (!msg || !msg.message || msg.key.fromMe) continue;
-            const sender = msg.key.remoteJid;
+
+            // Resolve remote JID (prefer phone jid over LID if available)
+            let sender = msg.key.remoteJid;
             if (!sender || sender.endsWith('@g.us') || sender.endsWith('@broadcast')) continue;
 
             const text = extractMessageContent(msg.message);
-            console.log(`📩 Incoming from ${sender}: "${text}"`);
 
-            if (!text) continue;
+            // Ignore empty strings, protocol sync frames, or reactions
+            if (!text || text.trim() === '') continue;
+
+            console.log(`📩 Incoming from ${sender}: "${text}"`);
 
             try {
                 const response = await axios.post(
@@ -376,7 +379,7 @@ async function startBot() {
                     },
                     {
                         headers: BRIDGE_API_TOKEN ? { Authorization: `Bearer ${BRIDGE_API_TOKEN}` } : {},
-                        timeout: 10000 // 10s request timeout
+                        timeout: 30000 // 30s request timeout to comfortably tolerate Render cold starts
                     }
                 );
                 console.log(`✅ Delivered message from ${sender} to Flask (${response.status})`);
