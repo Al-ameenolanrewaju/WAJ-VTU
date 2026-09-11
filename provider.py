@@ -15,6 +15,7 @@ CLUBKONNECT_APIKEY = os.getenv("CLUBKONNECT_APIKEY", "")
 CLUBKONNECT_BASE_URL = os.getenv(
     "CLUBKONNECT_BASE_URL", "https://www.nellobytesystems.com"
 )
+CANONICAL_CLUBKONNECT_BASE_URL = "https://www.nellobytesystems.com"
 MOCK_MODE = os.getenv("MOCK_MODE", "False").lower() == "true"
 
 NETWORK_CODES = {"MTN": "01", "GLO": "02", "9MOBILE": "03", "AIRTEL": "04"}
@@ -35,8 +36,17 @@ def _provider_request(endpoint: str, params: dict):
         "APIKey": CLUBKONNECT_APIKEY,
         **params,
     }
-    url = f"{CLUBKONNECT_BASE_URL.rstrip('/')}/{endpoint.lstrip('/')}?{urlencode(request_params)}"
+    path = f"/{endpoint.lstrip('/')}?{urlencode(request_params)}"
+    base_urls = [CLUBKONNECT_BASE_URL.rstrip("/")]
+    if base_urls[0].lower() != CANONICAL_CLUBKONNECT_BASE_URL.lower():
+        base_urls.append(CANONICAL_CLUBKONNECT_BASE_URL)
+
+    url = f"{base_urls[0]}{path}"
     response = requests.get(url, timeout=15)
+    if response.status_code == 404 and len(base_urls) > 1:
+        logger.warning("ClubKonnect URL returned 404; retrying canonical endpoint")
+        url = f"{base_urls[1]}{path}"
+        response = requests.get(url, timeout=15)
     response.raise_for_status()
     return response.json()
 
