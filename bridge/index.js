@@ -6,7 +6,21 @@ const qrImage = require('qrcode');
 const axios = require('axios');
 const http = require('http');
 
-const FLASK_WEBHOOK_URL = process.env.FLASK_WEBHOOK_URL || 'http://localhost:5000/webhook';
+function normalizeWebhookUrl(value) {
+    const configuredUrl = value || 'http://localhost:5000/webhook';
+    try {
+        const url = new URL(configuredUrl);
+        if (url.pathname === '/whatsapp/webhook' || url.pathname === '/whatsapp/webhook/') {
+            url.pathname = '/webhook';
+        }
+        return url.toString().replace(/\/$/, '');
+    } catch (error) {
+        console.error(`Invalid FLASK_WEBHOOK_URL: ${configuredUrl}`);
+        return 'http://localhost:5000/webhook';
+    }
+}
+
+const FLASK_WEBHOOK_URL = normalizeWebhookUrl(process.env.FLASK_WEBHOOK_URL);
 const BRIDGE_API_TOKEN = process.env.BRIDGE_API_TOKEN || '';
 const PORT = Number(process.env.PORT || 3000);
 const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || '';
@@ -44,6 +58,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 let sock;
 let whatsappConnected = false;
 let latestQrDataUrl = null;
+let resettingSession = false;
 
 // --- SUPABASE AUTH STATE HANDLER ---
 async function useSupabaseAuthState(sessionId = 'main_session') {
@@ -121,6 +136,36 @@ function sendJson(response, statusCode, body) {
     response.end(JSON.stringify(body));
 }
 
+async function resetWhatsAppSession() {
+    resettingSession = true;
+    whatsappConnected = false;
+    latestQrDataUrl = null;
+    reconnectAttempt = 0;
+
+    if (sock) {
+        try {
+            sock.end(new Error('WhatsApp session reset requested'));
+        } catch (error) {
+            console.warn('Unable to close WhatsApp socket during reset:', error.message);
+        }
+        sock = null;
+    }
+
+    const { error } = await supabase
+        .from('whatsapp_sessions')
+        .delete()
+        .like('id', 'main_session_%');
+
+    if (error) {
+        resettingSession = false;
+        throw error;
+    }
+
+    startingBot = false;
+    resettingSession = false;
+    await startBot();
+}
+
 function sendQrPage(response) {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end(`<!doctype html>
@@ -158,7 +203,7 @@ setInterval(refreshQr, 4000);
 }
 
 function startHttpServer() {
-    const server = http.createServer((request, response) => {
+    const server = http.createServer(async (request, response) => {
         const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
 
         // 1. HEALTH CHECK & ROOT ENDPOINTS FOR UPTIMEROBOT (Allows GET and HEAD)
@@ -179,6 +224,19 @@ function startHttpServer() {
                 return response.end(image);
             }
             return sendQrPage(response);
+        }
+
+        if (request.method === 'POST' && url.pathname === '/api/resetSession') {
+            if (!BRIDGE_API_TOKEN || request.headers.authorization !== `Bearer ${BRIDGE_API_TOKEN}`) {
+                return sendJson(response, 401, { error: 'Unauthorized' });
+            }
+            try {
+                await resetWhatsAppSession();
+                return sendJson(response, 200, { status: 'session_reset', message: 'Scan the new QR code at /qr' });
+            } catch (error) {
+                console.error('Error resetting WhatsApp session:', error.message);
+                return sendJson(response, 500, { error: 'Unable to reset WhatsApp session' });
+            }
         }
 
         // 3. PROTECTED API ENDPOINTS FOR FLASK BACKEND
@@ -257,9 +315,9 @@ async function startBot() {
         }
         if (connection === 'close') {
             whatsappConnected = false;
-            const shouldReconnect = (lastDisconnect?.error instanceof Boom)
+            const shouldReconnect = !resettingSession && ((lastDisconnect?.error instanceof Boom)
                 ? lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut
-                : true;
+                : true);
             startingBot = false;
             if (shouldReconnect && !reconnectTimer) {
                 const delay = Math.min(60000, 5000 * (2 ** reconnectAttempt));
