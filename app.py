@@ -293,7 +293,7 @@ def health_check():
     return jsonify({
         "status": "online",
         "service": "WhatsApp VTU Platform",
-        "build": "a0da1ad",
+        "build": "dacdaa5",
     }), 200
 
 
