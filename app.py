@@ -318,7 +318,7 @@ def health_check():
     return {"status": "healthy", "service": "waj-vtu"}, 200
 
 
-@app.route("/admin/users", methods=["GET"])
+@app.route("/admin/users", methods=["GET"], strict_slashes=False)
 def list_users():
     try:
         users = User.query.all()
@@ -327,7 +327,7 @@ def list_users():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/admin", methods=["GET"])
+@app.route("/admin", methods=["GET"], strict_slashes=False)
 def admin_dashboard():
     """Shows successful service sales and revenue totals for the admin."""
     revenue = db.session.query(func.coalesce(func.sum(Transaction.amount), 0)).filter(
@@ -344,14 +344,105 @@ def admin_dashboard():
         Transaction.status == "SUCCESS"
     ).group_by(Transaction.type).order_by(func.sum(Transaction.amount).desc()).all()
 
-    return render_template(
-        "admin/master.html",
-        revenue=Decimal(str(revenue or 0)),
-        transaction_count=transaction_count,
-        user_count=user_count,
-        revenue_by_type=revenue_by_type,
-        format_currency=format_currency,
-    )
+    try:
+        return render_template(
+            "admin/master.html",
+            revenue=Decimal(str(revenue or 0)),
+            transaction_count=transaction_count,
+            user_count=user_count,
+            revenue_by_type=revenue_by_type,
+            format_currency=format_currency,
+        )
+    except Exception:
+        return f"""
+        <h2>📊 VTU Bot Admin Dashboard</h2>
+        <ul>
+            <li><strong>Total Users:</strong> {user_count}</li>
+            <li><strong>Successful Transactions:</strong> {transaction_count}</li>
+            <li><strong>Total Revenue Generated:</strong> {format_currency(revenue or 0)}</li>
+        </ul>
+        <hr>
+        <a href="/admin/credit">Credit User Balance</a> | 
+        <a href="/admin/users">View User List (JSON)</a>
+        """
+
+
+@app.route("/admin/credit", methods=["GET", "POST"], strict_slashes=False)
+def admin_credit_wallet():
+    """Allows manual crediting or debiting of a user's wallet balance."""
+    if request.method == "POST":
+        data = request.get_json(silent=True) or request.form
+        identifier = data.get("phone") or data.get("jid") or data.get("phone_number")
+        amount_raw = data.get("amount")
+
+        if not identifier or not amount_raw:
+            return jsonify({"status": "error", "message": "Missing 'phone' or 'amount' parameter"}), 400
+
+        try:
+            amount = Decimal(str(amount_raw))
+        except (InvalidOperation, ValueError):
+            return jsonify({"status": "error", "message": "Invalid numerical amount"}), 400
+
+        clean_phone = identifier.replace("whatsapp:", "").replace("@lid", "").replace("@s.whatsapp.net", "").strip()
+
+        user = User.query.filter(or_(
+            User.phone_number == clean_phone,
+            User.whatsapp_id == clean_phone,
+            User.phone == clean_phone
+        )).first()
+
+        if not user:
+            return jsonify({"status": "error", "message": f"User '{clean_phone}' not found"}), 404
+
+        user.wallet_balance += amount
+        db.session.commit()
+
+        logger.info(f"ADMIN CREDIT: Updated {user.phone_number} balance by {amount}. New Balance: {user.wallet_balance}")
+
+        if request.is_json:
+            return jsonify({
+                "status": "success",
+                "phone_number": user.phone_number,
+                "added_amount": float(amount),
+                "new_balance": float(user.wallet_balance)
+            }), 200
+
+        return f"""
+        <h3>✅ Wallet Updated Successfully!</h3>
+        <p><strong>User:</strong> {user.phone_number}</p>
+        <p><strong>New Balance:</strong> {format_currency(user.wallet_balance)}</p>
+        <a href="/admin/credit">← Back to Credit Form</a>
+        """
+
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head><title>Admin Wallet Credit</title></head>
+    <body style="font-family: sans-serif; max-width: 500px; margin: 40px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px;">
+        <h2>💳 Credit / Top-Up User Wallet</h2>
+        <form method="POST" action="/admin/credit">
+            <label><strong>User Phone Number / JID:</strong></label><br>
+            <input type="text" name="phone" placeholder="e.g. 44715424665744" style="width: 100%; padding: 8px; margin: 8px 0;" required><br><br>
+            <label><strong>Amount (₦):</strong></label><br>
+            <input type="number" step="0.01" name="amount" placeholder="5000" style="width: 100%; padding: 8px; margin: 8px 0;" required><br><br>
+            <button type="submit" style="background: #28a745; color: white; border: none; padding: 10px 20px; cursor: pointer; border-radius: 4px;">Credit Account</button>
+        </form>
+    </body>
+    </html>
+    """
+
+
+@app.route("/debug-routes", methods=["GET"], strict_slashes=False)
+def list_registered_routes():
+    """Lists all active URLs registered in Flask map."""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            "endpoint": rule.endpoint,
+            "methods": list(rule.methods),
+            "url": rule.rule
+        })
+    return jsonify({"total_routes": len(routes), "routes": routes}), 200
 
 
 # --- MAIN WEBHOOK ENDPOINT ---
