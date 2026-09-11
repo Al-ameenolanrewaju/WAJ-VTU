@@ -543,8 +543,13 @@ def whatsapp_webhook():
         if len(text) != 11 or not text.isdigit():
             send_whatsapp_message(chat_id, "❌ Invalid phone number. Please enter a valid 11-digit phone number.")
         else:
+            plan = session_data.get("selected_plan")
+            if not plan:
+                set_user_session(user, STATES["IDLE"], {})
+                send_whatsapp_message(chat_id, "❌ Your plan selection expired. Type *MENU* and start again.")
+                return jsonify({"status": "expired_session"}), 200
+
             recipient_phone = text
-            plan = session_data["selected_plan"]
             network = session_data["network"]
             cost_decimal = Decimal(str(plan["amount"]))
 
