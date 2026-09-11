@@ -515,7 +515,7 @@ def whatsapp_webhook():
 
             plan_menu = f"📊 *SELECT {network_name} DATA PLAN*\n────────────────────────\n"
             plans_map = {}
-            for idx, plan in enumerate(filtered_plans[:8], start=1):
+            for idx, plan in enumerate(filtered_plans, start=1):
                 name = plan.get("name")
                 cost = float(plan.get("variation_amount")) + 50.00
                 code = plan.get("variation_code")
