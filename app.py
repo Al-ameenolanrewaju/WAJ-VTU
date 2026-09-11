@@ -1,33 +1,48 @@
 import os
 import json
 import uuid
+import hashlib
+import hmac
 import requests
 from decimal import Decimal
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for
-from flask_sqlalchemy import SQLAlchemy
+
+# 1. Import db, User, and Transaction directly from models.py
 from models import db, User, Transaction
+from wallet_service import generate_payment_link
 
 # Import provider functions from your clubkonnect/provider module
 from provider import (
     fetch_data_variations,
     process_data_purchase,
     process_airtime_purchase,
+    fetch_cable_plans,
+    verify_smartcard,
     process_cable_tv,
+    verify_meter,
     process_electricity_payment,
+    verify_betting_account,
     process_betting_topup,
+    fetch_education_packages,
     process_education_pin
 )
-
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///vtu_bot.db")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-BRIDGE_URL = os.getenv("BRIDGE_URL", "http://localhost:10000/send-message")
-db = SQLAlchemy(app)
+BRIDGE_BASE_URL = os.getenv("BRIDGE_URL") or os.getenv(
+    "NODE_BRIDGE_URL", "http://localhost:3000"
+)
+BRIDGE_URL = (
+    BRIDGE_BASE_URL
+    if BRIDGE_BASE_URL.rstrip("/").endswith("/api/sendText")
+    else f"{BRIDGE_BASE_URL.rstrip('/')}/api/sendText"
+)
+BRIDGE_API_TOKEN = os.getenv("BRIDGE_API_TOKEN", "")
+PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
 
-
-# --- MODELS ---
+# 2. Bind the single db instance from models.py to app
 db.init_app(app)
 
 with app.app_context():
@@ -45,14 +60,30 @@ STATES = {
     "AWAITING_AIRTIME_NETWORK": "AWAITING_AIRTIME_NETWORK",
     "AWAITING_AIRTIME_AMOUNT": "AWAITING_AIRTIME_AMOUNT",
     "AWAITING_AIRTIME_NUMBER": "AWAITING_AIRTIME_NUMBER",
+    # Cable TV Flow
+    "AWAITING_CABLE_PROVIDER": "AWAITING_CABLE_PROVIDER",
+    "AWAITING_CABLE_CARD": "AWAITING_CABLE_CARD",
+    "AWAITING_CABLE_PLAN": "AWAITING_CABLE_PLAN",
+    # Electricity Flow
+    "AWAITING_ELECTRICITY_DISCO": "AWAITING_ELECTRICITY_DISCO",
+    "AWAITING_ELECTRICITY_METER_TYPE": "AWAITING_ELECTRICITY_METER_TYPE",
+    "AWAITING_ELECTRICITY_METER": "AWAITING_ELECTRICITY_METER",
+    "AWAITING_ELECTRICITY_AMOUNT": "AWAITING_ELECTRICITY_AMOUNT",
+    # Betting Flow
+    "AWAITING_BETTING_PLATFORM": "AWAITING_BETTING_PLATFORM",
+    "AWAITING_BETTING_ACCOUNT": "AWAITING_BETTING_ACCOUNT",
+    "AWAITING_BETTING_AMOUNT": "AWAITING_BETTING_AMOUNT",
+    # Education Flow
+    "AWAITING_EDUCATION_PACKAGE": "AWAITING_EDUCATION_PACKAGE",
+    "AWAITING_EDUCATION_QUANTITY": "AWAITING_EDUCATION_QUANTITY",
 }
 
 
 # --- HELPER UTILITIES ---
 def get_or_create_user(phone_number):
-    user = User.query.filter_by(phone_number=phone_number).first()
+    user = User.query.filter_by(whatsapp_id=phone_number).first()
     if not user:
-        user = User(phone_number=phone_number, wallet_balance=Decimal("0.00"))
+        user = User(phone=phone_number, whatsapp_id=phone_number, wallet_balance=Decimal("0.00"))
         db.session.add(user)
         db.session.commit()
     return user
@@ -60,15 +91,116 @@ def get_or_create_user(phone_number):
 
 def set_user_session(user, state, data):
     user.current_state = state
-    user.session_data = json.dumps(data)
+    user.state_data = json.loads(json.dumps(data))
     db.session.commit()
 
 
 def get_user_session_data(user):
     try:
-        return json.loads(user.session_data or "{}")
+        data = user.state_data or {}
+        return json.loads(json.dumps(data)) if isinstance(data, dict) else json.loads(data)
     except Exception:
         return {}
+
+
+def settle_transaction(user, result, amount, transaction_type, recipient, description):
+    """Persist a successful provider result or refund the reserved wallet amount."""
+    amount = Decimal(str(amount))
+    if result.get("status") == "SUCCESS":
+        tx = Transaction(
+            user_id=user.id,
+            reference=result["reference"],
+            amount=amount,
+            type=transaction_type,
+            recipient=recipient,
+            status="SUCCESS",
+            description=description,
+            meta_data=result.get("data", {}),
+        )
+        db.session.add(tx)
+        db.session.commit()
+        return True
+
+    user.wallet_balance += amount
+    db.session.commit()
+    return False
+
+
+def verify_paystack_signature(raw_body, signature):
+    expected = hmac.new(
+        PAYSTACK_SECRET_KEY.encode("utf-8"), raw_body, hashlib.sha512
+    ).hexdigest()
+    return bool(signature) and hmac.compare_digest(expected, signature)
+
+
+@app.route("/payments/initialize", methods=["POST"])
+def initialize_payment():
+    payload = request.get_json() or {}
+    phone = str(payload.get("phone", "")).strip()
+    email = str(payload.get("email", "")).strip()
+    try:
+        amount = Decimal(str(payload.get("amount", "0")))
+    except Exception:
+        amount = Decimal("0")
+
+    if not phone or not email or amount <= 0:
+        return jsonify({"status": "FAILED", "reason": "phone, email, and a positive amount are required"}), 400
+
+    user = get_or_create_user(phone)
+    result = generate_payment_link(email, amount, phone, pass_fee_to_user=True)
+    if result.get("status") != "SUCCESS":
+        return jsonify(result), 502
+
+    return jsonify(result), 200
+
+
+@app.route("/payments/paystack/webhook", methods=["POST"])
+def paystack_webhook():
+    raw_body = request.get_data()
+    signature = request.headers.get("x-paystack-signature", "")
+    if not verify_paystack_signature(raw_body, signature):
+        return jsonify({"status": "error", "reason": "Invalid signature"}), 401
+
+    event = request.get_json(silent=True) or {}
+    if event.get("event") != "charge.success":
+        return jsonify({"status": "ignored"}), 200
+
+    data = event.get("data") or {}
+    reference = str(data.get("reference", "")).strip()
+    metadata = data.get("metadata") or {}
+    phone = str(metadata.get("phone_number", "")).strip()
+    try:
+        paid_gross = (Decimal(str(data.get("amount", 0))) / Decimal("100")).quantize(Decimal("0.01"))
+        net_credit = Decimal(str(metadata.get("net_credit_amount", paid_gross))).quantize(Decimal("0.01"))
+    except Exception:
+        return jsonify({"status": "error", "reason": "Invalid payment amount"}), 400
+
+    if not reference or not phone or paid_gross <= 0 or net_credit <= 0 or net_credit > paid_gross:
+        return jsonify({"status": "error", "reason": "Invalid payment payload"}), 400
+
+    if Transaction.query.filter_by(reference=reference).first():
+        return jsonify({"status": "ok", "duplicate": True}), 200
+
+    user = User.query.filter_by(whatsapp_id=phone).first()
+    if not user:
+        user = User.query.filter_by(phone=phone).first()
+    if not user:
+        user = User(phone=phone, whatsapp_id=phone, wallet_balance=Decimal("0.00"))
+        db.session.add(user)
+
+    user.wallet_balance += net_credit
+    db.session.add(Transaction(
+        user=user,
+        reference=reference,
+        amount=net_credit,
+        type="DEPOSIT",
+        recipient=phone,
+        status="SUCCESS",
+        description=f"Paystack deposit; gross paid NGN {paid_gross:,.2f}",
+        meta_data={"gross_amount": str(paid_gross), "net_amount": str(net_credit), "paystack": data},
+    ))
+    db.session.commit()
+    return jsonify({"status": "ok", "credited_amount": str(net_credit)}), 200
 
 
 def send_whatsapp_message(recipient, text):
@@ -76,16 +208,16 @@ def send_whatsapp_message(recipient, text):
     Sends outgoing message to the WhatsApp Bridge service (Node.js/Baileys).
     """
     try:
-        # Include all common property names so Node receives what it expects
         payload = {
-            "to": recipient,
             "chatId": recipient,
-            "message": text,
             "text": text
         }
-        response = requests.post(BRIDGE_URL, json=payload, timeout=10)
+        headers = {}
+        if BRIDGE_API_TOKEN:
+            headers["Authorization"] = f"Bearer {BRIDGE_API_TOKEN}"
 
-        # Log error in Render logs if Node bridge fails
+        response = requests.post(BRIDGE_URL, json=payload, headers=headers, timeout=10)
+
         if not response.ok:
             print(f"Bridge HTTP Error ({response.status_code}): {response.text}")
 
@@ -124,7 +256,6 @@ def categorize_data_plans(plans):
     return categorized
 
 
-
 @app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
 def health_check():
@@ -137,18 +268,18 @@ def health_check():
 def whatsapp_webhook():
     req_data = request.get_json() or {}
 
-    # Extract recipient/sender ID and incoming message text from varying bridge payload structures
     chat_id = req_data.get("sender") or req_data.get("from") or req_data.get("phone")
-    text = (req_data.get("message") or req_data.get("text") or "").strip()
+    text = (req_data.get("message") or req_data.get("text") or req_data.get("body") or "").strip()
 
     if not chat_id:
         return jsonify({"status": "error", "reason": "No sender specified"}), 400
+
+    provider_phone = str(chat_id).split("@", 1)[0]
 
     user = get_or_create_user(chat_id)
     current_state = user.current_state or STATES["IDLE"]
     session_data = get_user_session_data(user)
 
-    # Main menu definition template
     def send_main_menu_response():
         main_menu = (
             "📌 *MAIN SERVICES MENU*\n"
@@ -165,13 +296,11 @@ def whatsapp_webhook():
         )
         send_whatsapp_message(chat_id, main_menu)
 
-    # Global Cancel / Reset Command
     if text.upper() in ["0", "MENU", "*MENU*", "CANCEL"]:
         set_user_session(user, STATES["IDLE"], {})
         send_main_menu_response()
         return jsonify({"status": "ok"}), 200
 
-    # --- IDLE STATE (ANY UNKNOWN TEXT OR FIRST MESSAGE SHOWS MAIN MENU) ---
     if current_state == STATES["IDLE"]:
         if text == "1":
             set_user_session(user, STATES["AWAITING_DATA_NETWORK"], {})
@@ -200,16 +329,25 @@ def whatsapp_webhook():
             send_whatsapp_message(chat_id, airtime_menu)
 
         elif text == "3":
-            send_whatsapp_message(chat_id, "📺 *Cable TV Subscription*\nFeature coming soon! Type *MENU* to return.")
+            set_user_session(user, STATES["AWAITING_CABLE_PROVIDER"], {})
+            send_whatsapp_message(chat_id, "📺 *Select Cable Provider*\n1. DSTV\n2. GOTV\n3. STARTIMES\n\nReply 1, 2, or 3.")
 
         elif text == "4":
-            send_whatsapp_message(chat_id, "💡 *Pay Electricity Bill*\nFeature coming soon! Type *MENU* to return.")
+            set_user_session(user, STATES["AWAITING_ELECTRICITY_DISCO"], {})
+            send_whatsapp_message(chat_id, "💡 *Select Electricity Provider*\n1. IKEDC\n2. EKEDC\n3. AEDC\n4. IBEDC\n\nReply 1, 2, 3, or 4.")
 
         elif text == "5":
-            send_whatsapp_message(chat_id, "⚽ *Betting Wallet Topup*\nFeature coming soon! Type *MENU* to return.")
+            set_user_session(user, STATES["AWAITING_BETTING_PLATFORM"], {})
+            send_whatsapp_message(chat_id, "⚽ *Select Betting Platform*\n1. BET9JA\n2. SPORTYBET\n3. BETKING\n\nReply 1, 2, or 3.")
 
         elif text == "6":
-            send_whatsapp_message(chat_id, "🎓 *Education PINs (WAEC/JAMB)*\nFeature coming soon! Type *MENU* to return.")
+            packages = fetch_education_packages()
+            session_data["education_packages"] = packages
+            set_user_session(user, STATES["AWAITING_EDUCATION_PACKAGE"], session_data)
+            package_menu = "🎓 *Select Education PIN*\n"
+            for index, package in enumerate(packages, start=1):
+                package_menu += f"{index}. {package['name']} - ₦{package['amount']:,.2f}\n"
+            send_whatsapp_message(chat_id, package_menu + "\nReply with the package number.")
 
         elif text == "7":
             send_whatsapp_message(
@@ -218,10 +356,8 @@ def whatsapp_webhook():
             )
 
         else:
-            # Replaced "Invalid option" with sending the Main Menu directly
             send_main_menu_response()
 
-    # --- DATA BUNDLE FLOW ---
     elif current_state == STATES["AWAITING_DATA_NETWORK"]:
         networks = {"1": "MTN", "2": "AIRTEL", "3": "GLO", "4": "9MOBILE"}
         if text not in networks:
@@ -355,7 +491,6 @@ def whatsapp_webhook():
 
             set_user_session(user, STATES["IDLE"], {})
 
-    # --- AIRTIME FLOW ---
     elif current_state == STATES["AWAITING_AIRTIME_NETWORK"]:
         networks = {"1": "MTN", "2": "AIRTEL", "3": "GLO", "4": "9MOBILE"}
         if text not in networks:
@@ -420,6 +555,184 @@ def whatsapp_webhook():
                 send_whatsapp_message(chat_id, f"❌ Purchase failed: {result.get('reason')}. Wallet refunded.")
 
             set_user_session(user, STATES["IDLE"], {})
+
+    elif current_state == STATES["AWAITING_CABLE_PROVIDER"]:
+        providers = {"1": "DSTV", "2": "GOTV", "3": "STARTIMES"}
+        if text not in providers:
+            send_whatsapp_message(chat_id, "❌ Reply with 1 for DSTV, 2 for GOTV, or 3 for STARTIMES:")
+        else:
+            session_data["cable_provider"] = providers[text]
+            set_user_session(user, STATES["AWAITING_CABLE_CARD"], session_data)
+            send_whatsapp_message(chat_id, f"Enter your {providers[text]} smartcard / IUC number:")
+
+    elif current_state == STATES["AWAITING_CABLE_CARD"]:
+        if not text.isdigit() or len(text) < 8:
+            send_whatsapp_message(chat_id, "❌ Enter a valid smartcard / IUC number:")
+        else:
+            provider = session_data["cable_provider"]
+            send_whatsapp_message(chat_id, "⏳ Verifying your cable account...")
+            verification = verify_smartcard(provider, text)
+            if not verification.get("valid"):
+                send_whatsapp_message(chat_id, f"❌ {verification.get('message', 'Account verification failed')}")
+                set_user_session(user, STATES["IDLE"], {})
+            else:
+                session_data["smartcard"] = text
+                session_data["cable_plans"] = fetch_cable_plans(provider)
+                set_user_session(user, STATES["AWAITING_CABLE_PLAN"], session_data)
+                plan_menu = f"📺 *{provider} Plans*\n"
+                for index, plan in enumerate(session_data["cable_plans"], start=1):
+                    plan_menu += f"{index}. {plan['name']} - ₦{plan['amount']:,.2f}\n"
+                send_whatsapp_message(chat_id, plan_menu + "\nReply with the plan number.")
+
+    elif current_state == STATES["AWAITING_CABLE_PLAN"]:
+        plans = session_data.get("cable_plans", [])
+        if not text.isdigit() or not 1 <= int(text) <= len(plans):
+            send_whatsapp_message(chat_id, "❌ Select a valid cable plan number:")
+        else:
+            plan = plans[int(text) - 1]
+            amount = Decimal(str(plan["amount"]))
+            if user.wallet_balance < amount:
+                send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
+                set_user_session(user, STATES["IDLE"], {})
+            else:
+                user.wallet_balance -= amount
+                db.session.commit()
+                provider = session_data["cable_provider"]
+                send_whatsapp_message(chat_id, "⏳ Processing your cable subscription...")
+                result = process_cable_tv(provider, session_data["smartcard"], plan["code"], float(amount), provider_phone)
+                success = settle_transaction(user, result, amount, "CABLE", session_data["smartcard"], f"{provider} {plan['name']}")
+                if success:
+                    send_whatsapp_message(chat_id, f"✅ Cable subscription successful!\nRef: {result['reference']}\nNew Balance: ₦{user.wallet_balance:,.2f}")
+                else:
+                    send_whatsapp_message(chat_id, f"❌ {result.get('reason', 'Cable subscription failed')}. Wallet refunded.")
+                set_user_session(user, STATES["IDLE"], {})
+
+    elif current_state == STATES["AWAITING_ELECTRICITY_DISCO"]:
+        discos = {"1": "IKEDC", "2": "EKEDC", "3": "AEDC", "4": "IBEDC"}
+        if text not in discos:
+            send_whatsapp_message(chat_id, "❌ Reply with a valid electricity provider number:")
+        else:
+            session_data["disco"] = discos[text]
+            set_user_session(user, STATES["AWAITING_ELECTRICITY_METER_TYPE"], session_data)
+            send_whatsapp_message(chat_id, "Select meter type:\n1. Prepaid\n2. Postpaid")
+
+    elif current_state == STATES["AWAITING_ELECTRICITY_METER_TYPE"]:
+        meter_types = {"1": "PREPAID", "2": "POSTPAID"}
+        if text not in meter_types:
+            send_whatsapp_message(chat_id, "❌ Reply 1 for Prepaid or 2 for Postpaid:")
+        else:
+            session_data["meter_type"] = meter_types[text]
+            set_user_session(user, STATES["AWAITING_ELECTRICITY_METER"], session_data)
+            send_whatsapp_message(chat_id, "Enter your meter number:")
+
+    elif current_state == STATES["AWAITING_ELECTRICITY_METER"]:
+        if not text.isdigit() or len(text) < 8:
+            send_whatsapp_message(chat_id, "❌ Enter a valid meter number:")
+        else:
+            send_whatsapp_message(chat_id, "⏳ Verifying your meter...")
+            verification = verify_meter(session_data["disco"], text, session_data["meter_type"])
+            if not verification.get("valid"):
+                send_whatsapp_message(chat_id, f"❌ {verification.get('message', 'Meter verification failed')}")
+                set_user_session(user, STATES["IDLE"], {})
+            else:
+                session_data["meter_number"] = text
+                set_user_session(user, STATES["AWAITING_ELECTRICITY_AMOUNT"], session_data)
+                send_whatsapp_message(chat_id, "Enter the electricity amount (minimum ₦500):")
+
+    elif current_state == STATES["AWAITING_ELECTRICITY_AMOUNT"]:
+        if not text.isdigit() or int(text) < 500:
+            send_whatsapp_message(chat_id, "❌ Enter a valid amount of at least ₦500:")
+        else:
+            amount = Decimal(text)
+            if user.wallet_balance < amount:
+                send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
+                set_user_session(user, STATES["IDLE"], {})
+            else:
+                user.wallet_balance -= amount
+                db.session.commit()
+                send_whatsapp_message(chat_id, "⏳ Processing your electricity payment...")
+                result = process_electricity_payment(session_data["disco"], session_data["meter_number"], session_data["meter_type"], float(amount), provider_phone)
+                success = settle_transaction(user, result, amount, "ELECTRICITY", session_data["meter_number"], f"{session_data['disco']} electricity payment")
+                if success:
+                    send_whatsapp_message(chat_id, f"✅ Electricity payment successful!\nRef: {result['reference']}\nToken: {result.get('token', 'Check provider account')}\nNew Balance: ₦{user.wallet_balance:,.2f}")
+                else:
+                    send_whatsapp_message(chat_id, f"❌ {result.get('reason', 'Electricity payment failed')}. Wallet refunded.")
+                set_user_session(user, STATES["IDLE"], {})
+
+    elif current_state == STATES["AWAITING_BETTING_PLATFORM"]:
+        platforms = {"1": "BET9JA", "2": "SPORTYBET", "3": "BETKING"}
+        if text not in platforms:
+            send_whatsapp_message(chat_id, "❌ Reply with a valid betting platform number:")
+        else:
+            session_data["platform"] = platforms[text]
+            set_user_session(user, STATES["AWAITING_BETTING_ACCOUNT"], session_data)
+            send_whatsapp_message(chat_id, "Enter your betting account ID:")
+
+    elif current_state == STATES["AWAITING_BETTING_ACCOUNT"]:
+        if len(text) < 4 or len(text) > 30:
+            send_whatsapp_message(chat_id, "❌ Enter a valid betting account ID:")
+        else:
+            send_whatsapp_message(chat_id, "⏳ Verifying your betting account...")
+            verification = verify_betting_account(session_data["platform"], text)
+            if not verification.get("valid"):
+                send_whatsapp_message(chat_id, f"❌ {verification.get('message', 'Betting account verification failed')}")
+                set_user_session(user, STATES["IDLE"], {})
+            else:
+                session_data["betting_account"] = text
+                set_user_session(user, STATES["AWAITING_BETTING_AMOUNT"], session_data)
+                send_whatsapp_message(chat_id, "Enter top-up amount (minimum ₦100):")
+
+    elif current_state == STATES["AWAITING_BETTING_AMOUNT"]:
+        if not text.isdigit() or int(text) < 100:
+            send_whatsapp_message(chat_id, "❌ Enter a valid amount of at least ₦100:")
+        else:
+            amount = Decimal(text)
+            if user.wallet_balance < amount:
+                send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
+                set_user_session(user, STATES["IDLE"], {})
+            else:
+                user.wallet_balance -= amount
+                db.session.commit()
+                send_whatsapp_message(chat_id, "⏳ Processing your betting top-up...")
+                result = process_betting_topup(session_data["platform"], session_data["betting_account"], float(amount), provider_phone)
+                success = settle_transaction(user, result, amount, "BETTING", session_data["betting_account"], f"{session_data['platform']} betting top-up")
+                if success:
+                    send_whatsapp_message(chat_id, f"✅ Betting top-up successful!\nRef: {result['reference']}\nNew Balance: ₦{user.wallet_balance:,.2f}")
+                else:
+                    send_whatsapp_message(chat_id, f"❌ {result.get('reason', 'Betting top-up failed')}. Wallet refunded.")
+                set_user_session(user, STATES["IDLE"], {})
+
+    elif current_state == STATES["AWAITING_EDUCATION_PACKAGE"]:
+        packages = session_data.get("education_packages", [])
+        if not text.isdigit() or not 1 <= int(text) <= len(packages):
+            send_whatsapp_message(chat_id, "❌ Select a valid education package number:")
+        else:
+            session_data["education_package"] = packages[int(text) - 1]
+            set_user_session(user, STATES["AWAITING_EDUCATION_QUANTITY"], session_data)
+            send_whatsapp_message(chat_id, "How many PINs do you want? Enter a number from 1 to 5.")
+
+    elif current_state == STATES["AWAITING_EDUCATION_QUANTITY"]:
+        if not text.isdigit() or not 1 <= int(text) <= 5:
+            send_whatsapp_message(chat_id, "❌ Enter a quantity from 1 to 5:")
+        else:
+            quantity = int(text)
+            package = session_data["education_package"]
+            amount = Decimal(str(package["amount"])) * quantity
+            if user.wallet_balance < amount:
+                send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
+                set_user_session(user, STATES["IDLE"], {})
+            else:
+                user.wallet_balance -= amount
+                db.session.commit()
+                send_whatsapp_message(chat_id, "⏳ Processing your education PIN order...")
+                result = process_education_pin(package["code"], quantity, provider_phone)
+                success = settle_transaction(user, result, amount, "EDU", chat_id, f"{package['name']} x{quantity}")
+                if success:
+                    pins = "\n".join(str(pin) for pin in result.get("pins", []))
+                    send_whatsapp_message(chat_id, f"✅ Education PIN order successful!\nRef: {result['reference']}\nPINs:\n{pins}\nNew Balance: ₦{user.wallet_balance:,.2f}")
+                else:
+                    send_whatsapp_message(chat_id, f"❌ {result.get('reason', 'Education PIN order failed')}. Wallet refunded.")
+                set_user_session(user, STATES["IDLE"], {})
 
     return jsonify({"status": "success"}), 200
 
@@ -542,7 +855,7 @@ def admin_dashboard():
 def admin_users():
     search_query = request.args.get("q", "").strip()
     if search_query:
-        users = User.query.filter(User.phone_number.contains(search_query)).all()
+        users = User.query.filter(User.phone.contains(search_query)).all()
     else:
         users = User.query.order_by(User.id.desc()).all()
 
@@ -551,7 +864,7 @@ def admin_users():
         user_rows += f"""
         <tr>
             <td>#{u.id}</td>
-            <td><b>{u.phone_number}</b></td>
+            <td><b>{u.phone}</b></td>
             <td>₦{u.wallet_balance:,.2f}</td>
             <td><code>{u.current_state}</code></td>
             <td>
@@ -607,7 +920,7 @@ def admin_fund_wallet(user_id):
             reference=f"ADM_{uuid.uuid4().hex[:8].upper()}",
             amount=amount,
             type="WALLET_ADJUSTMENT",
-            recipient=user.phone_number,
+            recipient=user.phone,
             status="SUCCESS",
             description=desc
         )
@@ -652,4 +965,5 @@ def admin_transactions():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

@@ -3,6 +3,9 @@ import uuid
 import logging
 import requests
 from decimal import Decimal, ROUND_HALF_UP
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger("wallet_service")
 

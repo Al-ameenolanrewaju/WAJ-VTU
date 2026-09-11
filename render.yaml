@@ -20,12 +20,12 @@ services:
       - key: CLUBKONNECT_APIKEY
         sync: false
       - key: CLUBKONNECT_BASE_URL
-        value: https://www.clubkonnect.com/API
+        value: https://www.nellobytesystems.com
       - key: ADMIN_USERNAME
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: NODE_BRIDGE_URL
+      - key: BRIDGE_URL
         value: https://waj-vtu-bridge.onrender.com
       - key: BRIDGE_API_TOKEN
         sync: false
@@ -41,6 +41,10 @@ services:
       - key: FLASK_WEBHOOK_URL
         value: https://waj-vtu-backend.onrender.com/webhook
       - key: BRIDGE_API_TOKEN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
     disk:
       name: whatsapp-auth
