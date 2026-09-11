@@ -42,6 +42,8 @@ BRIDGE_URL = (
 )
 BRIDGE_API_TOKEN = os.getenv("BRIDGE_API_TOKEN", "")
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 
 # 2. Bind the single db instance from models.py to app
 db.init_app(app)
@@ -161,6 +163,18 @@ def verify_paystack_signature(raw_body, signature):
         PAYSTACK_SECRET_KEY.encode("utf-8"), raw_body, hashlib.sha512
     ).hexdigest()
     return bool(signature) and hmac.compare_digest(expected, signature)
+
+
+def require_admin_auth():
+    auth = request.authorization
+    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+        return jsonify({"status": "error", "reason": "Admin credentials are not configured"}), 503
+    if not auth or not hmac.compare_digest(auth.username, ADMIN_USERNAME) or not hmac.compare_digest(auth.password, ADMIN_PASSWORD):
+        response = jsonify({"status": "error", "reason": "Authentication required"})
+        response.status_code = 401
+        response.headers["WWW-Authenticate"] = 'Basic realm="WAJ VTU Admin"'
+        return response
+    return None
 
 
 @app.route("/payments/initialize", methods=["POST"])
@@ -300,10 +314,13 @@ def health_check():
 # --- MAIN WEBHOOK ENDPOINT ---
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
+    if BRIDGE_API_TOKEN and request.headers.get("Authorization") != f"Bearer {BRIDGE_API_TOKEN}":
+        return jsonify({"status": "error", "reason": "Unauthorized"}), 401
+
     req_data = request.get_json() or {}
 
     chat_id = req_data.get("sender") or req_data.get("from") or req_data.get("phone")
-    text = (req_data.get("message") or req_data.get("text") or req_data.get("body") or "").strip()
+    text = str(req_data.get("message") or req_data.get("text") or req_data.get("body") or "").strip()
 
     if not chat_id:
         return jsonify({"status": "error", "reason": "No sender specified"}), 400
@@ -948,6 +965,9 @@ ADMIN_BASE_TEMPLATE = """
 
 @app.route("/admin/dashboard")
 def admin_dashboard():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
     total_users = User.query.count()
     total_transactions = Transaction.query.count()
 
@@ -991,6 +1011,9 @@ def admin_dashboard():
 
 @app.route("/admin/users", methods=["GET"])
 def admin_users():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
     search_query = request.args.get("q", "").strip()
     if search_query:
         users = User.query.filter(User.phone.contains(search_query)).all()
@@ -1041,35 +1064,48 @@ def admin_users():
 
 @app.route("/admin/user/<int:user_id>/fund", methods=["POST"])
 def admin_fund_wallet(user_id):
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
     user = User.query.get_or_404(user_id)
-    amount = Decimal(request.form.get("amount", "0"))
+    try:
+        amount = Decimal(request.form.get("amount", "0"))
+    except Exception:
+        return redirect(url_for("admin_users"))
     action_type = request.form.get("action_type")
 
-    if amount > 0:
-        if action_type == "CREDIT":
-            user.wallet_balance += amount
-            desc = f"Admin Deposit (+₦{amount:,.2f})"
-        elif action_type == "DEBIT" and user.wallet_balance >= amount:
-            user.wallet_balance -= amount
-            desc = f"Admin Deduction (-₦{amount:,.2f})"
+    if amount <= 0 or action_type not in {"CREDIT", "DEBIT"}:
+        return redirect(url_for("admin_users"))
+    if action_type == "DEBIT" and user.wallet_balance < amount:
+        return redirect(url_for("admin_users"))
 
-        tx = Transaction(
-            user_id=user.id,
-            reference=f"ADM_{uuid.uuid4().hex[:8].upper()}",
-            amount=amount,
-            type="WALLET_ADJUSTMENT",
-            recipient=user.phone,
-            status="SUCCESS",
-            description=desc
-        )
-        db.session.add(tx)
-        db.session.commit()
+    if action_type == "CREDIT":
+        user.wallet_balance += amount
+        desc = f"Admin Deposit (+₦{amount:,.2f})"
+    else:
+        user.wallet_balance -= amount
+        desc = f"Admin Deduction (-₦{amount:,.2f})"
+
+    tx = Transaction(
+        user_id=user.id,
+        reference=f"ADM_{uuid.uuid4().hex[:8].upper()}",
+        amount=amount,
+        type="WALLET_ADJUSTMENT",
+        recipient=user.phone,
+        status="SUCCESS",
+        description=desc
+    )
+    db.session.add(tx)
+    db.session.commit()
 
     return redirect(url_for("admin_users"))
 
 
 @app.route("/admin/transactions")
 def admin_transactions():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
     transactions = Transaction.query.order_by(Transaction.id.desc()).all()
 
     tx_rows = ""
