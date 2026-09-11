@@ -34,7 +34,16 @@ logger = logging.getLogger("vtu_bot")
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///vtu_bot.db")
+database_url = os.getenv("DATABASE_URL", "").strip()
+is_production = os.getenv("FLASK_ENV", "").lower() == "production"
+if is_production and not database_url:
+    raise RuntimeError("DATABASE_URL must be configured in production; refusing to use ephemeral SQLite storage")
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+elif database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url or "sqlite:///vtu_bot.db"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "vtu-default-secret-key-change-in-production")
 NODE_BRIDGE_URL = os.getenv("NODE_BRIDGE_URL", "https://waj-vtu-bridge.onrender.com").rstrip("/")

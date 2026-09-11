@@ -10,7 +10,7 @@ services:
       - key: FLASK_ENV
         value: production
       - key: DATABASE_URL
-        sync: false # Set manually in Render Dashboard using your Supabase URI
+        sync: false # Required: set to a persistent Render Postgres or Supabase URL
       - key: SECRET_KEY
         generateValue: true
       - key: PAYSTACK_SECRET_KEY
