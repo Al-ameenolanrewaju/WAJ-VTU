@@ -2,9 +2,10 @@ import os
 import json
 import logging
 from decimal import Decimal, InvalidOperation
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template, render_template_string
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import func, inspect, text
 
 # Import provider functions from your clubkonnect/provider module
 from provider import (
@@ -44,6 +45,9 @@ class User(db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
+    whatsapp_id = db.Column(db.String(50), nullable=True)
+    phone = db.Column(db.String(20), nullable=True)
+    state_data = db.Column(db.Text, nullable=True)
     phone_number = db.Column(db.String(30), unique=True, nullable=False, index=True)
     wallet_balance = db.Column(db.Numeric(12, 2), default=Decimal("1000.00"), nullable=False)
     current_state = db.Column(db.String(50), default="IDLE", nullable=False)
@@ -91,6 +95,31 @@ class Transaction(db.Model):
 with app.app_context():
     db.create_all()
 
+    user_columns = {column["name"] for column in inspect(db.engine).get_columns("users")}
+    legacy_columns = {
+        "whatsapp_id": "VARCHAR(50)",
+        "phone": "VARCHAR(20)",
+        "state_data": "TEXT",
+        "phone_number": "VARCHAR(30)",
+        "session_data": "TEXT",
+        "updated_at": "DATETIME",
+    }
+    with db.engine.begin() as connection:
+        for column_name, column_type in legacy_columns.items():
+            if column_name not in user_columns:
+                connection.execute(text(
+                    f"ALTER TABLE users ADD COLUMN {column_name} {column_type}"
+                ))
+
+        connection.execute(text(
+            "UPDATE users SET phone_number = COALESCE(phone, whatsapp_id) "
+            "WHERE phone_number IS NULL"
+        ))
+        connection.execute(text(
+            "UPDATE users SET session_data = COALESCE(state_data, '{}') "
+            "WHERE session_data IS NULL"
+        ))
+
 # --- ALL SYSTEM STATES ---
 STATES = {
     "IDLE": "IDLE",
@@ -136,6 +165,9 @@ def get_or_create_user(phone_number):
             logger.info(f"Creating new user account for: {clean_phone}")
             user = User(
                 phone_number=clean_phone,
+                whatsapp_id=clean_phone,
+                phone=clean_phone,
+                state_data="{}",
                 wallet_balance=Decimal("1000.00"),
                 current_state=STATES["IDLE"],
                 session_data="{}"
@@ -232,13 +264,9 @@ def build_main_menu_text(user_balance):
 
 
 # --- HEALTH CHECK & WEB ROUTES ---
-@app.route("/", methods=["GET"])
+@app.route('/health', methods=['GET', 'HEAD'])
 def health_check():
-    return jsonify({
-        "status": "online",
-        "service": "WhatsApp VTU Automated Bot Engine",
-        "version": "2.4.0"
-    }), 200
+    return {"status": "healthy", "service": "waj-vtu"}, 200
 
 
 @app.route("/admin/users", methods=["GET"])
@@ -248,6 +276,33 @@ def list_users():
         return jsonify([u.to_dict() for u in users]), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin", methods=["GET"])
+def admin_dashboard():
+    """Shows successful service sales and revenue totals for the admin."""
+    revenue = db.session.query(func.coalesce(func.sum(Transaction.amount), 0)).filter(
+        Transaction.status == "SUCCESS"
+    ).scalar()
+    transaction_count = Transaction.query.filter_by(status="SUCCESS").count()
+    user_count = db.session.query(func.count(User.id)).scalar()
+
+    revenue_by_type = db.session.query(
+        Transaction.type,
+        func.sum(Transaction.amount).label("total"),
+        func.count(Transaction.id).label("count")
+    ).filter(
+        Transaction.status == "SUCCESS"
+    ).group_by(Transaction.type).order_by(func.sum(Transaction.amount).desc()).all()
+
+    return render_template(
+        "admin/master.html",
+        revenue=Decimal(str(revenue or 0)),
+        transaction_count=transaction_count,
+        user_count=user_count,
+        revenue_by_type=revenue_by_type,
+        format_currency=format_currency,
+    )
 
 
 # --- MAIN WEBHOOK ENDPOINT ---

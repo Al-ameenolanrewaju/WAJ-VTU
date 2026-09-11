@@ -1,13 +1,51 @@
-{% extends 'admin/base.html' %}
-
-{% block head_css %}
-    {{ super() }}
-    <!-- Load modern Darkly Bootstrap theme -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@4.6.2/dist/darkly/bootstrap.min.css">
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VTU Admin Dashboard</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .navbar { background-color: #1a1a1a !important; border-bottom: 2px solid #00bc8c; }
-        .table { border-radius: 8px; overflow: hidden; }
-        .btn-primary { background-color: #00bc8c; border-color: #00bc8c; }
+        :root { color-scheme: dark; font-family: Arial, sans-serif; }
+        body { margin: 0; background: #101817; color: #edf7f3; }
+        main { max-width: 1100px; margin: 0 auto; padding: 32px 20px; }
+        h1 { margin: 0 0 8px; }
+        .muted { color: #9db5ad; }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 28px 0; }
+        .stat, section { background: #182421; border: 1px solid #2b403a; border-radius: 8px; padding: 20px; }
+        .stat strong { display: block; color: #55d6a4; font-size: 1.8rem; margin-top: 8px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 14px 10px; border-bottom: 1px solid #2b403a; text-align: left; }
+        th { color: #9db5ad; font-size: .85rem; text-transform: uppercase; }
+        td:last-child, th:last-child { text-align: right; }
+        @media (max-width: 650px) { .stats { grid-template-columns: 1fr; } main { padding: 24px 14px; } }
     </style>
-{% endblock %}
+</head>
+<body>
+<main>
+    <h1>Revenue dashboard</h1>
+    <p class="muted">Successful service transactions only</p>
+
+    <div class="stats">
+        <div class="stat">Total revenue<strong>{{ format_currency(revenue) }}</strong></div>
+        <div class="stat">Successful transactions<strong>{{ transaction_count }}</strong></div>
+        <div class="stat">Registered users<strong>{{ user_count }}</strong></div>
+    </div>
+
+    <section>
+        <h2>Revenue by service</h2>
+        {% if revenue_by_type %}
+        <table>
+            <thead><tr><th>Service</th><th>Transactions</th><th>Revenue</th></tr></thead>
+            <tbody>
+            {% for service, total, count in revenue_by_type %}
+                <tr><td>{{ service }}</td><td>{{ count }}</td><td>{{ format_currency(total) }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No successful transactions yet.</p>
+        {% endif %}
+    </section>
+</main>
+</body>
+</html>
