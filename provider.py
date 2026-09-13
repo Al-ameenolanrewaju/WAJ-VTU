@@ -434,7 +434,6 @@ def fetch_education_packages():
     if MOCK_MODE:
         return [
             {"name": "WAEC Result Checker PIN", "code": "waecdirect", "amount": 5350},
-            {"name": "NECO Result Checker PIN", "code": "neco", "amount": 1500},
             {"name": "JAMB UTME PIN", "code": "utme-no-mock", "amount": 5700},
         ]
 
@@ -478,9 +477,6 @@ def fetch_education_packages():
                 packages.append({"name": name, "code": code, "amount": amount})
                 seen_codes.add(code)
 
-            logger.warning(
-                "ClubKonnect does not expose a documented NECO package catalog; NECO is available only in MOCK_MODE until a verified price/catalog source is provided"
-            )
         if not packages:
             logger.error("ClubKonnect returned no education packages")
         logger.info("Fetched %d education packages from ClubKonnect", len(packages))
