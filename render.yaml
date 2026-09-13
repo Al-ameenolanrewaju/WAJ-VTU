@@ -12,7 +12,7 @@ services:
       - key: DATABASE_URL
         sync: false # Required: set to a persistent Render Postgres or Supabase URL
       - key: SECRET_KEY
-        generateValue: true
+        sync: false # Required: set a persistent secret in the Render dashboard
       - key: PAYSTACK_SECRET_KEY
         sync: false
       - key: CLUBKONNECT_USERID

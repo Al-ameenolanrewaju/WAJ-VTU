@@ -3,13 +3,15 @@ import json
 import uuid
 import hashlib
 import hmac
+import secrets
 import requests
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from markupsafe import escape
 from sqlalchemy import inspect, text
-from flask import Flask, request, jsonify, render_template_string, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort
 
 # 1. Import db, User, and Transaction directly from models.py
-from models import db, User, Transaction
+from models import db, User, Transaction, ServiceMarkup
 from wallet_service import generate_payment_link
 
 # Import provider functions from the ClubKonnect adapter.
@@ -28,6 +30,10 @@ from provider import (
     process_education_pin
 )
 app = Flask(__name__)
+secret_key = os.getenv("SECRET_KEY")
+if not secret_key:
+    raise RuntimeError("SECRET_KEY environment variable is required for secure sessions")
+app.config['SECRET_KEY'] = secret_key
 
 # --- CONFIGURATION ---
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///vtu_bot.db")
@@ -76,9 +82,21 @@ def ensure_database_schema():
     db.session.commit()
 
 
+SERVICE_TYPES = ("DATA", "AIRTIME", "CABLE", "ELECTRICITY", "BETTING", "EDU")
+
+
+def seed_service_markups():
+    defaults = {service_type: Decimal("50.00") if service_type == "DATA" else Decimal("0.00") for service_type in SERVICE_TYPES}
+    for service_type, markup_amount in defaults.items():
+        if not ServiceMarkup.query.filter_by(service_type=service_type).first():
+            db.session.add(ServiceMarkup(service_type=service_type, markup_amount=markup_amount))
+    db.session.commit()
+
+
 with app.app_context():
     db.create_all()
     ensure_database_schema()
+    seed_service_markups()
 
 # --- STATE DEFINITIONS ---
 STATES = {
@@ -122,6 +140,11 @@ def get_or_create_user(phone_number):
         db.session.add(user)
         db.session.commit()
     return user
+
+
+def get_markup(service_type):
+    markup = ServiceMarkup.query.filter_by(service_type=service_type.upper()).first()
+    return Decimal(str(markup.markup_amount)) if markup else Decimal("0.00")
 
 
 def set_user_session(user, state, data):
@@ -178,6 +201,21 @@ def require_admin_auth():
         response.headers["WWW-Authenticate"] = 'Basic realm="WAJ VTU Admin"'
         return response
     return None
+
+
+def get_csrf_token():
+    token = session.get("admin_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["admin_csrf_token"] = token
+    return token
+
+
+def validate_csrf_token():
+    submitted_token = request.form.get("csrf_token", "")
+    expected_token = session.get("admin_csrf_token", "")
+    if not expected_token or not submitted_token or not hmac.compare_digest(submitted_token, expected_token):
+        abort(403)
 
 
 @app.route("/payments/initialize", methods=["POST"])
@@ -467,11 +505,18 @@ def whatsapp_webhook():
 
         elif text == "6":
             packages = fetch_education_packages()
+            if not packages:
+                send_whatsapp_message(
+                    chat_id,
+                    "❌ Education packages are unavailable right now. Please try again later."
+                )
+                return jsonify({"status": "error"}), 200
             session_data["education_packages"] = packages
             set_user_session(user, STATES["AWAITING_EDUCATION_PACKAGE"], session_data)
             package_menu = "🎓 *SELECT EDUCATION PIN*\n"
             for index, package in enumerate(packages, start=1):
-                package_menu += f"{index}. {package['name']} - ₦{package['amount']:,.2f}\n"
+                package_amount = Decimal(str(package["amount"])) + get_markup("EDU")
+                package_menu += f"{index}. {package['name']} - ₦{package_amount:,.2f}\n"
             send_whatsapp_message(chat_id, package_menu + "\n_Reply with the package number_")
 
         elif text == "7":
@@ -593,7 +638,7 @@ def whatsapp_webhook():
             plans_map = {}
             for idx, plan in enumerate(filtered_plans, start=1):
                 name = plan.get("name")
-                cost = float(plan.get("variation_amount")) + 50.00
+                cost = Decimal(str(plan.get("variation_amount"))) + get_markup("DATA")
                 code = plan.get("variation_code")
                 plans_map[str(idx)] = {"code": code, "amount": str(cost), "name": name}
                 plan_menu += f"{idx}. {name} - ₦{cost:,.2f}\n"
@@ -696,17 +741,18 @@ def whatsapp_webhook():
         else:
             recipient_phone = text
             amount_decimal = Decimal(session_data["amount"])
+            charge_amount = amount_decimal + get_markup("AIRTIME")
             network = session_data["network"]
 
-            if user.wallet_balance < amount_decimal:
+            if user.wallet_balance < charge_amount:
                 send_whatsapp_message(
                     chat_id,
-                    f"❌ Insufficient balance! Required: ₦{amount_decimal:,.2f} | Balance: ₦{user.wallet_balance:,.2f}"
+                    f"❌ Insufficient balance! Required: ₦{charge_amount:,.2f} | Balance: ₦{user.wallet_balance:,.2f}"
                 )
                 set_user_session(user, STATES["IDLE"], {})
                 return jsonify({"status": "insufficient_balance"}), 200
 
-            user.wallet_balance -= amount_decimal
+            user.wallet_balance -= charge_amount
             db.session.commit()
 
             send_whatsapp_message(chat_id, f"⏳ Processing ₦{amount_decimal} {network} airtime via WAJ VTU...")
@@ -716,7 +762,7 @@ def whatsapp_webhook():
                 tx = Transaction(
                     user_id=user.id,
                     reference=result['reference'],
-                    amount=amount_decimal,
+                    amount=charge_amount,
                     type='AIRTIME',
                     recipient=recipient_phone,
                     status='SUCCESS',
@@ -734,7 +780,7 @@ def whatsapp_webhook():
                     f"Type *MENU* for more services."
                 )
             else:
-                user.wallet_balance += amount_decimal
+                user.wallet_balance += charge_amount
                 db.session.commit()
                 send_whatsapp_message(chat_id, f"❌ Purchase failed: {result.get('reason')}. Your wallet has been refunded.")
 
@@ -765,7 +811,8 @@ def whatsapp_webhook():
                 set_user_session(user, STATES["AWAITING_CABLE_PLAN"], session_data)
                 plan_menu = f"📺 *{provider} PLANS*\n"
                 for index, plan in enumerate(session_data["cable_plans"], start=1):
-                    plan_menu += f"{index}. {plan['name']} - ₦{plan['amount']:,.2f}\n"
+                    plan_amount = Decimal(str(plan["amount"])) + get_markup("CABLE")
+                    plan_menu += f"{index}. {plan['name']} - ₦{plan_amount:,.2f}\n"
                 send_whatsapp_message(chat_id, plan_menu + "\n_Reply with the plan number you want._")
 
     elif current_state == STATES["AWAITING_CABLE_PLAN"]:
@@ -774,7 +821,7 @@ def whatsapp_webhook():
             send_whatsapp_message(chat_id, "❌ Please select a valid cable plan number.")
         else:
             plan = plans[int(text) - 1]
-            amount = Decimal(str(plan["amount"]))
+            amount = Decimal(str(plan["amount"])) + get_markup("CABLE")
             if user.wallet_balance < amount:
                 send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
                 set_user_session(user, STATES["IDLE"], {})
@@ -834,15 +881,16 @@ def whatsapp_webhook():
             send_whatsapp_message(chat_id, "❌ Enter a valid amount of at least ₦500.")
         else:
             amount = Decimal(text)
-            if user.wallet_balance < amount:
+            charge_amount = amount + get_markup("ELECTRICITY")
+            if user.wallet_balance < charge_amount:
                 send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
                 set_user_session(user, STATES["IDLE"], {})
             else:
-                user.wallet_balance -= amount
+                user.wallet_balance -= charge_amount
                 db.session.commit()
                 send_whatsapp_message(chat_id, "⏳ Processing your electricity payment via WAJ VTU...")
                 result = process_electricity_payment(session_data["disco"], session_data["meter_number"], session_data["meter_type"], float(amount), provider_phone)
-                success = settle_transaction(user, result, amount, "ELECTRICITY", session_data["meter_number"], f"{session_data['disco']} electricity payment")
+                success = settle_transaction(user, result, charge_amount, "ELECTRICITY", session_data["meter_number"], f"{session_data['disco']} electricity payment")
                 if success:
                     send_whatsapp_message(
                         chat_id,
@@ -884,15 +932,16 @@ def whatsapp_webhook():
             send_whatsapp_message(chat_id, "❌ Enter a valid amount of at least ₦100.")
         else:
             amount = Decimal(text)
-            if user.wallet_balance < amount:
+            charge_amount = amount + get_markup("BETTING")
+            if user.wallet_balance < charge_amount:
                 send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
                 set_user_session(user, STATES["IDLE"], {})
             else:
-                user.wallet_balance -= amount
+                user.wallet_balance -= charge_amount
                 db.session.commit()
                 send_whatsapp_message(chat_id, "⏳ Processing your betting top-up via WAJ VTU...")
                 result = process_betting_topup(session_data["platform"], session_data["betting_account"], float(amount), provider_phone)
-                success = settle_transaction(user, result, amount, "BETTING", session_data["betting_account"], f"{session_data['platform']} betting top-up")
+                success = settle_transaction(user, result, charge_amount, "BETTING", session_data["betting_account"], f"{session_data['platform']} betting top-up")
                 if success:
                     send_whatsapp_message(
                         chat_id,
@@ -920,7 +969,7 @@ def whatsapp_webhook():
         else:
             quantity = int(text)
             package = session_data["education_package"]
-            amount = Decimal(str(package["amount"])) * quantity
+            amount = (Decimal(str(package["amount"])) + get_markup("EDU")) * quantity
             if user.wallet_balance < amount:
                 send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
                 set_user_session(user, STATES["IDLE"], {})
@@ -1008,6 +1057,7 @@ ADMIN_BASE_TEMPLATE = """
             <li><a href="/admin/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}">📊 Dashboard</a></li>
             <li><a href="/admin/users" class="{{ 'active' if active_page == 'users' else '' }}">👥 Track Users</a></li>
             <li><a href="/admin/transactions" class="{{ 'active' if active_page == 'transactions' else '' }}">💳 Transactions</a></li>
+            <li><a href="/admin/settings" class="{{ 'active' if active_page == 'settings' else '' }}">⚙️ Pricing</a></li>
         </ul>
     </nav>
     <div class="container">
@@ -1036,11 +1086,11 @@ def admin_dashboard():
         status_cls = "badge-success" if tx.status == "SUCCESS" else "badge-failed"
         tx_rows += f"""
         <tr>
-            <td><code>{tx.reference}</code></td>
-            <td>{tx.type}</td>
+            <td><code>{escape(tx.reference)}</code></td>
+            <td>{escape(tx.type)}</td>
             <td>₦{tx.amount:,.2f}</td>
-            <td>{tx.recipient}</td>
-            <td class="{status_cls}">{tx.status}</td>
+            <td>{escape(tx.recipient or '')}</td>
+            <td class="{escape(status_cls)}">{escape(tx.status)}</td>
         </tr>
         """
 
@@ -1070,6 +1120,7 @@ def admin_users():
     if auth_error:
         return auth_error
     search_query = request.args.get("q", "").strip()
+    csrf_token = get_csrf_token()
     if search_query:
         users = User.query.filter(User.phone.contains(search_query)).all()
     else:
@@ -1079,12 +1130,13 @@ def admin_users():
     for u in users:
         user_rows += f"""
         <tr>
-            <td>#{u.id}</td>
-            <td><b>{u.phone}</b></td>
+            <td>#{escape(u.id)}</td>
+            <td><b>{escape(u.phone)}</b></td>
             <td>₦{u.wallet_balance:,.2f}</td>
-            <td><code>{u.current_state}</code></td>
+            <td><code>{escape(u.current_state)}</code></td>
             <td>
                 <form method="POST" action="/admin/user/{u.id}/fund" style="display:flex; gap:6px;">
+                    <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
                     <input type="number" step="0.01" name="amount" placeholder="Amount" required style="width:100px;">
                     <select name="action_type">
                         <option value="CREDIT">+ Credit</option>
@@ -1100,7 +1152,7 @@ def admin_users():
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
         <h2>👥 User Directory & Wallet Control</h2>
         <form method="GET" action="/admin/users" style="display:flex; gap:8px;">
-            <input type="text" name="q" placeholder="Search phone number..." value="{search_query}">
+            <input type="text" name="q" placeholder="Search phone number..." value="{escape(search_query)}">
             <button type="submit">Search</button>
         </form>
     </div>
@@ -1117,11 +1169,71 @@ def admin_users():
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="users")
 
 
+@app.route("/admin/settings", methods=["GET", "POST"])
+def admin_settings():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    if request.method == "POST":
+        validate_csrf_token()
+
+    errors = []
+    if request.method == "POST":
+        for service_type in SERVICE_TYPES:
+            raw_value = request.form.get(service_type, "").strip()
+            try:
+                markup_amount = Decimal(raw_value)
+                if not markup_amount.is_finite() or markup_amount < 0:
+                    raise ValueError
+                markup_amount = markup_amount.quantize(Decimal("0.01"))
+            except (InvalidOperation, ValueError):
+                errors.append(f"{service_type}: enter a non-negative number.")
+                continue
+
+            markup = ServiceMarkup.query.filter_by(service_type=service_type).first()
+            if markup is None:
+                markup = ServiceMarkup(service_type=service_type)
+                db.session.add(markup)
+            markup.markup_amount = markup_amount
+
+        db.session.commit()
+
+    csrf_token = get_csrf_token()
+    markups = {markup.service_type: markup.markup_amount for markup in ServiceMarkup.query.all()}
+    error_html = "".join(f"<p style=\"color:#dc2626; margin-bottom:8px;\">{escape(error)}</p>" for error in errors)
+    rows = ""
+    for service_type in SERVICE_TYPES:
+        value = escape(str(markups.get(service_type, Decimal("0.00"))))
+        label = escape(service_type)
+        rows += f"""
+        <tr>
+            <td><b>{label}</b></td>
+            <td><input type="number" min="0" step="0.01" name="{label}" value="{value}" required></td>
+        </tr>
+        """
+
+    content = f"""
+    <h2 style="margin-bottom:20px;">Service Markups</h2>
+    {error_html}
+    <form method="POST" action="/admin/settings">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+        <table>
+            <thead><tr><th>Service</th><th>Markup (₦)</th></tr></thead>
+            <tbody>{rows}</tbody>
+        </table>
+        <button type="submit" style="margin-top:15px;">Save Markups</button>
+    </form>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="settings")
+
+
 @app.route("/admin/user/<int:user_id>/fund", methods=["POST"])
 def admin_fund_wallet(user_id):
     auth_error = require_admin_auth()
     if auth_error:
         return auth_error
+    validate_csrf_token()
     user = User.query.get_or_404(user_id)
     try:
         amount = Decimal(request.form.get("amount", "0"))
@@ -1168,13 +1280,13 @@ def admin_transactions():
         status_cls = "badge-success" if tx.status == "SUCCESS" else "badge-failed"
         tx_rows += f"""
         <tr>
-            <td><code>{tx.reference}</code></td>
+            <td><code>{escape(tx.reference)}</code></td>
             <td>#{tx.user_id}</td>
-            <td>{tx.type}</td>
+            <td>{escape(tx.type)}</td>
             <td>₦{tx.amount:,.2f}</td>
-            <td>{tx.recipient}</td>
-            <td class="{status_cls}">{tx.status}</td>
-            <td><small>{tx.description or ''}</small></td>
+            <td>{escape(tx.recipient or '')}</td>
+            <td class="{escape(status_cls)}">{escape(tx.status)}</td>
+            <td><small>{escape(tx.description or '')}</small></td>
         </tr>
         """
 

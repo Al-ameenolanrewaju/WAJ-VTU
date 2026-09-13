@@ -212,11 +212,88 @@ def process_airtime_purchase(phone: str, network: str, amount: float):
 
 
 def fetch_cable_plans(provider: str):
-    """Returns the supported TV packages used to build the purchase menu."""
-    return [
-        {"name": f"{provider} Basic", "code": "basic", "amount": 2500},
-        {"name": f"{provider} Premium", "code": "premium", "amount": 5000},
-    ]
+    """Fetch available cable TV packages from ClubKonnect."""
+    mock_plans = {
+        "DSTV": [
+            {"name": "DStv Padi", "code": "dstv-padi", "amount": 4400},
+            {"name": "DStv Yanga", "code": "dstv-yanga", "amount": 6000},
+        ],
+        "GOTV": [
+            {"name": "GOtv Jinja", "code": "gotv-jinja", "amount": 3900},
+            {"name": "GOtv Max", "code": "gotv-max", "amount": 8500},
+        ],
+        "STARTIMES": [
+            {"name": "Nova (Dish)", "code": "nova", "amount": 2100},
+            {"name": "Basic (Antenna)", "code": "basic", "amount": 4000},
+        ],
+    }
+    provider_key = provider.upper()
+
+    if MOCK_MODE:
+        return mock_plans.get(provider_key, [])
+
+    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
+        logger.error("Cannot fetch cable plans: ClubKonnect credentials are missing")
+        return []
+
+    category_names = {
+        "DSTV": "DStv",
+        "GOTV": "GOtv",
+        "STARTIMES": "Startimes",
+        "SHOWMAX": "Showmax",
+    }
+    category_name = category_names.get(provider_key)
+    if not category_name:
+        logger.error("Cannot fetch cable plans: unsupported provider %s", provider)
+        return []
+
+    try:
+        response = _provider_request("APICableTVPackagesV2.asp", {})
+        tv_catalog = response.get("TV_ID", {})
+        if not isinstance(tv_catalog, dict):
+            logger.error("ClubKonnect cable plans response has unexpected TV_ID type: %s", type(tv_catalog).__name__)
+            return []
+
+        provider_entries = tv_catalog.get(category_name, [])
+        if not isinstance(provider_entries, list):
+            logger.error("ClubKonnect cable plans for %s have unexpected type: %s", provider, type(provider_entries).__name__)
+            return []
+
+        raw_plans = []
+        for entry in provider_entries:
+            if isinstance(entry, dict) and isinstance(entry.get("PRODUCT"), list):
+                raw_plans.extend(entry["PRODUCT"])
+
+        plans = []
+        for item in raw_plans:
+            if not isinstance(item, dict):
+                continue
+            code = item.get("PACKAGE_ID")
+            name = item.get("PACKAGE_NAME")
+            raw_amount = item.get("PACKAGE_AMOUNT")
+            if not code or not name or raw_amount in (None, ""):
+                continue
+            try:
+                amount = float(raw_amount)
+            except (TypeError, ValueError):
+                continue
+            if amount < 0:
+                continue
+            plans.append({"name": name, "code": code, "amount": amount})
+
+        if not plans:
+            logger.error(
+                "ClubKonnect returned no cable plans for %s; available categories=%s status=%s message=%s",
+                provider,
+                list(tv_catalog.keys()),
+                response.get("status", response.get("statuscode", "")),
+                response.get("msg", response.get("message", "")),
+            )
+        logger.info("Fetched %d %s cable plans from ClubKonnect", len(plans), provider)
+        return plans
+    except Exception:
+        logger.exception("Failed to fetch cable plans for %s", provider)
+        return []
 
 
 def verify_smartcard(provider: str, iuc: str):
@@ -353,11 +430,64 @@ def process_betting_topup(platform: str, user_id: str, amount: float, phone: str
 
 
 def fetch_education_packages():
-    """Returns educational scratch card packages (WAEC/NECO)."""
-    return [
-        {"name": "WAEC Result Checker", "code": "waecdirect", "amount": 3800},
-        {"name": "NECO Result Checker", "code": "neco", "amount": 1200},
-    ]
+    """Fetch the WAEC and JAMB e-PIN packages exposed by ClubKonnect."""
+    if MOCK_MODE:
+        return [
+            {"name": "WAEC Result Checker PIN", "code": "waecdirect", "amount": 5350},
+            {"name": "NECO Result Checker PIN", "code": "neco", "amount": 1500},
+            {"name": "JAMB UTME PIN", "code": "utme-no-mock", "amount": 5700},
+        ]
+
+    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
+        logger.error("Cannot fetch education packages: ClubKonnect credentials are missing")
+        return []
+
+    try:
+        package_endpoints = (
+            "APIWAECPackagesV2.asp",
+            "APIJAMBPackagesV2.asp",
+        )
+        packages = []
+        seen_codes = set()
+
+        for endpoint in package_endpoints:
+            response = _provider_request(endpoint, {})
+            exam_types = response.get("EXAM_TYPE", [])
+            if not isinstance(exam_types, list):
+                logger.error(
+                    "ClubKonnect education response has unexpected EXAM_TYPE type: endpoint=%s type=%s",
+                    endpoint,
+                    type(exam_types).__name__,
+                )
+                continue
+
+            for item in exam_types:
+                if not isinstance(item, dict):
+                    continue
+                code = item.get("PRODUCT_CODE")
+                name = item.get("PRODUCT_DESCRIPTION")
+                raw_amount = item.get("PRODUCT_AMOUNT")
+                if not code or not name or raw_amount in (None, "") or code in seen_codes:
+                    continue
+                try:
+                    amount = float(raw_amount)
+                except (TypeError, ValueError):
+                    continue
+                if amount < 0:
+                    continue
+                packages.append({"name": name, "code": code, "amount": amount})
+                seen_codes.add(code)
+
+            logger.warning(
+                "ClubKonnect does not expose a documented NECO package catalog; NECO is available only in MOCK_MODE until a verified price/catalog source is provided"
+            )
+        if not packages:
+            logger.error("ClubKonnect returned no education packages")
+        logger.info("Fetched %d education packages from ClubKonnect", len(packages))
+        return packages
+    except Exception:
+        logger.exception("Failed to fetch education packages")
+        return []
 
 
 def process_education_pin(exam: str, quantity: int = 1, phone: str = ""):

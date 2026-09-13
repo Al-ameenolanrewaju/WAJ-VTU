@@ -66,3 +66,12 @@ class Transaction(db.Model):
 
     def __repr__(self):
         return f"<Transaction {self.reference} - {self.type} - {self.status}>"
+
+
+class ServiceMarkup(db.Model):
+    __tablename__ = 'service_markups'
+
+    id = db.Column(db.Integer, primary_key=True)
+    service_type = db.Column(db.String(20), unique=True, nullable=False, index=True)
+    markup_amount = db.Column(db.Numeric(10, 2), default=0.00, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
