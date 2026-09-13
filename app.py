@@ -1100,7 +1100,10 @@ def admin_dashboard():
         <div class="card"><h3>Total Transactions</h3><p>{total_transactions}</p></div>
         <div class="card"><h3>Total Volume Processed</h3><p>₦{total_volume:,.2f}</p></div>
     </div>
-    <h3 style="margin-bottom: 15px;">Recent Activity Stream</h3>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <h3>Recent Activity Stream</h3>
+        <a href="/admin/settings" style="background:#2563eb; color:#ffffff; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:14px; font-weight:600;">Edit Service Pricing</a>
+    </div>
     <table>
         <thead>
             <tr><th>Reference</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th></tr>
