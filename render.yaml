@@ -15,6 +15,14 @@ services:
         sync: false # Required: set a persistent secret in the Render dashboard
       - key: PAYSTACK_SECRET_KEY
         sync: false
+      - key: META_API_TOKEN
+        sync: false # Required for official WhatsApp Cloud API sending
+      - key: META_PHONE_NUMBER_ID
+        sync: false # Required for official WhatsApp Cloud API sending
+      - key: META_VERIFY_TOKEN
+        sync: false # Required for webhook verification
+      - key: META_API_VERSION
+        value: v20.0
       - key: CLUBKONNECT_USERID
         sync: false
       - key: CLUBKONNECT_APIKEY

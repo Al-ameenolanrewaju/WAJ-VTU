@@ -48,6 +48,10 @@ BRIDGE_URL = (
 )
 BRIDGE_API_TOKEN = os.getenv("BRIDGE_API_TOKEN", "")
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
+META_API_TOKEN = os.getenv("META_API_TOKEN", "").strip()
+META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "").strip()
+META_API_VERSION = os.getenv("META_API_VERSION", "v20.0").strip()
+META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "").strip()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 
@@ -290,9 +294,31 @@ def paystack_webhook():
 
 def send_whatsapp_message(recipient, text):
     """
-    Sends outgoing message to the WhatsApp Bridge service (Node.js/Baileys).
+    Sends outgoing WhatsApp messages through the official Meta Cloud API when configured,
+    otherwise falls back to the local bridge service.
     """
     try:
+        meta_api_token = os.getenv("META_API_TOKEN", META_API_TOKEN).strip()
+        meta_phone_number_id = os.getenv("META_PHONE_NUMBER_ID", META_PHONE_NUMBER_ID).strip()
+        meta_api_version = os.getenv("META_API_VERSION", META_API_VERSION).strip()
+
+        if meta_api_token and meta_phone_number_id:
+            meta_url = f"https://graph.facebook.com/{meta_api_version}/{meta_phone_number_id}/messages"
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": recipient,
+                "type": "text",
+                "text": {"body": text}
+            }
+            headers = {
+                "Authorization": f"Bearer {meta_api_token}",
+                "Content-Type": "application/json",
+            }
+            response = requests.post(meta_url, json=payload, headers=headers, timeout=20)
+            if not response.ok:
+                print(f"Meta API HTTP Error ({response.status_code}): {response.text}")
+            return response.ok
+
         payload = {
             "chatId": recipient,
             "text": text
@@ -308,7 +334,7 @@ def send_whatsapp_message(recipient, text):
 
         return response.ok
     except Exception as e:
-        print(f"Failed to deliver WhatsApp message to bridge: {e}")
+        print(f"Failed to deliver WhatsApp message: {e}")
         return False
 
 
@@ -352,6 +378,19 @@ def health_check():
     }), 200
 
 
+@app.route("/webhook", methods=["GET"])
+def meta_webhook_verification():
+    """Handle Facebook/Meta webhook verification requests."""
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+
+    if mode == "subscribe" and token == META_VERIFY_TOKEN and challenge:
+        return challenge, 200
+
+    return jsonify({"status": "error", "reason": "Forbidden"}), 403
+
+
 # --- MAIN WEBHOOK ENDPOINT ---
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
@@ -359,6 +398,30 @@ def whatsapp_webhook():
         return jsonify({"status": "error", "reason": "Unauthorized"}), 401
 
     req_data = request.get_json() or {}
+
+    # Meta WhatsApp Cloud API sends payloads under entry -> changes -> value.
+    if "entry" in req_data:
+        for entry in req_data.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                messages = value.get("messages") or []
+                if messages:
+                    first_message = messages[0]
+                    sender = first_message.get("from") or first_message.get("sender")
+                    text = ""
+                    if first_message.get("type") == "text":
+                        text = first_message.get("text", {}).get("body", "")
+                    if sender:
+                        req_data = {
+                            "sender": sender,
+                            "message": text,
+                            "body": text,
+                            "from": sender,
+                            "text": text,
+                        }
+                        break
+            if "sender" in req_data:
+                break
 
     chat_id = req_data.get("sender") or req_data.get("from") or req_data.get("phone")
     text = str(req_data.get("message") or req_data.get("text") or req_data.get("body") or "").strip()
