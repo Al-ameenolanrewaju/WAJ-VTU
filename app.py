@@ -394,7 +394,8 @@ def meta_webhook_verification():
 # --- MAIN WEBHOOK ENDPOINT ---
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
-    if BRIDGE_API_TOKEN and request.headers.get("Authorization") != f"Bearer {BRIDGE_API_TOKEN}":
+    auth_header = request.headers.get("Authorization")
+    if auth_header and BRIDGE_API_TOKEN and auth_header != f"Bearer {BRIDGE_API_TOKEN}":
         return jsonify({"status": "error", "reason": "Unauthorized"}), 401
 
     req_data = request.get_json() or {}
