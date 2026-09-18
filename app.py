@@ -482,19 +482,19 @@ def whatsapp_webhook():
 
     def send_main_menu_response():
         main_menu = (
-            "✨ *WELCOME TO WAJ VTU*\n"
-            "────────────────────────\n"
-            "Choose a service below:\n\n"
-            "1. 📶 Buy Data\n"
-            "2. 📱 Buy Airtime\n"
-            "3. 📺 Cable TV\n"
-            "4. 💡 Pay Electricity\n"
-            "5. ⚽ Betting Top-up\n"
-            "6. 🎓 Education PINs\n"
-            "7. 💳 Check Wallet\n\n"
-            "8. 💰 Top Up Balance\n\n"
-            f"💰 *Available Balance:* ₦{user.wallet_balance:,.2f}\n"
-            "_Reply with a number from 1 to 8_"
+            "WAJ VTU\n"
+            "Smart utility services\n\n"
+            "Please select a service:\n\n"
+            "1. Buy Data\n"
+            "2. Buy Airtime\n"
+            "3. Cable TV\n"
+            "4. Pay Electricity\n"
+            "5. Betting Top-up\n"
+            "6. Education PINs\n"
+            "7. Check Wallet\n"
+            "8. Top Up Balance\n\n"
+            f"Available balance: ₦{user.wallet_balance:,.2f}\n"
+            "Reply with a number from 1 to 8."
         )
         send_whatsapp_message(chat_id, main_menu)
 
@@ -507,26 +507,24 @@ def whatsapp_webhook():
         if text == "1":
             set_user_session(user, STATES["AWAITING_DATA_NETWORK"], {})
             network_menu = (
-                "📶 *SELECT MOBILE NETWORK*\n"
-                "────────────────────────\n"
+                "Select mobile network\n\n"
                 "1. MTN\n"
-                "2. AIRTEL\n"
-                "3. GLO\n"
-                "4. 9MOBILE\n\n"
-                "_Choose a network by replying with 1, 2, 3, or 4_"
+                "2. Airtel\n"
+                "3. Glo\n"
+                "4. 9mobile\n\n"
+                "Reply with 1, 2, 3, or 4."
             )
             send_whatsapp_message(chat_id, network_menu)
 
         elif text == "2":
             set_user_session(user, STATES["AWAITING_AIRTIME_NETWORK"], {})
             airtime_menu = (
-                "📱 *SELECT AIRTIME NETWORK*\n"
-                "────────────────────────\n"
+                "Select airtime network\n\n"
                 "1. MTN\n"
-                "2. AIRTEL\n"
-                "3. GLO\n"
-                "4. 9MOBILE\n\n"
-                "_Choose a network by replying with 1, 2, 3, or 4_"
+                "2. Airtel\n"
+                "3. Glo\n"
+                "4. 9mobile\n\n"
+                "Reply with 1, 2, 3, or 4."
             )
             send_whatsapp_message(chat_id, airtime_menu)
 
@@ -534,12 +532,11 @@ def whatsapp_webhook():
             set_user_session(user, STATES["AWAITING_CABLE_PROVIDER"], {})
             send_whatsapp_message(
                 chat_id,
-                "📺 *SELECT CABLE PROVIDER*\n"
-                "────────────────────────\n"
+                "Select cable provider\n\n"
                 "1. DSTV\n"
                 "2. GOTV\n"
                 "3. STARTIMES\n\n"
-                "_Reply with 1, 2, or 3_"
+                "Reply with 1, 2, or 3."
             )
 
         elif text == "4":
