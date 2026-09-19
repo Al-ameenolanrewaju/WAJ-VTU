@@ -390,7 +390,9 @@ def paystack_callback():
         if transaction:
             reconcile_deposit_transaction(transaction)
         if transaction and transaction.status == "SUCCESS":
-            return render_template_string("<h2>Payment successful</h2><p>Your wallet has been credited.</p><a href=\"/\">Back to wallet</a>")
+            user_phone = normalize_phone_number((transaction.recipient or "").strip() or (transaction.user.phone if transaction.user else ""))
+            whatsapp_link = f"https://wa.me/{user_phone}" if user_phone else "https://wa.me/"
+            return redirect(whatsapp_link, code=302)
         return render_template_string("<h2>Payment is being processed</h2><p>Your transaction is still pending confirmation.</p><a href=\"/\">Refresh</a>")
     return render_template_string("<h2>Payment status unavailable</h2><p>The Paystack callback did not include a valid reference.</p>")
 

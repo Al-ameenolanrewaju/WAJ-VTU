@@ -200,6 +200,41 @@ def test_paystack_webhook_credits_balance_and_shows_in_admin_dashboard(client):
     assert b"DEP_TEST_1001" in dashboard_response.data
 
 
+def test_paystack_success_callback_redirects_to_whatsapp(client):
+    import app as app_module
+
+    with app_module.app.app_context():
+        app_module.db.session.query(app_module.Transaction).delete()
+        app_module.db.session.query(app_module.User).delete()
+
+        user = app_module.User(
+            whatsapp_id="2348000000000",
+            phone="2348000000000",
+            name="Demo Wallet User",
+            wallet_balance=Decimal("0.00"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.flush()
+
+        tx = app_module.Transaction(
+            user_id=user.id,
+            reference="DEP_REDIRECT_1001",
+            amount=Decimal("200.00"),
+            type="DEPOSIT",
+            recipient="2348000000000",
+            status="SUCCESS",
+            description="Paystack wallet funding",
+            meta_data={"credited": True},
+        )
+        app_module.db.session.add(tx)
+        app_module.db.session.commit()
+
+    response = client.get("/payments/paystack/callback?reference=DEP_REDIRECT_1001")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].startswith("https://wa.me/")
+
+
 def test_dynamic_paystack_fee_tiers_are_admin_editable(client):
     import app as app_module
     from wallet_service import calculate_paystack_gross
