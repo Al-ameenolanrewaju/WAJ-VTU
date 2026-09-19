@@ -614,6 +614,9 @@ def whatsapp_webhook():
     provider_phone = str(chat_id).split("@", 1)[0]
 
     user = get_or_create_user(chat_id)
+    if user is None:
+        return jsonify({"status": "ignored", "reason": "User creation is disabled"}), 200
+
     current_state = user.current_state or STATES["IDLE"]
     session_data = get_user_session_data(user)
 

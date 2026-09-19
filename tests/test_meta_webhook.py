@@ -54,6 +54,37 @@ def test_meta_message_payload_is_accepted(client):
     assert response.status_code == 200
 
 
+def test_webhook_ignores_new_user_when_db_mutations_disabled(client):
+    import app as app_module
+
+    app_module.ALLOW_DB_MUTATIONS = False
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "2348099999999",
+                                    "id": "wamid.456",
+                                    "timestamp": "1710000001",
+                                    "type": "text",
+                                    "text": {"body": "MENU"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    response = client.post("/webhook", json=payload)
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ignored"
+
+
 def test_send_whatsapp_message_uses_meta_api(monkeypatch):
     import app
 
