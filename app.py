@@ -154,11 +154,29 @@ STATES = {
 
 
 # --- HELPER UTILITIES ---
+def normalize_phone_number(phone_number):
+    if phone_number is None:
+        return ""
+    normalized = str(phone_number).strip().replace(" ", "").replace("+", "")
+    if normalized.startswith("234"):
+        return normalized
+    if normalized.startswith("0") and len(normalized) == 11:
+        return "234" + normalized[1:]
+    return normalized
+
+
 def get_or_create_user(phone_number):
-    user = User.query.filter_by(whatsapp_id=phone_number).first()
+    normalized_phone = normalize_phone_number(phone_number)
+    user = User.query.filter_by(whatsapp_id=normalized_phone).first() or User.query.filter_by(phone=normalized_phone).first()
     if not user:
-        user = User(phone=phone_number, whatsapp_id=phone_number, wallet_balance=Decimal("0.00"))
+        user = User(phone=normalized_phone, whatsapp_id=normalized_phone, wallet_balance=Decimal("0.00"))
         db.session.add(user)
+        db.session.commit()
+    else:
+        if user.whatsapp_id != normalized_phone:
+            user.whatsapp_id = normalized_phone
+        if user.phone != normalized_phone:
+            user.phone = normalized_phone
         db.session.commit()
     return user
 
@@ -401,12 +419,19 @@ def paystack_webhook():
     if not reference or not phone or paid_gross <= 0 or net_credit <= 0 or net_credit > paid_gross:
         return jsonify({"status": "error", "reason": "Invalid payment payload"}), 400
 
-    user = User.query.filter_by(whatsapp_id=phone).first()
+    normalized_phone = normalize_phone_number(phone)
+    user = User.query.filter_by(whatsapp_id=normalized_phone).first() or User.query.filter_by(phone=normalized_phone).first()
     if not user:
-        user = User.query.filter_by(phone=phone).first()
+        user = User.query.filter_by(whatsapp_id=phone).first() or User.query.filter_by(phone=phone).first()
     if not user:
-        user = User(phone=phone, whatsapp_id=phone, wallet_balance=Decimal("0.00"))
+        user = User(phone=normalized_phone, whatsapp_id=normalized_phone, wallet_balance=Decimal("0.00"))
         db.session.add(user)
+        db.session.commit()
+    else:
+        if user.whatsapp_id != normalized_phone:
+            user.whatsapp_id = normalized_phone
+        if user.phone != normalized_phone:
+            user.phone = normalized_phone
         db.session.commit()
 
     tx = Transaction.query.filter_by(reference=reference).first()
