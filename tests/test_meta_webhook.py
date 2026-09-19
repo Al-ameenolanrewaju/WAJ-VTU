@@ -85,6 +85,28 @@ def test_webhook_ignores_new_user_when_db_mutations_disabled(client):
     assert response.get_json()["status"] == "ignored"
 
 
+def test_webhook_ignores_non_message_events(client):
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "statuses": [
+                                {"id": "msg_1", "status": "read", "recipient_id": "2348012345678"}
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    response = client.post("/webhook", json=payload)
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ignored"
+
+
 def test_send_whatsapp_message_uses_meta_api(monkeypatch):
     import app
 

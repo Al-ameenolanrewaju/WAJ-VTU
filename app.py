@@ -587,21 +587,23 @@ def whatsapp_webhook():
             for change in entry.get("changes", []):
                 value = change.get("value", {})
                 messages = value.get("messages") or []
-                if messages:
-                    first_message = messages[0]
-                    sender = first_message.get("from") or first_message.get("sender")
-                    text = ""
-                    if first_message.get("type") == "text":
-                        text = first_message.get("text", {}).get("body", "")
-                    if sender:
-                        req_data = {
-                            "sender": sender,
-                            "message": text,
-                            "body": text,
-                            "from": sender,
-                            "text": text,
-                        }
-                        break
+                if not messages:
+                    continue
+
+                first_message = messages[0]
+                sender = first_message.get("from") or first_message.get("sender")
+                text = ""
+                if first_message.get("type") == "text":
+                    text = first_message.get("text", {}).get("body", "")
+                if sender:
+                    req_data = {
+                        "sender": sender,
+                        "message": text,
+                        "body": text,
+                        "from": sender,
+                        "text": text,
+                    }
+                    break
             if "sender" in req_data:
                 break
 
@@ -609,7 +611,7 @@ def whatsapp_webhook():
     text = str(req_data.get("message") or req_data.get("text") or req_data.get("body") or "").strip()
 
     if not chat_id:
-        return jsonify({"status": "error", "reason": "No sender specified"}), 400
+        return jsonify({"status": "ignored", "reason": "No sender specified"}), 200
 
     provider_phone = str(chat_id).split("@", 1)[0]
 
