@@ -137,6 +137,69 @@ def test_admin_dashboard_shows_timestamps(client):
     assert b"Joined" in users_response.data
 
 
+def test_paystack_webhook_credits_balance_and_shows_in_admin_dashboard(client):
+    import app as app_module
+    import hashlib
+    import hmac
+    import json
+
+    app_module.ADMIN_USERNAME = "admin"
+    app_module.ADMIN_PASSWORD = "secret"
+    app_module.PAYSTACK_SECRET_KEY = "test-secret"
+
+    with app_module.app.app_context():
+        app_module.db.session.query(app_module.Transaction).delete()
+        app_module.db.session.query(app_module.User).delete()
+
+        user = app_module.User(
+            whatsapp_id="2348000000000",
+            phone="2348000000000",
+            name="Demo Wallet User",
+            wallet_balance=Decimal("0.00"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+    payload = {
+        "event": "charge.success",
+        "data": {
+            "reference": "DEP_TEST_1001",
+            "amount": 20000,
+            "metadata": {
+                "phone_number": "2348000000000",
+                "net_credit_amount": "200.00",
+                "fee_amount": "5.00",
+            },
+        },
+    }
+    body = json.dumps(payload).encode("utf-8")
+    signature = hmac.new(b"test-secret", body, hashlib.sha512).hexdigest()
+
+    response = client.post(
+        "/payments/paystack/webhook",
+        data=body,
+        headers={"Content-Type": "application/json", "x-paystack-signature": signature},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ok"
+
+    with app_module.app.app_context():
+        refreshed = app_module.User.query.filter_by(whatsapp_id="2348000000000").first()
+        assert refreshed is not None
+        assert refreshed.wallet_balance == Decimal("200.00")
+        tx = app_module.Transaction.query.filter_by(reference="DEP_TEST_1001").first()
+        assert tx is not None
+        assert tx.status == "SUCCESS"
+
+    dashboard_response = client.get(
+        "/admin/dashboard",
+        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+    )
+    assert dashboard_response.status_code == 200
+    assert b"DEP_TEST_1001" in dashboard_response.data
+
+
 def test_dynamic_paystack_fee_tiers_are_admin_editable(client):
     import app as app_module
     from wallet_service import calculate_paystack_gross

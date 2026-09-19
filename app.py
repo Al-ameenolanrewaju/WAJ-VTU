@@ -50,6 +50,8 @@ BRIDGE_URL = (
 )
 BRIDGE_API_TOKEN = os.getenv("BRIDGE_API_TOKEN", "")
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
+APP_BASE_URL = (os.getenv("APP_BASE_URL") or os.getenv("PUBLIC_BASE_URL") or "http://localhost:5000").rstrip("/")
+PAYSTACK_CALLBACK_URL = os.getenv("PAYSTACK_CALLBACK_URL") or f"{APP_BASE_URL}/payments/paystack/callback"
 META_API_TOKEN = os.getenv("META_API_TOKEN", "").strip()
 META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "").strip()
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0").strip()
@@ -203,6 +205,81 @@ def settle_transaction(user, result, amount, transaction_type, recipient, descri
     return False
 
 
+def ensure_deposit_transaction(user, reference, amount, phone, status="PENDING", meta_data=None):
+    """Create or update a payment transaction so it appears in dashboards immediately."""
+    tx = Transaction.query.filter_by(reference=reference).first()
+    if tx is None:
+        tx = Transaction(
+            user_id=user.id,
+            reference=reference,
+            amount=Decimal(str(amount or "0.00")).quantize(Decimal("0.01")),
+            type="DEPOSIT",
+            recipient=phone,
+            status=status,
+            description="Paystack wallet funding",
+            meta_data=meta_data or {},
+        )
+        db.session.add(tx)
+    else:
+        tx.user_id = user.id
+        tx.amount = Decimal(str(amount or tx.amount)).quantize(Decimal("0.01"))
+        tx.recipient = phone or tx.recipient
+        tx.status = status
+        tx.description = tx.description or "Paystack wallet funding"
+        if meta_data is not None:
+            tx.meta_data = meta_data
+    if isinstance(tx.meta_data, dict):
+        tx.meta_data.setdefault("credited", status == "SUCCESS")
+    db.session.commit()
+    return tx
+
+
+def reconcile_deposit_transaction(transaction):
+    """Credit a successful deposit exactly once and mark it as reconciled."""
+    if transaction is None or transaction.type != "DEPOSIT" or transaction.status != "SUCCESS":
+        return False
+
+    user = transaction.user
+    if user is None:
+        return False
+
+    meta = transaction.meta_data or {}
+    if meta.get("credited") is True:
+        return False
+
+    amount = Decimal(str(transaction.amount or "0.00")).quantize(Decimal("0.01"))
+    user.wallet_balance += amount
+    meta["credited"] = True
+    meta["credited_at"] = datetime.now(timezone.utc).isoformat()
+    transaction.meta_data = meta
+    db.session.commit()
+    return True
+
+
+def reconcile_successful_deposit(user, tx, net_credit, paid_gross, data):
+    """Apply the wallet credit once and mark the transaction as credited."""
+    meta = dict(tx.meta_data or {})
+    if meta.get("credited") is True:
+        return False
+
+    user.wallet_balance += Decimal(str(net_credit))
+    meta.update({
+        "gross_amount": str(paid_gross),
+        "net_amount": str(net_credit),
+        "paystack": data,
+        "credited": True,
+        "credited_at": datetime.now(timezone.utc).isoformat(),
+    })
+    tx.amount = Decimal(str(net_credit)).quantize(Decimal("0.01"))
+    tx.type = "DEPOSIT"
+    tx.recipient = user.phone
+    tx.status = "SUCCESS"
+    tx.description = f"Paystack deposit; gross paid NGN {paid_gross:,.2f}"
+    tx.meta_data = meta
+    db.session.commit()
+    return True
+
+
 def verify_paystack_signature(raw_body, signature):
     expected = hmac.new(
         PAYSTACK_SECRET_KEY.encode("utf-8"), raw_body, hashlib.sha512
@@ -283,7 +360,21 @@ def initialize_payment():
     if result.get("status") != "SUCCESS":
         return jsonify(result), 502
 
+    ensure_deposit_transaction(user, result["reference"], result.get("net_amount", amount), phone, status="PENDING")
     return jsonify(result), 200
+
+
+@app.route("/payments/paystack/callback", methods=["GET"])
+def paystack_callback():
+    reference = request.args.get("reference") or request.args.get("trxref")
+    if reference:
+        transaction = Transaction.query.filter_by(reference=reference).first()
+        if transaction:
+            reconcile_deposit_transaction(transaction)
+        if transaction and transaction.status == "SUCCESS":
+            return render_template_string("<h2>Payment successful</h2><p>Your wallet has been credited.</p><a href=\"/\">Back to wallet</a>")
+        return render_template_string("<h2>Payment is being processed</h2><p>Your transaction is still pending confirmation.</p><a href=\"/\">Refresh</a>")
+    return render_template_string("<h2>Payment status unavailable</h2><p>The Paystack callback did not include a valid reference.</p>")
 
 
 @app.route("/payments/paystack/webhook", methods=["POST"])
@@ -310,28 +401,39 @@ def paystack_webhook():
     if not reference or not phone or paid_gross <= 0 or net_credit <= 0 or net_credit > paid_gross:
         return jsonify({"status": "error", "reason": "Invalid payment payload"}), 400
 
-    if Transaction.query.filter_by(reference=reference).first():
-        return jsonify({"status": "ok", "duplicate": True}), 200
-
     user = User.query.filter_by(whatsapp_id=phone).first()
     if not user:
         user = User.query.filter_by(phone=phone).first()
     if not user:
         user = User(phone=phone, whatsapp_id=phone, wallet_balance=Decimal("0.00"))
         db.session.add(user)
+        db.session.commit()
 
-    user.wallet_balance += net_credit
-    db.session.add(Transaction(
-        user=user,
-        reference=reference,
-        amount=net_credit,
-        type="DEPOSIT",
-        recipient=phone,
-        status="SUCCESS",
-        description=f"Paystack deposit; gross paid NGN {paid_gross:,.2f}",
-        meta_data={"gross_amount": str(paid_gross), "net_amount": str(net_credit), "paystack": data},
-    ))
-    db.session.commit()
+    tx = Transaction.query.filter_by(reference=reference).first()
+    if tx is None:
+        tx = Transaction(
+            user=user,
+            reference=reference,
+            amount=net_credit,
+            type="DEPOSIT",
+            recipient=phone,
+            status="SUCCESS",
+            description=f"Paystack deposit; gross paid NGN {paid_gross:,.2f}",
+            meta_data={},
+        )
+        db.session.add(tx)
+    else:
+        if tx.status == "SUCCESS":
+            if not (tx.meta_data or {}).get("credited"):
+                reconcile_successful_deposit(user, tx, net_credit, paid_gross, data)
+            return jsonify({"status": "ok", "duplicate": True, "credited_amount": str(net_credit)}), 200
+        tx.amount = net_credit
+        tx.type = "DEPOSIT"
+        tx.recipient = phone
+        tx.status = "SUCCESS"
+        tx.description = f"Paystack deposit; gross paid NGN {paid_gross:,.2f}"
+
+    reconcile_successful_deposit(user, tx, net_credit, paid_gross, data)
     return jsonify({"status": "ok", "credited_amount": str(net_credit)}), 200
 
 

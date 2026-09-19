@@ -14,6 +14,7 @@ logger = logging.getLogger("wallet_service")
 
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "sk_test_xxx")
 PAYSTACK_INITIALIZE_URL = "https://api.paystack.co/transaction/initialize"
+PAYSTACK_CALLBACK_URL = os.getenv("PAYSTACK_CALLBACK_URL") or os.getenv("APP_BASE_URL", "http://localhost:5000").rstrip("/") + "/payments/paystack/callback"
 DEFAULT_PAYMENT_TIERS = [
     {"label": "BELOW_1000", "min_amount": Decimal("0.00"), "max_amount": Decimal("999.99"), "fee_percentage": Decimal("2.50")},
     {"label": "1000_TO_20000", "min_amount": Decimal("1000.00"), "max_amount": Decimal("19999.99"), "fee_percentage": Decimal("1.50")},
@@ -80,6 +81,7 @@ def generate_payment_link(email, amount_naira, phone, pass_fee_to_user=True):
         "email": email,
         "amount": amount_kobo,
         "reference": reference,
+        "callback_url": PAYSTACK_CALLBACK_URL,
         "metadata": {
             "phone_number": phone,
             "net_credit_amount": str(net_target),
