@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import secrets
 import requests
+from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from markupsafe import escape
@@ -1926,8 +1927,9 @@ def admin_transactions():
         """
 
     statuses = ["ALL", "SUCCESS", "PENDING", "FAILED", "REVERSED"]
+    q_param = quote(search_query)
     filter_buttons = "".join(
-        f'<a href="/admin/transactions?status={status}&q={escape(search_query, quote=True)}" style="{ "background:#2563eb; color:#fff;" if status == status_filter else "background:#e2e8f0; color:#0f172a;" } padding:6px 10px; border-radius:6px; text-decoration:none; font-size:12px; margin-right:8px;">{status}</a>'
+        f'<a href="/admin/transactions?status={status}&q={q_param}" style="{ "background:#2563eb; color:#fff;" if status == status_filter else "background:#e2e8f0; color:#0f172a;" } padding:6px 10px; border-radius:6px; text-decoration:none; font-size:12px; margin-right:8px;">{status}</a>'
         for status in statuses
     )
 
