@@ -38,7 +38,10 @@ if not secret_key:
 app.config['SECRET_KEY'] = secret_key
 
 # --- CONFIGURATION ---
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///vtu_bot.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is required")
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 BRIDGE_BASE_URL = os.getenv("BRIDGE_URL") or os.getenv(
     "NODE_BRIDGE_URL", "http://localhost:3000"
