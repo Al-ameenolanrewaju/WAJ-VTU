@@ -75,3 +75,14 @@ class ServiceMarkup(db.Model):
     service_type = db.Column(db.String(20), unique=True, nullable=False, index=True)
     markup_amount = db.Column(db.Numeric(10, 2), default=0.00, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class PaymentFeeTier(db.Model):
+    __tablename__ = 'payment_fee_tiers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    label = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    min_amount = db.Column(db.Numeric(10, 2), default=0.00, nullable=False)
+    max_amount = db.Column(db.Numeric(10, 2), nullable=True)
+    fee_percentage = db.Column(db.Numeric(5, 2), default=0.00, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)

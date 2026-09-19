@@ -135,3 +135,34 @@ def test_admin_dashboard_shows_timestamps(client):
 
     assert users_response.status_code == 200
     assert b"Joined" in users_response.data
+
+
+def test_dynamic_paystack_fee_tiers_are_admin_editable(client):
+    import app as app_module
+    from wallet_service import calculate_paystack_gross
+
+    app_module.ADMIN_USERNAME = "admin"
+    app_module.ADMIN_PASSWORD = "secret"
+
+    with app_module.app.app_context():
+        app_module.db.session.query(app_module.PaymentFeeTier).delete()
+        app_module.db.session.add_all([
+            app_module.PaymentFeeTier(label="BELOW_1000", min_amount=Decimal("0.00"), max_amount=Decimal("999.99"), fee_percentage=Decimal("2.50")),
+            app_module.PaymentFeeTier(label="1000_TO_20000", min_amount=Decimal("1000.00"), max_amount=Decimal("19999.99"), fee_percentage=Decimal("1.50")),
+            app_module.PaymentFeeTier(label="ABOVE_20000", min_amount=Decimal("20000.00"), max_amount=None, fee_percentage=Decimal("1.00")),
+        ])
+        app_module.db.session.commit()
+
+    assert calculate_paystack_gross(Decimal("500.00")) == Decimal("512.82")
+    assert calculate_paystack_gross(Decimal("5000.00")) == Decimal("5076.14")
+    assert calculate_paystack_gross(Decimal("25000.00")) == Decimal("25252.53")
+
+    response = client.get(
+        "/admin/settings",
+        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+    )
+
+    assert response.status_code == 200
+    assert b"Paystack Fee Tiers" in response.data
+    assert b"Below 1000" in response.data
+    assert b"More than 20,000" in response.data

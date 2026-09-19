@@ -12,7 +12,7 @@ from sqlalchemy import inspect, text, func, or_
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort
 
 # 1. Import db, User, and Transaction directly from models.py
-from models import db, User, Transaction, ServiceMarkup
+from models import db, User, Transaction, ServiceMarkup, PaymentFeeTier
 from wallet_service import generate_payment_link
 
 # Import provider functions from the ClubKonnect adapter.
@@ -98,10 +98,23 @@ def seed_service_markups():
     db.session.commit()
 
 
+def seed_payment_fee_tiers():
+    defaults = [
+        {"label": "BELOW_1000", "min_amount": Decimal("0.00"), "max_amount": Decimal("999.99"), "fee_percentage": Decimal("2.50")},
+        {"label": "1000_TO_20000", "min_amount": Decimal("1000.00"), "max_amount": Decimal("19999.99"), "fee_percentage": Decimal("1.50")},
+        {"label": "ABOVE_20000", "min_amount": Decimal("20000.00"), "max_amount": None, "fee_percentage": Decimal("1.00")},
+    ]
+    for tier_data in defaults:
+        if not PaymentFeeTier.query.filter_by(label=tier_data["label"]).first():
+            db.session.add(PaymentFeeTier(**tier_data))
+    db.session.commit()
+
+
 with app.app_context():
     db.create_all()
     ensure_database_schema()
     seed_service_markups()
+    seed_payment_fee_tiers()
 
 # --- STATE DEFINITIONS ---
 STATES = {
@@ -1737,10 +1750,32 @@ def admin_settings():
                 db.session.add(markup)
             markup.markup_amount = markup_amount
 
+        payment_tiers = {
+            "BELOW_1000": request.form.get("BELOW_1000", "").strip(),
+            "1000_TO_20000": request.form.get("1000_TO_20000", "").strip(),
+            "ABOVE_20000": request.form.get("ABOVE_20000", "").strip(),
+        }
+        for label, raw_value in payment_tiers.items():
+            try:
+                fee_pct = Decimal(raw_value)
+                if not fee_pct.is_finite() or fee_pct < 0:
+                    raise ValueError
+                fee_pct = fee_pct.quantize(Decimal("0.01"))
+            except (InvalidOperation, ValueError):
+                errors.append(f"{label}: enter a non-negative percentage.")
+                continue
+
+            tier = PaymentFeeTier.query.filter_by(label=label).first()
+            if tier is None:
+                tier = PaymentFeeTier(label=label)
+                db.session.add(tier)
+            tier.fee_percentage = fee_pct
+
         db.session.commit()
 
     csrf_token = get_csrf_token()
     markups = {markup.service_type: markup.markup_amount for markup in ServiceMarkup.query.all()}
+    payment_tiers = {tier.label: tier for tier in PaymentFeeTier.query.order_by(PaymentFeeTier.min_amount.asc()).all()}
     error_html = "".join(f"<p style=\"color:#dc2626; margin-bottom:8px;\">{escape(error)}</p>" for error in errors)
     rows = ""
     for service_type in SERVICE_TYPES:
@@ -1750,6 +1785,30 @@ def admin_settings():
         <tr>
             <td><b>{label}</b></td>
             <td><input type="number" min="0" step="0.01" name="{label}" value="{value}" required></td>
+        </tr>
+        """
+
+    fee_rows = ""
+    preview_rows = ""
+    fee_configs = [
+        ("BELOW_1000", "Below 1000", "2.50", Decimal("500.00")),
+        ("1000_TO_20000", "More than 1000", "1.50", Decimal("5000.00")),
+        ("ABOVE_20000", "More than 20,000", "1.00", Decimal("25000.00")),
+    ]
+    for label, display_name, default_value, sample_amount in fee_configs:
+        value = payment_tiers.get(label, PaymentFeeTier(label=label, fee_percentage=Decimal(default_value))).fee_percentage
+        gross_amount = (sample_amount / (Decimal("1.00") - (value / Decimal("100")))).quantize(Decimal("0.01"))
+        fee_rows += f"""
+        <tr>
+            <td><b>{escape(display_name)}</b></td>
+            <td><input type="number" min="0" step="0.01" name="{label}" value="{escape(str(value))}" required></td>
+        </tr>
+        """
+        preview_rows += f"""
+        <tr>
+            <td>{escape(display_name)}</td>
+            <td>₦{sample_amount:,.2f}</td>
+            <td>₦{gross_amount:,.2f}</td>
         </tr>
         """
 
@@ -1764,6 +1823,22 @@ def admin_settings():
         </table>
         <button type="submit" style="margin-top:15px;">Save Markups</button>
     </form>
+
+    <h2 style="margin:30px 0 20px;">Paystack Fee Tiers</h2>
+    <form method="POST" action="/admin/settings">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+        <table>
+            <thead><tr><th>Tier</th><th>Fee %</th></tr></thead>
+            <tbody>{fee_rows}</tbody>
+        </table>
+        <button type="submit" style="margin-top:15px;">Save Paystack Tiers</button>
+    </form>
+
+    <h3 style="margin:30px 0 12px;">Fee Preview</h3>
+    <table>
+        <thead><tr><th>Tier</th><th>Wallet Credit</th><th>Customer Pays</th></tr></thead>
+        <tbody>{preview_rows}</tbody>
+    </table>
     """
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="settings")
 

@@ -4,6 +4,9 @@ import logging
 import requests
 from decimal import Decimal, ROUND_HALF_UP
 from dotenv import load_dotenv
+from flask import has_app_context
+
+from models import PaymentFeeTier
 
 load_dotenv()
 
@@ -11,34 +14,38 @@ logger = logging.getLogger("wallet_service")
 
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "sk_test_xxx")
 PAYSTACK_INITIALIZE_URL = "https://api.paystack.co/transaction/initialize"
+DEFAULT_PAYMENT_TIERS = [
+    {"label": "BELOW_1000", "min_amount": Decimal("0.00"), "max_amount": Decimal("999.99"), "fee_percentage": Decimal("2.50")},
+    {"label": "1000_TO_20000", "min_amount": Decimal("1000.00"), "max_amount": Decimal("19999.99"), "fee_percentage": Decimal("1.50")},
+    {"label": "ABOVE_20000", "min_amount": Decimal("20000.00"), "max_amount": None, "fee_percentage": Decimal("1.00")},
+]
+
+
+def get_payment_fee_tiers():
+    if not has_app_context():
+        return [PaymentFeeTier(**tier) for tier in DEFAULT_PAYMENT_TIERS]
+
+    db_tiers = PaymentFeeTier.query.order_by(PaymentFeeTier.min_amount.asc()).all()
+    if db_tiers:
+        return db_tiers
+    return [PaymentFeeTier(**tier) for tier in DEFAULT_PAYMENT_TIERS]
+
+
+def get_payment_fee_percentage(net_amount):
+    amount = Decimal(str(net_amount))
+    for tier in get_payment_fee_tiers():
+        min_amount = Decimal(str(tier.min_amount))
+        max_amount = Decimal(str(tier.max_amount)) if tier.max_amount is not None else None
+        if amount >= min_amount and (max_amount is None or amount <= max_amount):
+            return Decimal(str(tier.fee_percentage))
+    return Decimal("1.00")
 
 
 def calculate_paystack_gross(net_amount):
-    """
-    Calculates the gross amount to charge via Paystack so that the user's wallet
-    is credited with the exact intended net_amount after Paystack fees.
-
-    Paystack Local Pricing Structure (Nigeria):
-    - 1.5% fee on amounts under ₦2,500.
-    - 1.5% + ₦100 flat fee on amounts ₦2,500 and above (capped at ₦2,000 total fee).
-    """
-    net = Decimal(str(net_amount))
-
-    # Paystack flat ₦100 fee applies when Gross >= ₦2,500.
-    # Gross without flat fee: net / 0.985. If this is < 2500, flat fee is waived.
-    gross_no_flat = net / Decimal('0.985')
-
-    if gross_no_flat < Decimal('2500.00'):
-        gross = gross_no_flat
-    else:
-        gross = (net + Decimal('100.00')) / Decimal('0.985')
-
-    # Calculate actual fee and apply the ₦2,000 cap
-    fee = gross - net
-    if fee > Decimal('2000.00'):
-        gross = net + Decimal('2000.00')
-
-    # Quantize to 2 decimal places using standard banking rounding
+    """Calculate the total amount a customer must pay so the wallet is credited with the desired net amount after the configured Paystack fee."""
+    net = Decimal(str(net_amount)).quantize(Decimal('0.01'))
+    fee_rate = get_payment_fee_percentage(net) / Decimal('100')
+    gross = net / (Decimal('1.00') - fee_rate)
     return gross.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
 
