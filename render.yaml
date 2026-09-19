@@ -1,20 +1,28 @@
 services:
   - type: web
-    name: waj-vtu-backend
+    name: waj-vtu
     env: python
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.11.8
       - key: FLASK_ENV
         value: production
+      - key: ALLOW_DB_MUTATIONS
+        value: "false"
       - key: DATABASE_URL
         sync: false # Required: set to a persistent Render Postgres or Supabase URL
       - key: SECRET_KEY
         sync: false # Required: set a persistent secret in the Render dashboard
+      - key: APP_BASE_URL
+        value: https://waj-vtu.onrender.com
+      - key: PUBLIC_BASE_URL
+        value: https://waj-vtu.onrender.com
       - key: PAYSTACK_SECRET_KEY
         sync: false
+      - key: PAYSTACK_CALLBACK_URL
+        value: https://waj-vtu.onrender.com/payments/paystack/callback
       - key: META_API_TOKEN
         sync: false # Required for official WhatsApp Cloud API sending
       - key: META_PHONE_NUMBER_ID
@@ -34,7 +42,7 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
       - key: BRIDGE_URL
-        value: https://waj-vtu-bridge.onrender.com
+        value: https://waj-vtu-1.onrender.com/api/sendText
       - key: BRIDGE_API_TOKEN
         sync: false
   - type: web
@@ -47,7 +55,7 @@ services:
       - key: NODE_VERSION
         value: 20
       - key: FLASK_WEBHOOK_URL
-        value: https://waj-vtu-backend.onrender.com/webhook
+        value: https://waj-vtu.onrender.com/webhook
       - key: BRIDGE_API_TOKEN
         sync: false
       - key: SUPABASE_URL
