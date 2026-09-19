@@ -43,6 +43,7 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is required")
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+ALLOW_DB_MUTATIONS = os.getenv("ALLOW_DB_MUTATIONS", "false").strip().lower() in {"1", "true", "yes", "on"}
 BRIDGE_BASE_URL = os.getenv("BRIDGE_URL") or os.getenv(
     "NODE_BRIDGE_URL", "http://localhost:3000"
 )
@@ -116,11 +117,12 @@ def seed_payment_fee_tiers():
     db.session.commit()
 
 
-with app.app_context():
-    db.create_all()
-    ensure_database_schema()
-    seed_service_markups()
-    seed_payment_fee_tiers()
+if ALLOW_DB_MUTATIONS:
+    with app.app_context():
+        db.create_all()
+        ensure_database_schema()
+        seed_service_markups()
+        seed_payment_fee_tiers()
 
 # --- STATE DEFINITIONS ---
 STATES = {
@@ -172,6 +174,8 @@ def get_or_create_user(phone_number):
     normalized_phone = normalize_phone_number(phone_number)
     user = User.query.filter_by(whatsapp_id=normalized_phone).first() or User.query.filter_by(phone=normalized_phone).first()
     if not user:
+        if not ALLOW_DB_MUTATIONS:
+            return None
         user = User(phone=normalized_phone, whatsapp_id=normalized_phone, wallet_balance=Decimal("0.00"))
         db.session.add(user)
         db.session.commit()
@@ -429,6 +433,8 @@ def paystack_webhook():
     if not user:
         user = User.query.filter_by(whatsapp_id=phone).first() or User.query.filter_by(phone=phone).first()
     if not user:
+        if not ALLOW_DB_MUTATIONS:
+            return jsonify({"status": "error", "reason": "User creation disabled"}), 400
         user = User(phone=normalized_phone, whatsapp_id=normalized_phone, wallet_balance=Decimal("0.00"))
         db.session.add(user)
         db.session.commit()

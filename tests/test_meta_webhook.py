@@ -6,6 +6,7 @@ import pytest
 
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("META_VERIFY_TOKEN", "meta-token")
+os.environ.setdefault("ALLOW_DB_MUTATIONS", "true")
 
 from app import app
 
