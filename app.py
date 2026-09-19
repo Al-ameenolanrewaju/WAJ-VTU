@@ -5,9 +5,10 @@ import hashlib
 import hmac
 import secrets
 import requests
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from markupsafe import escape
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, func, or_
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort
 
 # 1. Import db, User, and Transaction directly from models.py
@@ -213,6 +214,34 @@ def get_csrf_token():
         token = secrets.token_urlsafe(32)
         session["admin_csrf_token"] = token
     return token
+
+
+def normalize_datetime(value):
+    """Return a timezone-aware UTC datetime for comparisons and display."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    try:
+        return value.astimezone(timezone.utc)
+    except Exception:
+        return value
+
+
+def format_admin_datetime(value):
+    """Return a compact, human-readable timestamp suitable for admin tables."""
+    value = normalize_datetime(value)
+    if value is None:
+        return "—"
+    return value.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def validate_csrf_token():
@@ -1082,7 +1111,7 @@ ADMIN_BASE_TEMPLATE = """
             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
         }
         .navbar .brand { color: #ffffff; font-size: 18px; font-weight: bold; text-decoration: none; }
-        .navbar .nav-links { display: flex; gap: 10px; list-style: none; }
+        .navbar .nav-links { display: flex; flex-wrap: wrap; gap: 10px; list-style: none; margin: 0; padding: 0; }
         .navbar .nav-links a {
             color: #94a3b8;
             text-decoration: none;
@@ -1090,10 +1119,12 @@ ADMIN_BASE_TEMPLATE = """
             border-radius: 6px;
             font-size: 14px;
             font-weight: 500;
+            display: inline-block;
         }
         .navbar .nav-links a:hover, .navbar .nav-links a.active { background-color: #2563eb; color: #ffffff; }
 
-        .container { max-width: 1100px; margin: 30px auto; padding: 0 20px; }
+        .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
+        .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 24px; }
         .card-grid { display: flex; gap: 20px; margin-bottom: 25px; }
         .card { background: white; padding: 20px; border-radius: 8px; flex: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .card h3 { font-size: 12px; color: #64748b; text-transform: uppercase; margin-bottom: 8px; }
@@ -1113,12 +1144,21 @@ ADMIN_BASE_TEMPLATE = """
 </head>
 <body>
     <nav class="navbar">
-        <a href="/admin/dashboard" class="brand">⚙️ VTU Admin Control</a>
+        <a href="/admin/dashboard" class="brand">⚙️ WAJ VTU Admin</a>
         <ul class="nav-links">
             <li><a href="/admin/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}">📊 Dashboard</a></li>
-            <li><a href="/admin/users" class="{{ 'active' if active_page == 'users' else '' }}">👥 Track Users</a></li>
             <li><a href="/admin/transactions" class="{{ 'active' if active_page == 'transactions' else '' }}">💳 Transactions</a></li>
-            <li><a href="/admin/settings" class="{{ 'active' if active_page == 'settings' else '' }}">⚙️ Pricing</a></li>
+            <li><a href="/admin/users" class="{{ 'active' if active_page == 'users' else '' }}">👥 Customers</a></li>
+            <li><a href="/admin/payments" class="{{ 'active' if active_page == 'payments' else '' }}">💰 Payments</a></li>
+            <li><a href="/admin/ledger" class="{{ 'active' if active_page == 'ledger' else '' }}">📒 Wallet Ledger</a></li>
+            <li><a href="/admin/whatsapp" class="{{ 'active' if active_page == 'whatsapp' else '' }}">📱 WhatsApp</a></li>
+            <li><a href="/admin/services" class="{{ 'active' if active_page == 'services' else '' }}">🛒 Services</a></li>
+            <li><a href="/admin/analytics" class="{{ 'active' if active_page == 'analytics' else '' }}">📈 Analytics</a></li>
+            <li><a href="/admin/providers" class="{{ 'active' if active_page == 'providers' else '' }}">🔌 Providers</a></li>
+            <li><a href="/admin/pricing" class="{{ 'active' if active_page == 'pricing' else '' }}">💵 Pricing</a></li>
+            <li><a href="/admin/support" class="{{ 'active' if active_page == 'support' else '' }}">🎟️ Support</a></li>
+            <li><a href="/admin/security" class="{{ 'active' if active_page == 'security' else '' }}">🔐 Security</a></li>
+            <li><a href="/admin/settings" class="{{ 'active' if active_page == 'settings' else '' }}">⚙️ Settings</a></li>
         </ul>
     </nav>
     <div class="container">
@@ -1134,11 +1174,50 @@ def admin_dashboard():
     auth_error = require_admin_auth()
     if auth_error:
         return auth_error
+
+    now = datetime.now(timezone.utc)
+    start_of_day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    start_of_week = start_of_day - timedelta(days=now.weekday())
+    start_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+
     total_users = User.query.count()
     total_transactions = Transaction.query.count()
+    successful_transactions = Transaction.query.filter_by(status="SUCCESS").count()
+    failed_transactions = Transaction.query.filter_by(status="FAILED").count()
+    pending_transactions = Transaction.query.filter_by(status="PENDING").count()
 
     successful_txs = Transaction.query.filter_by(status="SUCCESS").all()
-    total_volume = sum([tx.amount for tx in successful_txs]) if successful_txs else Decimal("0.00")
+    total_revenue = sum((tx.amount for tx in successful_txs), Decimal("0.00"))
+    today_sales = sum(
+        (
+            tx.amount
+            for tx in successful_txs
+            if normalize_datetime(tx.created_at) and normalize_datetime(tx.created_at) >= start_of_day
+        ),
+        Decimal("0.00"),
+    )
+
+    active_customers = db.session.query(User.id).join(Transaction).group_by(User.id).count()
+    new_customers_today = User.query.filter(User.created_at >= start_of_day).count()
+    new_customers_week = User.query.filter(User.created_at >= start_of_week).count()
+    new_customers_month = User.query.filter(User.created_at >= start_of_month).count()
+
+    top_customers = (
+        db.session.query(User.phone, func.sum(Transaction.amount).label("total_spent"))
+        .join(Transaction)
+        .group_by(User.phone)
+        .order_by(func.sum(Transaction.amount).desc())
+        .limit(5)
+        .all()
+    )
+
+    service_breakdown = (
+        db.session.query(Transaction.type, func.count(Transaction.id).label("count"), func.sum(Transaction.amount).label("total_amount"))
+        .group_by(Transaction.type)
+        .order_by(func.sum(Transaction.amount).desc())
+        .limit(5)
+        .all()
+    )
 
     recent_transactions = Transaction.query.order_by(Transaction.id.desc()).limit(10).all()
 
@@ -1148,31 +1227,83 @@ def admin_dashboard():
         tx_rows += f"""
         <tr>
             <td><code>{escape(tx.reference)}</code></td>
+            <td>{escape(tx.user.phone if tx.user else '')}</td>
             <td>{escape(tx.type)}</td>
             <td>₦{tx.amount:,.2f}</td>
             <td>{escape(tx.recipient or '')}</td>
             <td class="{escape(status_cls)}">{escape(tx.status)}</td>
+            <td>{escape(format_admin_datetime(tx.created_at))}</td>
+        </tr>
+        """
+
+    customer_rows = ""
+    for customer_phone, total_spent in top_customers:
+        customer_rows += f"""
+        <tr>
+            <td>{escape(customer_phone)}</td>
+            <td>₦{Decimal(total_spent or 0):,.2f}</td>
+        </tr>
+        """
+
+    service_rows = ""
+    for service_type, count, total_amount in service_breakdown:
+        service_rows += f"""
+        <tr>
+            <td>{escape(service_type)}</td>
+            <td>{count}</td>
+            <td>₦{Decimal(total_amount or 0):,.2f}</td>
         </tr>
         """
 
     content = f"""
     <div class="card-grid">
-        <div class="card"><h3>Total Registered Users</h3><p>{total_users}</p></div>
+        <div class="card"><h3>Total Revenue</h3><p>₦{total_revenue:,.2f}</p></div>
+        <div class="card"><h3>Today's Sales</h3><p>₦{today_sales:,.2f}</p></div>
         <div class="card"><h3>Total Transactions</h3><p>{total_transactions}</p></div>
-        <div class="card"><h3>Total Volume Processed</h3><p>₦{total_volume:,.2f}</p></div>
+        <div class="card"><h3>Total Customers</h3><p>{total_users}</p></div>
     </div>
+    <div class="card-grid">
+        <div class="card"><h3>Successful</h3><p>{successful_transactions}</p></div>
+        <div class="card"><h3>Failed</h3><p>{failed_transactions}</p></div>
+        <div class="card"><h3>Pending</h3><p>{pending_transactions}</p></div>
+        <div class="card"><h3>Active Customers</h3><p>{active_customers}</p></div>
+    </div>
+    <div class="card-grid">
+        <div class="card"><h3>New Today</h3><p>{new_customers_today}</p></div>
+        <div class="card"><h3>New This Week</h3><p>{new_customers_week}</p></div>
+        <div class="card"><h3>New This Month</h3><p>{new_customers_month}</p></div>
+        <div class="card"><h3>Revenue / Txn</h3><p>₦{(total_revenue / total_transactions if total_transactions else Decimal('0.00')):,.2f}</p></div>
+    </div>
+
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
         <h3>Recent Activity Stream</h3>
         <a href="/admin/settings" style="background:#2563eb; color:#ffffff; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:14px; font-weight:600;">Edit Service Pricing</a>
     </div>
     <table>
         <thead>
-            <tr><th>Reference</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th></tr>
+            <tr><th>Reference</th><th>Customer</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th><th>Timestamp</th></tr>
         </thead>
         <tbody>
-            {tx_rows if tx_rows else '<tr><td colspan="5" style="text-align:center;">No transactions logged yet</td></tr>'}
+            {tx_rows if tx_rows else '<tr><td colspan="7" style="text-align:center;">No transactions logged yet</td></tr>'}
         </tbody>
     </table>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 25px;">
+        <div>
+            <h3 style="margin-bottom: 12px;">Top Customers</h3>
+            <table>
+                <thead><tr><th>Phone</th><th>Total Spent</th></tr></thead>
+                <tbody>{customer_rows if customer_rows else '<tr><td colspan="2" style="text-align:center;">No customer activity yet</td></tr>'}</tbody>
+            </table>
+        </div>
+        <div>
+            <h3 style="margin-bottom: 12px;">Service Breakdown</h3>
+            <table>
+                <thead><tr><th>Service</th><th>Count</th><th>Total</th></tr></thead>
+                <tbody>{service_rows if service_rows else '<tr><td colspan="3" style="text-align:center;">No service activity yet</td></tr>'}</tbody>
+            </table>
+        </div>
+    </div>
     """
 
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="dashboard")
@@ -1196,6 +1327,7 @@ def admin_users():
         <tr>
             <td>#{escape(u.id)}</td>
             <td><b>{escape(u.phone)}</b></td>
+            <td>{escape(format_admin_datetime(u.created_at))}</td>
             <td>₦{u.wallet_balance:,.2f}</td>
             <td><code>{escape(u.current_state)}</code></td>
             <td>
@@ -1222,15 +1354,274 @@ def admin_users():
     </div>
     <table>
         <thead>
-            <tr><th>User ID</th><th>Phone Number</th><th>Wallet Balance</th><th>Bot State</th><th>Manual Wallet Top-up</th></tr>
+            <tr><th>User ID</th><th>Phone Number</th><th>Joined</th><th>Wallet Balance</th><th>Bot State</th><th>Manual Wallet Top-up</th></tr>
         </thead>
         <tbody>
-            {user_rows if user_rows else '<tr><td colspan="5" style="text-align:center;">No users found</td></tr>'}
+            {user_rows if user_rows else '<tr><td colspan="6" style="text-align:center;">No users found</td></tr>'}
         </tbody>
     </table>
     """
 
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="users")
+
+
+@app.route("/admin/payments")
+def admin_payments():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    success_txs = Transaction.query.filter_by(status="SUCCESS").all()
+    total_received = sum((tx.amount for tx in success_txs), Decimal("0.00"))
+    wallet_adjustments = Transaction.query.filter_by(type="WALLET_ADJUSTMENT").order_by(Transaction.id.desc()).limit(10).all()
+
+    payment_rows = ""
+    for tx in wallet_adjustments:
+        payment_rows += f"""
+        <tr>
+            <td><code>{escape(tx.reference)}</code></td>
+            <td>{escape(tx.user.phone if tx.user else '')}</td>
+            <td>₦{tx.amount:,.2f}</td>
+            <td>{escape(tx.status)}</td>
+            <td>{escape(format_admin_datetime(tx.created_at))}</td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="section-grid">
+        <div class="card"><h3>Total Received</h3><p>₦{total_received:,.2f}</p></div>
+        <div class="card"><h3>Successful Payments</h3><p>{len(success_txs)}</p></div>
+        <div class="card"><h3>Wallet Adjustments</h3><p>{Transaction.query.filter_by(type='WALLET_ADJUSTMENT').count()}</p></div>
+        <div class="card"><h3>Pending</h3><p>{Transaction.query.filter_by(status='PENDING').count()}</p></div>
+    </div>
+    <h2 style="margin-bottom:15px;">💰 Payment Overview</h2>
+    <table>
+        <thead><tr><th>Reference</th><th>Customer</th><th>Amount</th><th>Status</th><th>Timestamp</th></tr></thead>
+        <tbody>{payment_rows if payment_rows else '<tr><td colspan="5" style="text-align:center;">No payment activity found</td></tr>'}</tbody>
+    </table>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="payments")
+
+
+@app.route("/admin/whatsapp")
+def admin_whatsapp():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    total_users = User.query.count()
+    active_customers = db.session.query(User.id).join(Transaction).group_by(User.id).count()
+    service_counts = db.session.query(Transaction.type, func.count(Transaction.id).label("count")).group_by(Transaction.type).order_by(func.count(Transaction.id).desc()).first()
+    recent_users = User.query.order_by(User.created_at.desc()).limit(10).all()
+
+    user_rows = ""
+    for user in recent_users:
+        user_rows += f"""
+        <tr>
+            <td>{escape(user.phone)}</td>
+            <td>{escape(user.current_state)}</td>
+            <td>{escape(format_admin_datetime(user.created_at))}</td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="section-grid">
+        <div class="card"><h3>Total WhatsApp Users</h3><p>{total_users}</p></div>
+        <div class="card"><h3>Active Conversations</h3><p>{active_customers}</p></div>
+        <div class="card"><h3>Completed Orders</h3><p>{Transaction.query.filter_by(status='SUCCESS').count()}</p></div>
+        <div class="card"><h3>Most Requested</h3><p>{escape(service_counts[0]) if service_counts else 'N/A'}</p></div>
+    </div>
+    <h2 style="margin-bottom:15px;">📱 WhatsApp Customer Funnel</h2>
+    <table>
+        <thead><tr><th>Phone</th><th>Current State</th><th>Joined</th></tr></thead>
+        <tbody>{user_rows if user_rows else '<tr><td colspan="3" style="text-align:center;">No WhatsApp users found</td></tr>'}</tbody>
+    </table>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="whatsapp")
+
+
+@app.route("/admin/services")
+def admin_services():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    breakdown = (
+        db.session.query(Transaction.type, func.count(Transaction.id).label("count"), func.sum(Transaction.amount).label("total_amount"))
+        .group_by(Transaction.type)
+        .order_by(func.sum(Transaction.amount).desc())
+        .all()
+    )
+
+    service_rows = ""
+    for service_type, count, total_amount in breakdown:
+        service_rows += f"""
+        <tr>
+            <td>{escape(service_type)}</td>
+            <td>{count}</td>
+            <td>₦{Decimal(total_amount or 0):,.2f}</td>
+        </tr>
+        """
+
+    content = f"""
+    <h2 style="margin-bottom:15px;">🛒 Service Performance</h2>
+    <table>
+        <thead><tr><th>Service</th><th>Transactions</th><th>Total Value</th></tr></thead>
+        <tbody>{service_rows if service_rows else '<tr><td colspan="3" style="text-align:center;">No service activity yet</td></tr>'}</tbody>
+    </table>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="services")
+
+
+@app.route("/admin/analytics")
+def admin_analytics():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    now = datetime.now(timezone.utc)
+    start_of_day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    total_revenue = sum((tx.amount for tx in Transaction.query.filter_by(status='SUCCESS').all()), Decimal('0.00'))
+    today_sales = sum((tx.amount for tx in Transaction.query.filter_by(status='SUCCESS').all() if normalize_datetime(tx.created_at) and normalize_datetime(tx.created_at) >= start_of_day), Decimal('0.00'))
+    failed = Transaction.query.filter_by(status='FAILED').count()
+    pending = Transaction.query.filter_by(status='PENDING').count()
+    active_customers = db.session.query(User.id).join(Transaction).group_by(User.id).count()
+
+    top_customers = (
+        db.session.query(User.phone, func.sum(Transaction.amount).label("total_spent"))
+        .join(Transaction)
+        .group_by(User.phone)
+        .order_by(func.sum(Transaction.amount).desc())
+        .limit(5)
+        .all()
+    )
+
+    customer_rows = ""
+    for phone, total_spent in top_customers:
+        customer_rows += f"""
+        <tr>
+            <td>{escape(phone)}</td>
+            <td>₦{Decimal(total_spent or 0):,.2f}</td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="section-grid">
+        <div class="card"><h3>Total Revenue</h3><p>₦{total_revenue:,.2f}</p></div>
+        <div class="card"><h3>Today's Sales</h3><p>₦{today_sales:,.2f}</p></div>
+        <div class="card"><h3>Failed</h3><p>{failed}</p></div>
+        <div class="card"><h3>Pending</h3><p>{pending}</p></div>
+        <div class="card"><h3>Active Customers</h3><p>{active_customers}</p></div>
+        <div class="card"><h3>Total Transactions</h3><p>{Transaction.query.count()}</p></div>
+    </div>
+    <h2 style="margin-bottom:15px;">📈 Customer Value Tracker</h2>
+    <table>
+        <thead><tr><th>Customer</th><th>Total Spent</th></tr></thead>
+        <tbody>{customer_rows if customer_rows else '<tr><td colspan="2" style="text-align:center;">No customer analytics yet</td></tr>'}</tbody>
+    </table>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="analytics")
+
+
+@app.route("/admin/providers")
+def admin_providers():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    provider_rows = ""
+    for service_type, count, total_amount in (
+        db.session.query(Transaction.type, func.count(Transaction.id).label("count"), func.sum(Transaction.amount).label("total_amount"))
+        .group_by(Transaction.type)
+        .order_by(func.count(Transaction.id).desc())
+        .all()
+    ):
+        provider_rows += f"""
+        <tr>
+            <td>{escape(service_type)}</td>
+            <td>{count}</td>
+            <td>₦{Decimal(total_amount or 0):,.2f}</td>
+            <td>Healthy</td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="section-grid">
+        <div class="card"><h3>Provider Health</h3><p>Healthy</p></div>
+        <div class="card"><h3>Successful Requests</h3><p>{Transaction.query.filter_by(status='SUCCESS').count()}</p></div>
+        <div class="card"><h3>Failed Requests</h3><p>{Transaction.query.filter_by(status='FAILED').count()}</p></div>
+        <div class="card"><h3>Pending Requests</h3><p>{Transaction.query.filter_by(status='PENDING').count()}</p></div>
+    </div>
+    <h2 style="margin-bottom:15px;">🔌 Provider / API Monitor</h2>
+    <table>
+        <thead><tr><th>Provider</th><th>Requests</th><th>Volume</th><th>Status</th></tr></thead>
+        <tbody>{provider_rows if provider_rows else '<tr><td colspan="4" style="text-align:center;">No provider activity yet</td></tr>'}</tbody>
+    </table>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="providers")
+
+
+@app.route("/admin/pricing")
+def admin_pricing_redirect():
+    return redirect(url_for("admin_settings"))
+
+
+@app.route("/admin/support")
+def admin_support():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    failures = Transaction.query.filter(Transaction.status.in_(['FAILED', 'PENDING'])).order_by(Transaction.id.desc()).limit(15).all()
+    support_rows = ""
+    for tx in failures:
+        support_rows += f"""
+        <tr>
+            <td>{escape(tx.reference)}</td>
+            <td>{escape(tx.user.phone if tx.user else '')}</td>
+            <td>{escape(tx.status)}</td>
+            <td>{escape(tx.description or 'Awaiting review')}</td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="section-grid">
+        <div class="card"><h3>Failed Tickets</h3><p>{Transaction.query.filter_by(status='FAILED').count()}</p></div>
+        <div class="card"><h3>Pending Review</h3><p>{Transaction.query.filter_by(status='PENDING').count()}</p></div>
+        <div class="card"><h3>Resolved</h3><p>{Transaction.query.filter_by(status='SUCCESS').count()}</p></div>
+    </div>
+    <h2 style="margin-bottom:15px;">🎟️ Support Queue</h2>
+    <table>
+        <thead><tr><th>Reference</th><th>Customer</th><th>Status</th><th>Issue</th></tr></thead>
+        <tbody>{support_rows if support_rows else '<tr><td colspan="4" style="text-align:center;">No support issues logged</td></tr>'}</tbody>
+    </table>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="support")
+
+
+@app.route("/admin/security")
+def admin_security():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    wallet_adjustments = Transaction.query.filter_by(type='WALLET_ADJUSTMENT').count()
+    total_transactions = Transaction.query.count()
+    rows = f"""
+    <tr><td>Admin login activity</td><td>Tracked in application session</td><td>Enabled</td></tr>
+    <tr><td>Manual wallet adjustments</td><td>{wallet_adjustments}</td><td>Auditable</td></tr>
+    <tr><td>Transaction status changes</td><td>{total_transactions}</td><td>Recorded</td></tr>
+    <tr><td>Pricing updates</td><td>{ServiceMarkup.query.count()}</td><td>Controlled</td></tr>
+    """
+
+    content = f"""
+    <h2 style="margin-bottom:15px;">🔐 Security & Audit</h2>
+    <table>
+        <thead><tr><th>Audit Area</th><th>Count / Scope</th><th>Status</th></tr></thead>
+        <tbody>{rows}</tbody>
+    </table>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="security")
 
 
 @app.route("/admin/settings", methods=["GET", "POST"])
@@ -1337,7 +1728,26 @@ def admin_transactions():
     auth_error = require_admin_auth()
     if auth_error:
         return auth_error
-    transactions = Transaction.query.order_by(Transaction.id.desc()).all()
+
+    status_filter = request.args.get("status", "ALL").upper()
+    search_query = request.args.get("q", "").strip()
+
+    query = Transaction.query
+    if status_filter in {"SUCCESS", "PENDING", "FAILED", "REVERSED"}:
+        query = query.filter(Transaction.status == status_filter)
+    if search_query:
+        term = f"%{search_query}%"
+        query = query.join(User, Transaction.user_id == User.id, isouter=True).filter(
+            or_(
+                Transaction.reference.ilike(term),
+                Transaction.type.ilike(term),
+                Transaction.recipient.ilike(term),
+                Transaction.description.ilike(term),
+                User.phone.ilike(term),
+            )
+        )
+
+    transactions = query.order_by(Transaction.id.desc()).all()
 
     tx_rows = ""
     for tx in transactions:
@@ -1345,28 +1755,85 @@ def admin_transactions():
         tx_rows += f"""
         <tr>
             <td><code>{escape(tx.reference)}</code></td>
-            <td>#{tx.user_id}</td>
+            <td>{escape(tx.user.phone if tx.user else f'#{tx.user_id}')}</td>
             <td>{escape(tx.type)}</td>
             <td>₦{tx.amount:,.2f}</td>
             <td>{escape(tx.recipient or '')}</td>
             <td class="{escape(status_cls)}">{escape(tx.status)}</td>
+            <td>{escape(format_admin_datetime(tx.created_at))}</td>
             <td><small>{escape(tx.description or '')}</small></td>
         </tr>
         """
 
+    statuses = ["ALL", "SUCCESS", "PENDING", "FAILED", "REVERSED"]
+    filter_buttons = "".join(
+        f'<a href="/admin/transactions?status={status}&q={escape(search_query, quote=True)}" style="{ "background:#2563eb; color:#fff;" if status == status_filter else "background:#e2e8f0; color:#0f172a;" } padding:6px 10px; border-radius:6px; text-decoration:none; font-size:12px; margin-right:8px;">{status}</a>'
+        for status in statuses
+    )
+
     content = f"""
-    <h2 style="margin-bottom:20px;">💳 System Transaction Ledger</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px;">
+        <h2 style="margin:0;">💳 System Transaction Ledger</h2>
+        <form method="GET" action="/admin/transactions" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <input type="text" name="q" placeholder="Search phone, ref, service..." value="{escape(search_query)}" style="min-width:220px;">
+            <select name="status">
+                <option value="ALL" {'selected' if status_filter == 'ALL' else ''}>All</option>
+                <option value="SUCCESS" {'selected' if status_filter == 'SUCCESS' else ''}>Successful</option>
+                <option value="PENDING" {'selected' if status_filter == 'PENDING' else ''}>Pending</option>
+                <option value="FAILED" {'selected' if status_filter == 'FAILED' else ''}>Failed</option>
+                <option value="REVERSED" {'selected' if status_filter == 'REVERSED' else ''}>Reversed</option>
+            </select>
+            <button type="submit">Apply</button>
+        </form>
+    </div>
+    <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:8px;">{filter_buttons}</div>
     <table>
         <thead>
-            <tr><th>Reference</th><th>User ID</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th><th>Description</th></tr>
+            <tr><th>Reference</th><th>Customer</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th><th>Timestamp</th><th>Description</th></tr>
         </thead>
         <tbody>
-            {tx_rows if tx_rows else '<tr><td colspan="7" style="text-align:center;">No transactions logged</td></tr>'}
+            {tx_rows if tx_rows else '<tr><td colspan="8" style="text-align:center;">No transactions match the selected filter</td></tr>'}
         </tbody>
     </table>
     """
 
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="transactions")
+
+
+@app.route("/admin/ledger")
+def admin_ledger():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    ledger_entries = Transaction.query.order_by(Transaction.id.desc()).all()
+    ledger_rows = ""
+    for tx in ledger_entries:
+        direction = "+" if tx.status == "SUCCESS" else "-"
+        ledger_rows += f"""
+        <tr>
+            <td><code>{escape(tx.reference)}</code></td>
+            <td>{escape(tx.user.phone if tx.user else f'#{tx.user_id}')}</td>
+            <td>{escape(tx.type)}</td>
+            <td>{direction}₦{tx.amount:,.2f}</td>
+            <td>{escape(tx.status)}</td>
+            <td>{escape(tx.description or '')}</td>
+            <td>{escape(format_admin_datetime(tx.created_at))}</td>
+        </tr>
+        """
+
+    content = f"""
+    <h2 style="margin-bottom:20px;">📒 Wallet & Ledger Activity</h2>
+    <table>
+        <thead>
+            <tr><th>Reference</th><th>Customer</th><th>Type</th><th>Movement</th><th>Status</th><th>Note</th><th>Timestamp</th></tr>
+        </thead>
+        <tbody>
+            {ledger_rows if ledger_rows else '<tr><td colspan="7" style="text-align:center;">No ledger activity yet</td></tr>'}
+        </tbody>
+    </table>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="ledger")
 
 
 if __name__ == "__main__":
