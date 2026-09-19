@@ -1104,7 +1104,7 @@ ADMIN_BASE_TEMPLATE = """
         .navbar {
             background-color: #0f172a;
             padding: 0 30px;
-            height: 60px;
+            min-height: 60px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -1122,6 +1122,16 @@ ADMIN_BASE_TEMPLATE = """
             display: inline-block;
         }
         .navbar .nav-links a:hover, .navbar .nav-links a.active { background-color: #2563eb; color: #ffffff; }
+        .nav-toggle {
+            display: none;
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.25);
+            color: white;
+            font-size: 18px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
 
         .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
         .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 24px; }
@@ -1140,12 +1150,78 @@ ADMIN_BASE_TEMPLATE = """
 
         .badge-success { color: #16a34a; font-weight: bold; }
         .badge-failed { color: #dc2626; font-weight: bold; }
+
+        @media (max-width: 768px) {
+            .navbar {
+                padding: 12px 16px;
+                flex-wrap: wrap;
+                gap: 12px;
+            }
+            .navbar .brand {
+                font-size: 16px;
+            }
+            .nav-toggle {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .navbar .nav-links {
+                display: none;
+                flex-direction: column;
+                width: 100%;
+                gap: 8px;
+            }
+            .navbar .nav-links.open {
+                display: flex;
+            }
+            .navbar .nav-links a {
+                width: 100%;
+                text-align: left;
+                padding: 8px 10px;
+                font-size: 12px;
+            }
+            .container {
+                margin: 20px auto;
+                padding: 0 12px;
+            }
+            .card-grid,
+            .section-grid {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+            .card {
+                padding: 16px;
+            }
+            .card p {
+                font-size: 20px;
+            }
+            th, td {
+                padding: 10px 8px;
+                font-size: 12px;
+                white-space: nowrap;
+            }
+            table {
+                display: block;
+                width: 100%;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            input, select {
+                width: 100%;
+                min-width: 0;
+            }
+            form {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
     <nav class="navbar">
         <a href="/admin/dashboard" class="brand">⚙️ WAJ VTU Admin</a>
-        <ul class="nav-links">
+        <button class="nav-toggle" type="button" aria-label="Toggle navigation">☰</button>
+        <ul class="nav-links" id="admin-nav-links">
             <li><a href="/admin/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}">📊 Dashboard</a></li>
             <li><a href="/admin/transactions" class="{{ 'active' if active_page == 'transactions' else '' }}">💳 Transactions</a></li>
             <li><a href="/admin/users" class="{{ 'active' if active_page == 'users' else '' }}">👥 Customers</a></li>
@@ -1164,6 +1240,15 @@ ADMIN_BASE_TEMPLATE = """
     <div class="container">
         {{ body_content | safe }}
     </div>
+    <script>
+        const navToggle = document.querySelector('.nav-toggle');
+        const navLinks = document.getElementById('admin-nav-links');
+        if (navToggle && navLinks) {
+            navToggle.addEventListener('click', () => {
+                navLinks.classList.toggle('open');
+            });
+        }
+    </script>
 </body>
 </html>
 """
