@@ -47,6 +47,8 @@ app.config['PREFERRED_URL_SCHEME'] = 'https'
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is required")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 ALLOW_DB_MUTATIONS = os.getenv("ALLOW_DB_MUTATIONS", "false").strip().lower() in {"1", "true", "yes", "on"}
@@ -1600,15 +1602,25 @@ def admin_dashboard():
     pending_transactions = Transaction.query.filter_by(status="PENDING").count()
 
     successful_txs = Transaction.query.filter_by(status="SUCCESS").all()
-    total_revenue = sum((tx.amount for tx in successful_txs), Decimal("0.00"))
-    today_sales = sum(
+    total_inflow = sum((tx.amount for tx in successful_txs if tx.type == "DEPOSIT"), Decimal("0.00"))
+    total_outflow = sum((tx.amount for tx in successful_txs if tx.type != "DEPOSIT"), Decimal("0.00"))
+    today_inflow = sum(
         (
             tx.amount
             for tx in successful_txs
-            if normalize_datetime(tx.created_at) and normalize_datetime(tx.created_at) >= start_of_day
+            if tx.type == "DEPOSIT" and normalize_datetime(tx.created_at) and normalize_datetime(tx.created_at) >= start_of_day
         ),
         Decimal("0.00"),
     )
+    today_outflow = sum(
+        (
+            tx.amount
+            for tx in successful_txs
+            if tx.type != "DEPOSIT" and normalize_datetime(tx.created_at) and normalize_datetime(tx.created_at) >= start_of_day
+        ),
+        Decimal("0.00"),
+    )
+    total_user_balances = db.session.query(func.sum(User.wallet_balance)).scalar() or Decimal("0.00")
 
     active_customers = db.session.query(User.id).join(Transaction).group_by(User.id).count()
     new_customers_today = User.query.filter(User.created_at >= start_of_day).count()
@@ -1618,6 +1630,7 @@ def admin_dashboard():
     top_customers = (
         db.session.query(User.phone, func.sum(Transaction.amount).label("total_spent"))
         .join(Transaction)
+        .filter(Transaction.type != "DEPOSIT", Transaction.status == "SUCCESS")
         .group_by(User.phone)
         .order_by(func.sum(Transaction.amount).desc())
         .limit(5)
@@ -1626,6 +1639,7 @@ def admin_dashboard():
 
     service_breakdown = (
         db.session.query(Transaction.type, func.count(Transaction.id).label("count"), func.sum(Transaction.amount).label("total_amount"))
+        .filter(Transaction.type != "DEPOSIT", Transaction.status == "SUCCESS")
         .group_by(Transaction.type)
         .order_by(func.sum(Transaction.amount).desc())
         .limit(5)
@@ -1670,22 +1684,22 @@ def admin_dashboard():
 
     content = f"""
     <div class="card-grid">
-        <div class="card"><h3>Total Revenue</h3><p>₦{total_revenue:,.2f}</p></div>
-        <div class="card"><h3>Today's Sales</h3><p>₦{today_sales:,.2f}</p></div>
+        <div class="card"><h3>Total Inflow</h3><p>₦{total_inflow:,.2f}</p></div>
+        <div class="card"><h3>Total Outflow</h3><p>₦{total_outflow:,.2f}</p></div>
+        <div class="card"><h3>Today's Inflow</h3><p>₦{today_inflow:,.2f}</p></div>
+        <div class="card"><h3>Today's Outflow</h3><p>₦{today_outflow:,.2f}</p></div>
+    </div>
+    <div class="card-grid">
+        <div class="card"><h3>Total User Balances</h3><p>₦{total_user_balances:,.2f}</p></div>
         <div class="card"><h3>Total Transactions</h3><p>{total_transactions}</p></div>
         <div class="card"><h3>Total Customers</h3><p>{total_users}</p></div>
+        <div class="card"><h3>Active Customers</h3><p>{active_customers}</p></div>
     </div>
     <div class="card-grid">
         <div class="card"><h3>Successful</h3><p>{successful_transactions}</p></div>
         <div class="card"><h3>Failed</h3><p>{failed_transactions}</p></div>
         <div class="card"><h3>Pending</h3><p>{pending_transactions}</p></div>
-        <div class="card"><h3>Active Customers</h3><p>{active_customers}</p></div>
-    </div>
-    <div class="card-grid">
-        <div class="card"><h3>New Today</h3><p>{new_customers_today}</p></div>
-        <div class="card"><h3>New This Week</h3><p>{new_customers_week}</p></div>
         <div class="card"><h3>New This Month</h3><p>{new_customers_month}</p></div>
-        <div class="card"><h3>Revenue / Txn</h3><p>₦{(total_revenue / total_transactions if total_transactions else Decimal('0.00')):,.2f}</p></div>
     </div>
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
