@@ -11,9 +11,10 @@ from decimal import Decimal, InvalidOperation
 from markupsafe import escape
 from sqlalchemy import inspect, text, func, or_
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 1. Import db, User, and Transaction directly from models.py
-from models import db, User, Transaction, ServiceMarkup, PaymentFeeTier
+from models import db, User, Transaction, ServiceMarkup, PaymentFeeTier, AdminAuditLog
 from wallet_service import generate_payment_link
 
 # Import provider functions from the ClubKonnect adapter.
@@ -32,10 +33,15 @@ from provider import (
     process_education_pin
 )
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 secret_key = os.getenv("SECRET_KEY")
 if not secret_key:
     raise RuntimeError("SECRET_KEY environment variable is required for secure sessions")
 app.config['SECRET_KEY'] = secret_key
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV', '').strip().lower() == 'production' or os.getenv('APP_BASE_URL', '').lower().startswith('https://')
+app.config['PREFERRED_URL_SCHEME'] = 'https'
 
 # --- CONFIGURATION ---
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -70,6 +76,10 @@ db.init_app(app)
 def ensure_database_schema():
     """Add model columns to existing deployments that predate the current schema."""
     inspector = inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
+    if "admin_audit_logs" not in existing_tables:
+        AdminAuditLog.__table__.create(bind=db.engine)
+
     dialect = db.engine.dialect.name
     json_type = "JSONB" if dialect == "postgresql" else "JSON"
     required_columns = {
@@ -85,6 +95,8 @@ def ensure_database_schema():
     }
 
     for table_name, columns in required_columns.items():
+        if table_name not in existing_tables:
+            continue
         existing = {column["name"] for column in inspector.get_columns(table_name)}
         for column_name, column_type in columns.items():
             if column_name not in existing:
@@ -189,6 +201,106 @@ def normalize_phone_number(phone_number):
     if normalized.startswith("0") and len(normalized) == 11:
         return "234" + normalized[1:]
     return normalized
+
+
+INJECTION_PATTERNS = (
+    "<script",
+    "</script",
+    "<iframe",
+    "<object",
+    "<embed",
+    "<svg",
+    "<img",
+    "javascript:",
+    "vbscript:",
+    "data:text/html",
+    "onerror=",
+    "onload=",
+    "srcdoc",
+    "alert(",
+    "document.cookie",
+    "eval(",
+    "expression(",
+)
+
+
+def contains_injection_pattern(value):
+    if value is None:
+        return False
+    text = str(value)
+    if len(text) > 2048:
+        return True
+    if "\x00" in text:
+        return True
+    if any(ord(ch) < 32 and ch not in "\r\n\t" for ch in text):
+        return True
+    lowered = text.lower()
+    return any(pattern in lowered for pattern in INJECTION_PATTERNS)
+
+
+def validate_request_tree(value, path="request"):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            validate_request_tree(item, f"{path}.{key}")
+        return
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            validate_request_tree(item, f"{path}[{index}]")
+        return
+    if isinstance(value, str) and contains_injection_pattern(value):
+        raise ValueError(f"Suspicious input detected at {path}")
+
+
+@app.before_request
+def reject_malicious_payloads():
+    if request.method == "OPTIONS":
+        return None
+
+    try:
+        if request.args:
+            validate_request_tree(request.args.to_dict(flat=False), "query")
+        if request.form:
+            validate_request_tree(request.form.to_dict(flat=False), "form")
+        if request.is_json:
+            payload = request.get_json(silent=True)
+            if payload is not None:
+                validate_request_tree(payload, "json")
+    except ValueError as exc:
+        return jsonify({"status": "rejected", "reason": str(exc)}), 400
+
+    return None
+
+
+@app.before_request
+def enforce_https_redirect():
+    if app.testing:
+        return None
+    proto = request.headers.get("X-Forwarded-Proto", "")
+    if proto.lower() == "http" and request.url.startswith("http://"):
+        redirect_url = request.url.replace("http://", "https://", 1)
+        return redirect(redirect_url, code=301)
+    return None
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'geolocation=(), camera=(), microphone=()'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'; "
+        "upgrade-insecure-requests"
+    )
+    return response
 
 
 def get_or_create_user(phone_number):
@@ -333,15 +445,37 @@ def verify_paystack_signature(raw_body, signature):
     return bool(signature) and hmac.compare_digest(expected, signature)
 
 
+def record_admin_audit(username, action, success, reason=None):
+    username = (username or "unknown").strip()[:100]
+    reason = (reason or ("Successful admin action" if success else "Admin action failed")).strip()[:255]
+    ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
+    ip_address = ip_address.split(",", 1)[0].strip() or "unknown"
+    user_agent = (request.user_agent.string or "unknown")[:255]
+    entry = AdminAuditLog(
+        username=username,
+        action=action,
+        success=bool(success),
+        reason=reason,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    db.session.add(entry)
+    db.session.commit()
+
+
 def require_admin_auth():
     auth = request.authorization
+    username = auth.username if auth else ""
     if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+        record_admin_audit(username, "login", False, "Admin credentials are not configured")
         return jsonify({"status": "error", "reason": "Admin credentials are not configured"}), 503
     if not auth or not hmac.compare_digest(auth.username, ADMIN_USERNAME) or not hmac.compare_digest(auth.password, ADMIN_PASSWORD):
+        record_admin_audit(username, "login", False, "Invalid admin credentials")
         response = jsonify({"status": "error", "reason": "Authentication required"})
         response.status_code = 401
         response.headers["WWW-Authenticate"] = 'Basic realm="WAJ VTU Admin"'
         return response
+    record_admin_audit(username, "login", True, "Successful admin login")
     return None
 
 
@@ -385,6 +519,7 @@ def validate_csrf_token():
     submitted_token = request.form.get("csrf_token", "")
     expected_token = session.get("admin_csrf_token", "")
     if not expected_token or not submitted_token or not hmac.compare_digest(submitted_token, expected_token):
+        record_admin_audit(ADMIN_USERNAME or "unknown", "csrf_failure", False, "Invalid admin CSRF token")
         abort(403)
 
 
@@ -642,6 +777,11 @@ def whatsapp_webhook():
 
     user = get_or_create_user(chat_id)
     if user is None:
+        print(
+            f"[webhook] Ignoring message from {chat_id}: ALLOW_DB_MUTATIONS is False at runtime "
+            f"(env value: {os.getenv('ALLOW_DB_MUTATIONS')!r})",
+            flush=True,
+        )
         return jsonify({"status": "ignored", "reason": "User creation is disabled"}), 200
 
     current_state = user.current_state or STATES["IDLE"]
@@ -1874,18 +2014,37 @@ def admin_security():
 
     wallet_adjustments = Transaction.query.filter_by(type='WALLET_ADJUSTMENT').count()
     total_transactions = Transaction.query.count()
+    recent_audits = AdminAuditLog.query.order_by(AdminAuditLog.created_at.desc()).limit(10).all()
     rows = f"""
-    <tr><td>Admin login activity</td><td>Tracked in application session</td><td>Enabled</td></tr>
+    <tr><td>Admin login activity</td><td>{AdminAuditLog.query.filter_by(action='login').count()} recorded logins</td><td>Enabled</td></tr>
     <tr><td>Manual wallet adjustments</td><td>{wallet_adjustments}</td><td>Auditable</td></tr>
     <tr><td>Transaction status changes</td><td>{total_transactions}</td><td>Recorded</td></tr>
     <tr><td>Pricing updates</td><td>{ServiceMarkup.query.count()}</td><td>Controlled</td></tr>
     """
+    audit_rows = "".join(
+        f"""
+        <tr>
+            <td>{escape(log.username)}</td>
+            <td>{escape(log.action)}</td>
+            <td>{'Success' if log.success else 'Failure'}</td>
+            <td>{escape(log.reason or '')}</td>
+            <td>{escape(log.ip_address or '')}</td>
+            <td>{escape(format_admin_datetime(log.created_at))}</td>
+        </tr>
+        """ for log in recent_audits
+    )
 
     content = f"""
     <h2 style="margin-bottom:15px;">🔐 Security & Audit</h2>
     <table>
         <thead><tr><th>Audit Area</th><th>Count / Scope</th><th>Status</th></tr></thead>
         <tbody>{rows}</tbody>
+    </table>
+
+    <h3 style="margin:30px 0 12px;">Recent Admin Audit Trail</h3>
+    <table>
+        <thead><tr><th>Username</th><th>Action</th><th>Result</th><th>Reason</th><th>IP Address</th><th>Timestamp</th></tr></thead>
+        <tbody>{audit_rows if audit_rows else '<tr><td colspan="6" style="text-align:center;">No admin activity logged yet</td></tr>'}</tbody>
     </table>
     """
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="security")
@@ -1940,7 +2099,11 @@ def admin_settings():
                 db.session.add(tier)
             tier.fee_percentage = fee_pct
 
-        db.session.commit()
+        if errors:
+            record_admin_audit(ADMIN_USERNAME, "pricing_update", False, "; ".join(errors[:5]))
+        else:
+            db.session.commit()
+            record_admin_audit(ADMIN_USERNAME, "pricing_update", True, "Service pricing and fee tiers updated")
 
     csrf_token = get_csrf_token()
     markups = {markup.service_type: markup.markup_amount for markup in ServiceMarkup.query.all()}
@@ -2017,7 +2180,11 @@ def admin_fund_wallet(user_id):
     auth_error = require_admin_auth()
     if auth_error:
         return auth_error
-    validate_csrf_token()
+    try:
+        validate_csrf_token()
+    except Exception:
+        record_admin_audit(ADMIN_USERNAME or "unknown", "wallet_adjustment", False, "Invalid admin CSRF token for wallet adjustment")
+        raise
     user = User.query.get_or_404(user_id)
     try:
         amount = Decimal(request.form.get("amount", "0"))
@@ -2026,8 +2193,10 @@ def admin_fund_wallet(user_id):
     action_type = request.form.get("action_type")
 
     if amount <= 0 or action_type not in {"CREDIT", "DEBIT"}:
+        record_admin_audit(ADMIN_USERNAME, "wallet_adjustment", False, f"Invalid wallet adjustment request for user #{user.id}")
         return redirect(url_for("admin_users"))
     if action_type == "DEBIT" and user.wallet_balance < amount:
+        record_admin_audit(ADMIN_USERNAME, "wallet_adjustment", False, f"Insufficient wallet balance for user #{user.id}")
         return redirect(url_for("admin_users"))
 
     if action_type == "CREDIT":
@@ -2048,6 +2217,7 @@ def admin_fund_wallet(user_id):
     )
     db.session.add(tx)
     db.session.commit()
+    record_admin_audit(ADMIN_USERNAME, "wallet_adjustment", True, f"{action_type} wallet for user #{user.id} by {amount:,.2f}")
 
     return redirect(url_for("admin_users"))
 

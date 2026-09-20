@@ -77,6 +77,22 @@ class ServiceMarkup(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
 
+class AdminAuditLog(db.Model):
+    __tablename__ = 'admin_audit_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), nullable=False, index=True)
+    action = db.Column(db.String(100), nullable=False, index=True)
+    success = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    reason = db.Column(db.String(255), nullable=True)
+    ip_address = db.Column(db.String(45), nullable=True, index=True)
+    user_agent = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<AdminAuditLog {self.username} - {self.action} - {'SUCCESS' if self.success else 'FAILURE'}>"
+
+
 class PaymentFeeTier(db.Model):
     __tablename__ = 'payment_fee_tiers'
 

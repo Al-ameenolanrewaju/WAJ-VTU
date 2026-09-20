@@ -27,6 +27,56 @@ def test_meta_verification_route(client):
     assert response.get_data(as_text=True) == "abc123"
 
 
+def test_malicious_payloads_are_rejected(client):
+    response = client.get(
+        "/admin/users?q=<script>alert(1)</script>",
+        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "rejected"
+
+
+def test_admin_login_and_wallet_adjustment_are_audited(client):
+    import app as app_module
+
+    app_module.ADMIN_USERNAME = "admin"
+    app_module.ADMIN_PASSWORD = "secret"
+
+    with app_module.app.app_context():
+        app_module.db.session.query(app_module.AdminAuditLog).delete()
+        app_module.db.session.query(app_module.Transaction).delete()
+        app_module.db.session.query(app_module.User).delete()
+
+        user = app_module.User(
+            whatsapp_id="2348000000001",
+            phone="2348000000001",
+            name="Audit User",
+            wallet_balance=Decimal("10.00"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+        user_id = user.id
+
+    login_response = client.get(
+        "/admin/dashboard",
+        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+    )
+    assert login_response.status_code == 200
+
+    bad_adjustment = client.post(
+        f"/admin/user/{user_id}/fund",
+        data={"amount": "999", "action_type": "DEBIT", "csrf_token": "invalid"},
+        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+    )
+    assert bad_adjustment.status_code == 403
+
+    with app_module.app.app_context():
+        entries = app_module.AdminAuditLog.query.order_by(app_module.AdminAuditLog.created_at.desc()).all()
+        assert any(entry.action == "login" and entry.success for entry in entries)
+        assert any(entry.action == "wallet_adjustment" and not entry.success for entry in entries)
+
+
 def test_meta_message_payload_is_accepted(client):
     payload = {
         "entry": [
