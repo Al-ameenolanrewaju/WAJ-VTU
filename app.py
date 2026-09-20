@@ -117,12 +117,33 @@ def seed_payment_fee_tiers():
     db.session.commit()
 
 
+def _masked_database_target():
+    """Returns a safe-to-log description of the DB engine/host, no credentials."""
+    try:
+        url = db.engine.url
+        host_part = f"{url.host}:{url.port}" if url.host else "(no host - likely SQLite/local file)"
+        return f"driver={url.drivername} database={url.database} host={host_part}"
+    except Exception as exc:
+        return f"(unable to inspect database URL: {exc})"
+
+
+with app.app_context():
+    print(f"[startup] Connecting to database -> {_masked_database_target()}")
+    if DATABASE_URL.startswith("sqlite://"):
+        print(
+            "[startup] WARNING: DATABASE_URL is SQLite. On Render (and most hosts) the "
+            "filesystem is wiped on every deploy/restart, so all users and transactions "
+            "will be lost each time you redeploy. Use a persistent Postgres URL instead."
+        )
+
 if ALLOW_DB_MUTATIONS:
     with app.app_context():
         db.create_all()
         ensure_database_schema()
         seed_service_markups()
         seed_payment_fee_tiers()
+        existing_user_count = User.query.count()
+        print(f"[startup] Existing users in database after create_all(): {existing_user_count}")
 
 # --- STATE DEFINITIONS ---
 STATES = {
@@ -485,9 +506,12 @@ def send_whatsapp_message(recipient, text):
 
         if meta_api_token and meta_phone_number_id:
             meta_url = f"https://graph.facebook.com/{meta_api_version}/{meta_phone_number_id}/messages"
+            # Meta's Cloud API requires a bare MSISDN (digits only) as "to" - strip any
+            # bridge-style JID suffix (e.g. "...@s.whatsapp.net") if one is ever present.
+            meta_recipient = str(recipient).split("@", 1)[0]
             payload = {
                 "messaging_product": "whatsapp",
-                "to": recipient,
+                "to": meta_recipient,
                 "type": "text",
                 "text": {"body": text}
             }

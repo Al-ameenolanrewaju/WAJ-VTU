@@ -10,7 +10,7 @@ services:
       - key: FLASK_ENV
         value: production
       - key: ALLOW_DB_MUTATIONS
-        value: "false"
+        value: "true"
       - key: DATABASE_URL
         sync: false # Required: set to a persistent Render Postgres or Supabase URL
       - key: SECRET_KEY
