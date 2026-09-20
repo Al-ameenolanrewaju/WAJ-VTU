@@ -635,6 +635,7 @@ def whatsapp_webhook():
     text = str(req_data.get("message") or req_data.get("text") or req_data.get("body") or "").strip()
 
     if not chat_id:
+        print(f"[webhook] No sender extracted from payload: {req_data}")
         return jsonify({"status": "ignored", "reason": "No sender specified"}), 200
 
     provider_phone = str(chat_id).split("@", 1)[0]
