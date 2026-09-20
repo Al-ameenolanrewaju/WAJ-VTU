@@ -305,6 +305,9 @@ def add_security_headers(response):
 
 def get_or_create_user(phone_number):
     normalized_phone = normalize_phone_number(phone_number)
+    if not normalized_phone:
+        return None
+
     user = User.query.filter_by(whatsapp_id=normalized_phone).first() or User.query.filter_by(phone=normalized_phone).first()
     if not user:
         if not ALLOW_DB_MUTATIONS:
@@ -585,6 +588,9 @@ def paystack_webhook():
         return jsonify({"status": "error", "reason": "Invalid payment payload"}), 400
 
     normalized_phone = normalize_phone_number(phone)
+    if not normalized_phone:
+        return jsonify({"status": "error", "reason": "Missing or invalid phone number in Paystack metadata"}), 400
+
     user = User.query.filter_by(whatsapp_id=normalized_phone).first() or User.query.filter_by(phone=normalized_phone).first()
     if not user:
         user = User.query.filter_by(whatsapp_id=phone).first() or User.query.filter_by(phone=phone).first()

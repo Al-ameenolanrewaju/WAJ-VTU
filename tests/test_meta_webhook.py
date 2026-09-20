@@ -37,6 +37,19 @@ def test_malicious_payloads_are_rejected(client):
     assert response.get_json()["status"] == "rejected"
 
 
+def test_blank_phone_does_not_create_default_user(client):
+    import app as app_module
+
+    with app_module.app.app_context():
+        app_module.db.session.query(app_module.Transaction).delete()
+        app_module.db.session.query(app_module.User).delete()
+        app_module.db.session.commit()
+
+        assert app_module.get_or_create_user("") is None
+        assert app_module.get_or_create_user(None) is None
+        assert app_module.User.query.count() == 0
+
+
 def test_admin_login_and_wallet_adjustment_are_audited(client):
     import app as app_module
 
