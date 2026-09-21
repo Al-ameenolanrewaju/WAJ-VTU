@@ -44,4 +44,6 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
       - key: GROQ_API_KEY
-        sync: false
+        sync: false
+      - key: ADMIN_PHONE
+        sync: false # Required for receiving customer support escalation messages

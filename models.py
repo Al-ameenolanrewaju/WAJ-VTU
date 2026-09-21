@@ -21,6 +21,7 @@ class User(db.Model):
     # User Flow & State Management
     current_state = db.Column(db.String(50), default="IDLE", nullable=False)
     state_data = db.Column(db.JSON, default=dict)
+    is_escalated = db.Column(db.Boolean, default=False, nullable=False)
 
     # Paystack Dedicated Virtual Account details
     paystack_customer_code = db.Column(db.String(100), nullable=True)
@@ -66,6 +67,27 @@ class Transaction(db.Model):
 
     def __repr__(self):
         return f"<Transaction {self.reference} - {self.type} - {self.status}>"
+
+
+class ScheduledTask(db.Model):
+    __tablename__ = 'scheduled_tasks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    
+    # frequency: e.g. "daily", "weekly", "monthly"
+    frequency = db.Column(db.String(20), nullable=False)
+    next_run = db.Column(db.DateTime(timezone=True), nullable=False)
+    
+    # JSON data for the agent's execute_tool
+    tool_name = db.Column(db.String(50), nullable=False)
+    tool_kwargs = db.Column(db.JSON, nullable=False)
+    
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+    
+    def __repr__(self):
+        return f"<ScheduledTask {self.tool_name} ({self.frequency}) for User {self.user_id}>"
 
 
 class ServiceMarkup(db.Model):

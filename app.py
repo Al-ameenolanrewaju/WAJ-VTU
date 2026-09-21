@@ -1746,6 +1746,50 @@ def admin_ledger():
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="ledger")
 
 
+
+# ==============================================================================
+# --- CRON ROUTES ---
+# ==============================================================================
+
+@app.route("/api/cron/run_scheduled_tasks", methods=["GET", "POST"])
+def run_scheduled_tasks():
+    from models import ScheduledTask
+    from datetime import datetime, timedelta
+    from chat_agent import execute_tool
+    
+    now = datetime.utcnow()
+    tasks = ScheduledTask.query.filter(ScheduledTask.is_active == True, ScheduledTask.next_run <= now).all()
+    
+    executed = 0
+    for task in tasks:
+        user = User.query.get(task.user_id)
+        if not user:
+            continue
+            
+        provider_phone = "AdminCron"
+        result = execute_tool(app, db, user, provider_phone, task.tool_name, task.tool_kwargs)
+        
+        # Send WhatsApp message
+        message = f"🔄 *Scheduled Task Executed*\nTask: {task.tool_name}\nResult: {result.get('message', 'Processed')}"
+        if result.get("status") != "success":
+            message = f"⚠️ *Scheduled Task Failed*\nTask: {task.tool_name}\nReason: {result.get('message', 'Failed')}"
+            
+        send_whatsapp_message(user.whatsapp_id if "@" in user.whatsapp_id else f"{user.phone}@c.us", message)
+        
+        # Update next run
+        if task.frequency == "daily":
+            task.next_run = now + timedelta(days=1)
+        elif task.frequency == "weekly":
+            task.next_run = now + timedelta(days=7)
+        else:
+            task.next_run = now + timedelta(days=30)
+            
+        executed += 1
+        
+    db.session.commit()
+    return jsonify({"status": "success", "executed_tasks": executed}), 200
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

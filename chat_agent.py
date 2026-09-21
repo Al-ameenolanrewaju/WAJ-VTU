@@ -14,12 +14,15 @@ SYSTEM_PROMPT = """You are WAJ VTU Assistant, a helpful AI that allows users in 
 You have access to tools to fetch plans and execute transactions. 
 
 RULES:
-1. When a user asks for a service (e.g., "I want to buy MTN data"), FIRST use the fetching tool (e.g., `get_data_plans`) to see available plans and their EXACT `plan_code` and `amount`. Do NOT guess plan codes or amounts.
-2. Present the options to the user nicely formatted with prices. Keep it short.
-3. When the user confirms the plan and provides the necessary details (like phone, smartcard, or meter number), use the purchase tool (e.g., `buy_data`) with the exact `plan_code` and `amount`.
-4. If a user provides all details upfront (e.g., "buy 1gb mtn for 08123456789"), you still MUST call the fetch tool first to find the correct `plan_code` and `amount` before calling the purchase tool. Do not skip fetching.
-5. If a purchase tool fails, inform the user politely of the reason.
-6. Keep your responses short, conversational, and friendly, suitable for WhatsApp. Use emojis appropriately.
+1. When a user asks for a service, FIRST use the fetching tool to see available plans and their EXACT `plan_code` and `amount`.
+2. Present options nicely formatted with prices.
+3. When confirmed, use the purchase tool with the exact `plan_code` and `amount`.
+4. If a purchase fails, inform the user politely.
+5. KEEP YOUR RESPONSES SHORT AND FRIENDLY.
+6. **MULTI-LANGUAGE SUPPORT**: If the user speaks to you in Hausa, Igbo, Yoruba, or Nigerian Pidgin, YOU MUST RESPOND IN THAT EXACT NATIVE LANGUAGE. Translate your responses naturally while executing the underlying tools normally in English.
+7. If the user asks for their transaction history or receipts, use `get_transaction_history`.
+8. If the user asks for a recurring/scheduled transaction (e.g. "buy this every Friday"), use `schedule_task`.
+9. If the user is extremely angry, stuck, or explicitly asks to speak to a human/customer care, immediately use `escalate_to_human`.
 """
 
 def define_tools():
@@ -160,6 +163,50 @@ def define_tools():
                     "required": ["amount", "email"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_transaction_history",
+                "description": "Fetch the user's most recent transactions to provide history or receipts.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer", "description": "Number of recent transactions to fetch (e.g. 5)"}
+                    },
+                    "required": ["limit"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "escalate_to_human",
+                "description": "Escalate the chat to a human admin and disable AI responses for this user.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "reason": {"type": "string", "description": "The reason for escalation"}
+                    },
+                    "required": ["reason"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "schedule_task",
+                "description": "Schedule a recurring VTU purchase. The tool_name must be a purchase tool (e.g., buy_data, buy_airtime). tool_kwargs must be the exact JSON dictionary of arguments for that tool.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "frequency": {"type": "string", "enum": ["daily", "weekly", "monthly"]},
+                        "tool_name": {"type": "string", "description": "The name of the tool to run, e.g. buy_data"},
+                        "tool_kwargs": {"type": "string", "description": "A JSON-encoded string of the arguments for the tool"}
+                    },
+                    "required": ["frequency", "tool_name", "tool_kwargs"]
+                }
+            }
         }
     ]
 
@@ -169,10 +216,54 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         fetch_cable_plans, verify_smartcard, process_cable_tv,
         verify_meter as provider_verify_meter, process_electricity_payment
     )
-    from app import get_markup, settle_transaction, generate_payment_link, Transaction
+    from app import get_markup, settle_transaction, generate_payment_link, Transaction, ScheduledTask
     
+
     if name == "get_wallet_balance":
         return {"status": "success", "balance": float(user.wallet_balance)}
+        
+    elif name == "get_transaction_history":
+        limit = kwargs.get("limit", 5)
+        txs = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.created_at.desc()).limit(limit).all()
+        history = [{"reference": t.reference, "type": t.type, "amount": float(t.amount), "status": t.status, "date": str(t.created_at)} for t in txs]
+        return {"status": "success", "transactions": history}
+        
+    elif name == "escalate_to_human":
+        user.is_escalated = True
+        db.session.commit()
+        admin_phone = os.getenv("ADMIN_PHONE")
+        if admin_phone:
+            from app import send_whatsapp_message
+            send_whatsapp_message(admin_phone, f"⚠️ *Escalation Alert*\\nUser {user.phone} requested human support.\\nReason: {kwargs.get('reason')}")
+        return {"status": "success", "message": "The chat has been escalated. You should tell the user an agent will reply shortly."}
+        
+    elif name == "schedule_task":
+        frequency = kwargs.get("frequency")
+        tool_name = kwargs.get("tool_name")
+        try:
+            tool_kwargs = json.loads(kwargs.get("tool_kwargs")) if isinstance(kwargs.get("tool_kwargs"), str) else kwargs.get("tool_kwargs")
+        except:
+            tool_kwargs = kwargs.get("tool_kwargs")
+            
+        from datetime import timedelta
+        if frequency == "daily":
+            next_run = datetime.utcnow() + timedelta(days=1)
+        elif frequency == "weekly":
+            next_run = datetime.utcnow() + timedelta(days=7)
+        else:
+            next_run = datetime.utcnow() + timedelta(days=30)
+            
+        task = ScheduledTask(
+            user_id=user.id,
+            frequency=frequency,
+            next_run=next_run,
+            tool_name=tool_name,
+            tool_kwargs=tool_kwargs
+        )
+        db.session.add(task)
+        db.session.commit()
+        return {"status": "success", "message": f"Task scheduled to run {frequency} starting {next_run.strftime('%Y-%m-%d')}"}
+
         
     elif name == "get_data_plans":
         network = kwargs.get("network")
@@ -338,6 +429,9 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
 
 def handle_chat_message(app, db, user, text, chat_id, provider_phone):
+    if getattr(user, "is_escalated", False):
+        return
+        
     client = get_groq_client()
     if not client:
         from app import send_whatsapp_message
