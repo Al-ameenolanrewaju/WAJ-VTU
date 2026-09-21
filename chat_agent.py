@@ -427,6 +427,13 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
 def handle_chat_message(app, db, user, text, chat_id, provider_phone):
     if getattr(user, "is_escalated", False):
+        lower_text = str(text).strip().lower()
+        if lower_text in ["/resume_ai", "/resume", "resume ai", "reset ai"]:
+            user.is_escalated = False
+            db.session.commit()
+            from app import send_whatsapp_message
+            send_whatsapp_message(chat_id, "🤖 AI support has been resumed. How can I help you today?")
+            return
         return
         
     client = get_groq_client()
