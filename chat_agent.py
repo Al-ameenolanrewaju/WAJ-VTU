@@ -216,7 +216,8 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         fetch_cable_plans, verify_smartcard, process_cable_tv,
         verify_meter as provider_verify_meter, process_electricity_payment
     )
-    from app import get_markup, settle_transaction, generate_payment_link, Transaction, ScheduledTask
+    from app import get_markup, settle_transaction, generate_payment_link
+    from models import Transaction, ScheduledTask
     
 
     if name == "get_wallet_balance":
