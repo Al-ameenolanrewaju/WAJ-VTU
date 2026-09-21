@@ -797,7 +797,15 @@ def process_webhook_payload(req_data):
         text = str(req_data.get("message") or req_data.get("text") or req_data.get("body") or "").strip()
 
         if not chat_id:
-            print(f"[webhook] No sender extracted from payload: {req_data}", flush=True)
+            # Check if this is just a status update (read/delivered/sent) before logging
+            is_status = False
+            for entry in req_data.get('entry', []):
+                for change in entry.get('changes', []):
+                    if 'statuses' in change.get('value', {}):
+                        is_status = True
+            
+            if not is_status:
+                print(f"[webhook] No sender extracted from payload: {req_data}", flush=True)
             return
 
         provider_phone = str(chat_id).split("@", 1)[0]

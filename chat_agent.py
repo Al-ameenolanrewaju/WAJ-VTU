@@ -455,7 +455,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
     try:
         response = client.chat.completions.create(
             messages=messages,
-            model="llama-3.1-8b-instant",
+            model="llama3-8b-8192",
             temperature=0,
             tools=tools,
             tool_choice="auto",
@@ -494,7 +494,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 
             response = client.chat.completions.create(
                 messages=messages,
-                model="llama-3.1-8b-instant",
+                model="llama3-8b-8192",
                 temperature=0,
                 tools=tools,
                 tool_choice="auto",
