@@ -108,11 +108,21 @@ def ensure_database_schema():
     db.session.commit()
 
 
-SERVICE_TYPES = ("DATA", "AIRTIME", "CABLE", "ELECTRICITY", "BETTING", "EDU")
+SERVICE_TYPES = ("DATA_MTN", "DATA_AIRTEL", "DATA_GLO", "DATA_9MOBILE", "AIRTIME", "CABLE", "ELECTRICITY", "BETTING", "EDU")
 
 
 def seed_service_markups():
-    defaults = {service_type: Decimal("50.00") if service_type == "DATA" else Decimal("0.00") for service_type in SERVICE_TYPES}
+    defaults = {
+        "DATA_MTN": Decimal("5.00"), 
+        "DATA_AIRTEL": Decimal("5.00"), 
+        "DATA_GLO": Decimal("5.00"), 
+        "DATA_9MOBILE": Decimal("5.00"), 
+        "AIRTIME": Decimal("2.00"), 
+        "CABLE": Decimal("2.00"), 
+        "ELECTRICITY": Decimal("2.00"), 
+        "BETTING": Decimal("2.00"), 
+        "EDU": Decimal("5.00")
+    }
     for service_type, markup_amount in defaults.items():
         if not ServiceMarkup.query.filter_by(service_type=service_type).first():
             db.session.add(ServiceMarkup(service_type=service_type, markup_amount=markup_amount))
@@ -326,9 +336,10 @@ def get_or_create_user(phone_number):
     return user
 
 
-def get_markup(service_type):
+def get_markup(service_type, base_amount=Decimal("0.00")):
     markup = ServiceMarkup.query.filter_by(service_type=service_type.upper()).first()
-    return Decimal(str(markup.markup_amount)) if markup else Decimal("0.00")
+    percentage = Decimal(str(markup.markup_amount)) if markup else Decimal("0.00")
+    return (base_amount * percentage / Decimal("100")).quantize(Decimal("0.01"))
 
 
 def set_user_session(user, state, data):
@@ -650,8 +661,8 @@ def send_whatsapp_message(recipient, text):
         if meta_api_token and meta_phone_number_id:
             meta_url = f"https://graph.facebook.com/{meta_api_version}/{meta_phone_number_id}/messages"
             # Meta's Cloud API requires a bare MSISDN (digits only) as "to" - strip any
-            # bridge-style JID suffix (e.g. "...@s.whatsapp.net") if one is ever present.
-            meta_recipient = str(recipient).split("@", 1)[0]
+            # bridge-style JID suffix (e.g. "...@s.whatsapp.net") or leading + sign if present.
+            meta_recipient = str(recipient).split("@", 1)[0].replace("+", "")
             payload = {
                 "messaging_product": "whatsapp",
                 "to": meta_recipient,
@@ -796,48 +807,27 @@ def whatsapp_webhook():
     session_data = get_user_session_data(user)
 
     normalized_text = text.strip().lower().replace("*", "").replace("#", "")
-    english_aliases = {
-        "menu": "MENU",
-        "main menu": "MENU",
-        "home": "MENU",
-        "cancel": "CANCEL",
-        "back": "MENU",
-        "help": "MENU",
-        "buy data": "1",
-        "data": "1",
-        "data bundle": "1",
-        "internet data": "1",
-        "buy airtime": "2",
-        "airtime": "2",
-        "top up balance": "8",
-        "top up": "8",
-        "fund wallet": "8",
-        "deposit": "8",
-        "cable tv": "3",
-        "tv subscription": "3",
-        "dstv": "3",
-        "gotv": "3",
-        "startimes": "3",
-        "electricity": "4",
-        "pay electricity": "4",
-        "electric bill": "4",
-        "light bill": "4",
-        "betting": "5",
-        "betting top up": "5",
-        "bet9ja": "5",
-        "sportybet": "5",
-        "betking": "5",
-        "education": "6",
-        "waec": "6",
-        "jamb": "6",
-        "pins": "6",
-        "wallet": "7",
-        "check wallet": "7",
-        "balance": "7",
-        "my balance": "7",
-    }
-    if normalized_text in english_aliases:
-        text = english_aliases[normalized_text]
+    
+    # Allow exact matches for cancel/menu anywhere
+    if normalized_text in ["menu", "main menu", "cancel", "home", "back", "help"]:
+        text = "MENU"
+    elif current_state == STATES["IDLE"]:
+        if "data" in normalized_text or "internet" in normalized_text:
+            text = "1"
+        elif "airtime" in normalized_text or "recharge" in normalized_text or "card" in normalized_text:
+            text = "2"
+        elif any(k in normalized_text for k in ["cable", "tv", "dstv", "gotv", "startimes", "decoder"]):
+            text = "3"
+        elif any(k in normalized_text for k in ["electric", "light", "nepa", "ikedc", "ekedc", "aedc", "ibedc"]):
+            text = "4"
+        elif "bet" in normalized_text or "sporty" in normalized_text or "1xbet" in normalized_text:
+            text = "5"
+        elif any(k in normalized_text for k in ["educat", "waec", "jamb", "neco", "pin"]):
+            text = "6"
+        elif "balance" in normalized_text or "wallet" in normalized_text or "check" in normalized_text:
+            text = "7"
+        elif "fund" in normalized_text or "top up" in normalized_text or "deposit" in normalized_text or "add money" in normalized_text:
+            text = "8"
 
     def send_main_menu_response():
         main_menu = (
@@ -935,7 +925,8 @@ def whatsapp_webhook():
             set_user_session(user, STATES["AWAITING_EDUCATION_PACKAGE"], session_data)
             package_menu = "🎓 *SELECT EDUCATION PIN*\n"
             for index, package in enumerate(packages, start=1):
-                package_amount = Decimal(str(package["amount"])) + get_markup("EDU")
+                base_pkg_amount = Decimal(str(package["amount"]))
+                package_amount = base_pkg_amount + get_markup("EDU", base_pkg_amount)
                 package_menu += f"{index}. {package['name']} - ₦{package_amount:,.2f}\n"
             send_whatsapp_message(chat_id, package_menu + "\n_Reply with the package number_")
 
@@ -1058,7 +1049,8 @@ def whatsapp_webhook():
             plans_map = {}
             for idx, plan in enumerate(filtered_plans, start=1):
                 name = plan.get("name")
-                cost = Decimal(str(plan.get("variation_amount"))) + get_markup("DATA")
+                base_data_cost = Decimal(str(plan.get("variation_amount")))
+                cost = base_data_cost + get_markup(f"DATA_{network_name}", base_data_cost)
                 code = plan.get("variation_code")
                 plans_map[str(idx)] = {"code": code, "amount": str(cost), "name": name}
                 plan_menu += f"{idx}. {name} - ₦{cost:,.2f}\n"
@@ -1161,7 +1153,7 @@ def whatsapp_webhook():
         else:
             recipient_phone = text
             amount_decimal = Decimal(session_data["amount"])
-            charge_amount = amount_decimal + get_markup("AIRTIME")
+            charge_amount = amount_decimal + get_markup("AIRTIME", amount_decimal)
             network = session_data["network"]
 
             if user.wallet_balance < charge_amount:
@@ -1231,7 +1223,8 @@ def whatsapp_webhook():
                 set_user_session(user, STATES["AWAITING_CABLE_PLAN"], session_data)
                 plan_menu = f"📺 *{provider} PLANS*\n"
                 for index, plan in enumerate(session_data["cable_plans"], start=1):
-                    plan_amount = Decimal(str(plan["amount"])) + get_markup("CABLE")
+                    base_cable_plan = Decimal(str(plan["amount"]))
+                    plan_amount = base_cable_plan + get_markup("CABLE", base_cable_plan)
                     plan_menu += f"{index}. {plan['name']} - ₦{plan_amount:,.2f}\n"
                 send_whatsapp_message(chat_id, plan_menu + "\n_Reply with the plan number you want._")
 
@@ -1241,7 +1234,8 @@ def whatsapp_webhook():
             send_whatsapp_message(chat_id, "❌ Please select a valid cable plan number.")
         else:
             plan = plans[int(text) - 1]
-            amount = Decimal(str(plan["amount"])) + get_markup("CABLE")
+            base_cable_cost = Decimal(str(plan["amount"]))
+            amount = base_cable_cost + get_markup("CABLE", base_cable_cost)
             if user.wallet_balance < amount:
                 send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
                 set_user_session(user, STATES["IDLE"], {})
@@ -1301,7 +1295,7 @@ def whatsapp_webhook():
             send_whatsapp_message(chat_id, "❌ Enter a valid amount of at least ₦500.")
         else:
             amount = Decimal(text)
-            charge_amount = amount + get_markup("ELECTRICITY")
+            charge_amount = amount + get_markup("ELECTRICITY", amount)
             if user.wallet_balance < charge_amount:
                 send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
                 set_user_session(user, STATES["IDLE"], {})
@@ -1352,7 +1346,7 @@ def whatsapp_webhook():
             send_whatsapp_message(chat_id, "❌ Enter a valid amount of at least ₦100.")
         else:
             amount = Decimal(text)
-            charge_amount = amount + get_markup("BETTING")
+            charge_amount = amount + get_markup("BETTING", amount)
             if user.wallet_balance < charge_amount:
                 send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
                 set_user_session(user, STATES["IDLE"], {})
@@ -1389,7 +1383,8 @@ def whatsapp_webhook():
         else:
             quantity = int(text)
             package = session_data["education_package"]
-            amount = (Decimal(str(package["amount"])) + get_markup("EDU")) * quantity
+            base_edu_amt = Decimal(str(package["amount"]))
+            amount = (base_edu_amt + get_markup("EDU", base_edu_amt)) * quantity
             if user.wallet_balance < amount:
                 send_whatsapp_message(chat_id, "❌ Insufficient wallet balance.")
                 set_user_session(user, STATES["IDLE"], {})
@@ -2170,7 +2165,7 @@ def admin_settings():
     <form method="POST" action="/admin/settings">
         <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
         <table>
-            <thead><tr><th>Service</th><th>Markup (₦)</th></tr></thead>
+            <thead><tr><th>Service</th><th>Markup (%)</th></tr></thead>
             <tbody>{rows}</tbody>
         </table>
         <button type="submit" style="margin-top:15px;">Save Markups</button>
