@@ -15,7 +15,7 @@ You have access to tools to fetch plans and execute transactions.
 
 RULES:
 1. When a user asks for a service, FIRST use the fetching tool to see available plans and their EXACT `plan_code` and `amount`.
-2. Present options nicely formatted with prices.
+2. Present options as a clean, numbered list with line breaks so it is easy to read on WhatsApp. DO NOT show the `plan_code` or internal codes to the user, only show the plan name and price.
 3. When confirmed, use the purchase tool with the exact `plan_code` and `amount`.
 4. If a purchase fails, inform the user politely.
 5. KEEP YOUR RESPONSES SHORT AND FRIENDLY.
@@ -276,12 +276,10 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         for plan in variations:
             base_cost = Decimal(str(plan.get("variation_amount")))
             cost = base_cost + get_markup(f"DATA_{network}", base_cost)
-            plans.append({
-                "name": plan.get("name"),
-                "plan_code": plan.get("variation_code"),
-                "amount": float(cost)
-            })
-        return {"status": "success", "plans": plans}
+            plans.append(
+                f"- {plan.get('name')}: ₦{cost} (System Code: {plan.get('variation_code')})"
+            )
+        return {"status": "success", "plans_list": "\n".join(plans), "message": "Present these options to the user clearly. Do not show the System Code to the user."}
         
     elif name == "buy_data":
         network = kwargs.get("network")
@@ -355,12 +353,10 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         for plan in plans_raw:
             base_cost = Decimal(str(plan["amount"]))
             cost = base_cost + get_markup("CABLE", base_cost)
-            plans.append({
-                "name": plan.get("name"),
-                "plan_code": plan.get("code"),
-                "amount": float(cost)
-            })
-        return {"status": "success", "plans": plans}
+            plans.append(
+                f"- {plan.get('name')}: ₦{cost} (System Code: {plan.get('code')})"
+            )
+        return {"status": "success", "plans_list": "\n".join(plans), "message": "Present these options to the user clearly. Do not show the System Code to the user."}
         
     elif name == "buy_cable":
         provider = kwargs.get("provider")
