@@ -814,9 +814,18 @@ def process_webhook_payload(req_data):
         if user is None:
             return
 
-        # Let the AI Chat Agent handle everything!
-        import chat_agent
-        chat_agent.handle_chat_message(app, db, user, text, chat_id, provider_phone)
+        # Let the AI Chat Agent handle everything in a background thread!
+        # This is CRITICAL so the webhook instantly returns 200 OK to WhatsApp
+        import threading
+        
+        def run_agent_in_background(user_id, message_text, chat_id_str, provider_phone_str):
+            with app.app_context():
+                user_obj = User.query.get(user_id)
+                if user_obj:
+                    import chat_agent
+                    chat_agent.handle_chat_message(app, db, user_obj, message_text, chat_id_str, provider_phone_str)
+                    
+        threading.Thread(target=run_agent_in_background, args=(user.id, text, chat_id, provider_phone)).start()
 
 ADMIN_BASE_TEMPLATE = """
 <!DOCTYPE html>
