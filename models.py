@@ -1,7 +1,11 @@
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import MetaData
 from datetime import datetime, timezone
+import os
 
-db = SQLAlchemy()
+database_url = os.getenv("DATABASE_URL", "")
+default_schema = "public" if database_url.startswith(("postgres://", "postgresql://")) else None
+db = SQLAlchemy(metadata=MetaData(schema=default_schema))
 
 
 def utc_now():
