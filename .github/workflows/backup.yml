@@ -30,4 +30,4 @@ jobs:
         with:
           name: supabase-database-backup
           path: backup.sql
-          retention-days: 7 # Keeps the last 7 days of backups
+          retention-days: 30 # Keeps the last 30 days of backups
