@@ -23,7 +23,10 @@ jobs:
             echo "DATABASE_URL secret is not set! Please add it in your repository settings."
             exit 1
           fi
-          pg_dump "$DATABASE_URL" > backup.sql
+          
+          # Remove any accidental newlines or spaces from the secret
+          CLEAN_URL=$(echo "$DATABASE_URL" | tr -d '\n\r ')
+          pg_dump "$CLEAN_URL" > backup.sql
           
       - name: Upload Backup Artifact
         uses: actions/upload-artifact@v4
