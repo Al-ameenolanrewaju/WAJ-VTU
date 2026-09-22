@@ -31,7 +31,7 @@ jobs:
           
           # Remove any accidental newlines or spaces from the secret
           CLEAN_URL=$(echo "$DATABASE_URL" | tr -d '\n\r ')
-          pg_dump "$CLEAN_URL" > backup.sql
+          /usr/lib/postgresql/17/bin/pg_dump "$CLEAN_URL" > backup.sql
           
       - name: Upload Backup Artifact
         uses: actions/upload-artifact@v4
