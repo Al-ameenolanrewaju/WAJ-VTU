@@ -1,0 +1,26 @@
+{% extends "web/base.html" %}
+{% block content %}
+{% include "web/_service_nav.html" %}
+<main class="page-shell">
+  <div class="page-heading"><div><h1>Electricity bill</h1><p>Pay your power bill securely and get your token instantly.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
+  <div class="form-card">
+    <form method="POST" action="{{ url_for('web.electricity_page') }}">
+      <label>Distribution company</label>
+      <select name="disco">
+        {% for d in ["EKEDC", "IKEDC", "AEDC", "PHEDC", "KEDCO", "JED", "IBEDC", "EEDC"] %}
+        <option value="{{ d }}">{{ d }}</option>
+        {% endfor %}
+      </select>
+      <label>Meter type</label><select name="meter_type">
+        <option value="PREPAID">Prepaid</option>
+        <option value="POSTPAID">Postpaid</option>
+      </select>
+      <label>Meter number</label>
+      <input name="meter_number" placeholder="Enter meter number" required>
+      <label>Payment amount</label>
+      <input name="amount" type="number" min="100" step="0.01" placeholder="Amount in NGN" required>
+      <button type="submit">Pay Bill</button>
+    </form>
+  </div>
+</main>
+{% endblock %}

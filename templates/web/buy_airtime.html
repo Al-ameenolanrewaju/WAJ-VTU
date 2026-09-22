@@ -1,0 +1,23 @@
+{% extends "web/base.html" %}
+{% block content %}
+{% include "web/_service_nav.html" %}
+<main class="page-shell">
+  <div class="page-heading"><div><h1>Buy airtime</h1><p>Top up any Nigerian number instantly.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
+  <div class="form-card">
+    <form method="POST" action="{{ url_for('web.buy_airtime') }}">
+      <label>Network</label>
+      <select name="network">
+        <option value="MTN">MTN</option>
+        <option value="AIRTEL">Airtel</option>
+        <option value="GLO">Glo</option>
+        <option value="9MOBILE">9mobile</option>
+      </select>
+      <label>Recipient phone number</label>
+      <input name="phone" placeholder="08012345678" required>
+      <label>Amount</label>
+      <input name="amount" type="number" min="50" step="0.01" placeholder="Amount in NGN" required>
+      <button type="submit">Buy Airtime</button>
+    </form>
+  </div>
+</main>
+{% endblock %}

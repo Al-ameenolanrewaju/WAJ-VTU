@@ -1,0 +1,19 @@
+{% extends "web/base.html" %}
+{% block content %}
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="dashboard-brand" style="color:var(--indigo); margin-bottom:10px;">WAJ VTU</div>
+    <h1>Welcome back</h1>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+    {% endwith %}
+    <form method="POST">
+      <input name="email" type="email" placeholder="Email" required>
+      <input name="password" type="password" placeholder="Password" required>
+      <button type="submit">Log in to your wallet</button>
+    </form>
+    <div class="auth-switch"><a href="{{ url_for('auth.forgot_password') }}">Forgot password?</a></div>
+    <div class="auth-switch">No account? <a href="{{ url_for('auth.signup') }}">Sign up</a></div>
+  </div>
+</div>
+{% endblock %}

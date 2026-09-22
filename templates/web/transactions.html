@@ -1,0 +1,25 @@
+{% extends "web/base.html" %}
+{% block content %}
+{% include "web/_service_nav.html" %}
+<main class="page-shell">
+  <div class="page-heading"><div><h1>Transactions</h1><p>A clear record of your wallet activity and purchases.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
+  <div class="tx-list">
+    {% for tx in transactions %}
+    <div class="tx-item">
+      <div class="tx-details">
+        <div class="tx-title">{{ tx.type|title }}{% if tx.recipient %} — {{ tx.recipient }}{% endif %}</div>
+        <div class="tx-meta">{{ tx.reference }} · {{ tx.created_at.strftime("%b %d, %Y %I:%M %p") }}</div>
+      </div>
+      <div class="tx-right">
+        <div class="tx-amount">{{ "+" if tx.type == "DEPOSIT" else "-" }}₦{{ "{:,.2f}".format(tx.amount) }}</div>
+        <div class="tx-status status-{{ 'success' if tx.status == 'SUCCESS' else ('pending' if tx.status == 'PENDING' else 'failed') }}">
+          {{ tx.status|title }}
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="tx-item"><div class="tx-details"><div class="tx-title">No transactions yet</div></div></div>
+    {% endfor %}
+  </div>
+</main>
+{% endblock %}

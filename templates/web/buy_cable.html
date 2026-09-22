@@ -1,0 +1,33 @@
+{% extends "web/base.html" %}
+{% block content %}
+{% include "web/_service_nav.html" %}
+<main class="page-shell">
+  <div class="page-heading"><div><h1>TV subscription</h1><p>Keep your entertainment active with a quick renewal.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
+  <div class="form-card">
+    <form method="GET" action="{{ url_for('web.cable_page') }}">
+      <label>TV provider</label>
+      <select name="provider" onchange="this.form.submit()">
+        {% for p in ["DSTV", "GOTV", "STARTIMES"] %}
+        <option value="{{ p }}" {{ "selected" if p == provider }}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </form>
+
+    {% if plans %}
+    <form method="POST" action="{{ url_for('web.cable_page') }}">
+      <input type="hidden" name="provider" value="{{ provider }}">
+      <label>Smartcard / IUC number</label>
+      <input name="smartcard" placeholder="Enter customer number" required>
+      <label>Subscription plan</label>
+      <select name="plan_code" required>
+        <option value="" disabled selected>Select a TV plan</option>
+        {% for plan in plans %}<option value="{{ plan.code }}">{{ plan.name }} - ₦{{ "%.2f"|format(plan.amount) }}</option>{% endfor %}
+      </select>
+      <button type="submit">Subscribe</button>
+    </form>
+    {% else %}
+    <p>No TV plans are available right now.</p>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

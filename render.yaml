@@ -43,7 +43,11 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: ADMIN_PHONE
-        sync: false # Required for receiving customer support escalation messages
+        sync: false # Required for receiving customer support escalation messages

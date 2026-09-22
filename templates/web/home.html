@@ -1,0 +1,44 @@
+{% extends "web/base.html" %}
+{% block title %}WAJ VTU | Everyday services, one wallet{% endblock %}
+{% block body_class %}landing{% endblock %}
+{% block content %}
+<main class="landing-page">
+  <nav class="landing-nav">
+    <a class="brand-mark" href="{{ url_for('web.home') }}">WAJ VTU</a>
+    <div class="landing-nav-actions">
+      <a href="{{ url_for('auth.login') }}">Log in</a>
+      <a href="{{ url_for('auth.signup') }}" class="nav-cta">Create account</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-copy">
+      <div class="eyebrow">Fast, simple, always within reach</div>
+      <h1>Your everyday services, <em>sorted.</em></h1>
+      <p>Buy data, airtime, TV subscriptions, electricity and more from one calm, reliable wallet built for Nigeria.</p>
+      <div class="hero-actions">
+        <a class="primary" href="{{ url_for('auth.signup') }}">Get started</a>
+        <a class="ghost" href="{{ url_for('auth.login') }}">Sign in</a>
+      </div>
+    </div>
+    <div class="hero-panel" aria-label="WAJ wallet preview">
+      <div class="hero-panel-top"><span>WAJ wallet</span><span>● Secure</span></div>
+      <div class="hero-balance">
+        <small>Available balance</small>
+        <strong>₦24,850.00</strong>
+        <div class="hero-mini-grid">
+          <div><b>24/7</b>Access</div>
+          <div><b>1 tap</b>Checkout</div>
+          <div><b>Live</b>Updates</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="feature-strip">
+    <div class="feature"><b>One wallet</b><span>Fund once, then handle your essential services without starting over.</span></div>
+    <div class="feature"><b>Clear pricing</b><span>Choose the exact plan or service you need before you confirm.</span></div>
+    <div class="feature"><b>Made for mobile</b><span>A quick, focused experience that works wherever your day takes you.</span></div>
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "web/base.html" %}
+{% block content %}
+{% include "web/_service_nav.html" %}
+<main class="page-shell">
+  <div class="page-heading"><div><h1>Exam PINs</h1><p>Get WAEC and JAMB access PINs delivered after payment.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
+  <div class="form-card">
+    {% if plans %}
+    <form method="POST" action="{{ url_for('web.education_page') }}">
+      <label>Exam package</label>
+      <select name="exam" required>
+        <option value="" disabled selected>Select an exam package</option>
+        {% for plan in plans %}<option value="{{ plan.code }}">{{ plan.name }} - ₦{{ "%.2f"|format(plan.amount) }}</option>{% endfor %}
+      </select>
+      <label>Quantity</label>
+      <input name="quantity" type="number" min="1" value="1">
+      <button type="submit">Buy PIN</button>
+    </form>
+    {% else %}
+    <p>No exam packages are available right now.</p>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

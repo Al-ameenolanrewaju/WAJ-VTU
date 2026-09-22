@@ -74,6 +74,30 @@ def _failure(reference: str, message: str):
     return {"status": "FAILED", "reference": reference, "reason": message}
 
 
+def fetch_account_balance():
+    """Fetch the current ClubKonnect wallet balance for the admin dashboard."""
+    if MOCK_MODE:
+        return {"status": "SUCCESS", "balance": 100000.00}
+    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
+        return {"status": "FAILED", "reason": "ClubKonnect credentials are missing"}
+    try:
+        response = _provider_request("APIWalletBalance.asp", {})
+        raw_balance = (
+            response.get("balance")
+            or response.get("Balance")
+            or response.get("BALANCE")
+            or response.get("wallet_balance")
+        )
+        if raw_balance is None:
+            return {"status": "FAILED", "reason": response.get("msg", response.get("message", "Balance was not returned"))}
+        return {"status": "SUCCESS", "balance": float(str(raw_balance).replace(",", "")), "data": response}
+    except (TypeError, ValueError):
+        return {"status": "FAILED", "reason": "ClubKonnect returned an invalid balance"}
+    except Exception as exc:
+        logger.exception("Failed to fetch ClubKonnect balance")
+        return {"status": "FAILED", "reason": str(exc)}
+
+
 # --- DATA SERVICES ---
 
 
@@ -279,7 +303,22 @@ def fetch_cable_plans(provider: str):
                 continue
             if amount < 0:
                 continue
-            plans.append({"name": name, "code": code, "amount": amount})
+            raw_discount_amount = item.get("PRODUCT_DISCOUNT_AMOUNT")
+            raw_discount = item.get("PRODUCT_DISCOUNT", 0)
+            try:
+                discount_amount = float(raw_discount_amount) if raw_discount_amount not in (None, "") else amount
+                discount_percent = float(raw_discount or 0) * 100
+            except (TypeError, ValueError):
+                discount_amount = amount
+                discount_percent = 0.0
+            plans.append({
+                "name": name,
+                "code": code,
+                "amount": discount_amount,
+                "list_amount": amount,
+                "discount_amount": max(amount - discount_amount, 0),
+                "discount_percent": discount_percent,
+            })
 
         if not plans:
             logger.error(

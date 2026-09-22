@@ -1,0 +1,10 @@
+<nav class="site-nav">
+  <a class="site-brand" href="{{ url_for('web.dashboard') }}">WAJ VTU</a>
+  <button class="site-menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" onclick="const menu = this.nextElementSibling; const open = menu.classList.toggle('open'); this.setAttribute('aria-expanded', open);">☰</button>
+  <div class="site-nav-links">
+    <a href="{{ url_for('web.dashboard') }}">Dashboard</a>
+    <a href="{{ url_for('web.transactions_page') }}">Transactions</a>
+    <a class="site-nav-balance" href="{{ url_for('web.fund_wallet') }}">Fund wallet</a>
+    <a href="{{ url_for('auth.logout') }}">Log out</a>
+  </div>
+</nav>

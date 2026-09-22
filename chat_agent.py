@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from decimal import Decimal
 from datetime import datetime
 from groq import Groq
@@ -9,6 +10,47 @@ def get_groq_client():
     if not api_key:
         return None
     return Groq(api_key=api_key)
+
+
+def clean_whatsapp_text(text):
+    """Normalize model markdown to WhatsApp-friendly text."""
+    cleaned = str(text or "").strip()
+    cleaned = re.sub(r"(?m)^\s*\*{2,}\s*$", "", cleaned)
+    cleaned = re.sub(r"\*{2,}", "", cleaned)
+    cleaned = re.sub(r"^\s*\*+", "", cleaned).strip()
+    cleaned = re.sub(r"\*+\s*$", "", cleaned).strip()
+    return cleaned
+
+
+def build_context(history, max_user_turns=12):
+    """Keep full history in the database while sending complete recent turns to Groq."""
+    if not isinstance(history, list):
+        history = []
+    valid = [
+        message for message in history
+        if isinstance(message, dict) and message.get("role") in {"system", "user", "assistant", "tool"}
+    ]
+    system = next((message for message in valid if message.get("role") == "system"), {"role": "system", "content": SYSTEM_PROMPT})
+    conversation = [message for message in valid if message.get("role") != "system"]
+    user_indexes = [index for index, message in enumerate(conversation) if message.get("role") == "user"]
+    if len(user_indexes) <= max_user_turns:
+        return [system] + conversation
+
+    start = user_indexes[-max_user_turns]
+    older = conversation[:start]
+    recent = conversation[start:]
+    memory_lines = []
+    for message in older:
+        if message.get("role") in {"user", "assistant"} and message.get("content"):
+            content = clean_whatsapp_text(message["content"])
+            if content:
+                memory_lines.append(f"{message['role']}: {content[:300]}")
+    memory = "\n".join(memory_lines[-20:])
+    context = [system]
+    if memory:
+        context.append({"role": "system", "content": f"Long-term conversation memory from earlier messages:\n{memory}"})
+    context.extend(recent)
+    return context
 
 SYSTEM_PROMPT = """You are WAJ VTU Assistant, a helpful AI that allows users in Nigeria to buy Data, Airtime, Cable TV, Electricity, Betting Top-ups, and Education PINs.
 You have access to tools to fetch plans and execute transactions. 
@@ -152,15 +194,14 @@ def define_tools():
         {
             "type": "function",
             "function": {
-                "name": "generate_topup_link",
-                "description": "Generate a payment link to fund the user's wallet.",
+                "name": "get_funding_account",
+                "description": "Get the user's permanent dedicated bank account number for funding their wallet. The user can transfer any amount to this account at any time; the wallet is credited automatically. Requires the user to have an email on file — ask for one first if they don't.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "amount": {"type": "number", "description": "Amount to fund in Naira"},
-                        "email": {"type": "string", "description": "User's email address"}
+                        "email": {"type": "string", "description": "User's email address (required the first time; not needed again once the account exists)"}
                     },
-                    "required": ["amount", "email"]
+                    "required": []
                 }
             }
         },
@@ -216,7 +257,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         fetch_cable_plans, verify_smartcard, process_cable_tv,
         verify_meter as provider_verify_meter, process_electricity_payment
     )
-    from app import get_markup, settle_transaction, generate_payment_link
+    from app import get_markup, settle_transaction
     from models import Transaction, ScheduledTask
     
 
@@ -363,6 +404,17 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         smartcard = kwargs.get("smartcard")
         plan_code = kwargs.get("plan_code")
         amount = Decimal(str(kwargs.get("amount")))
+        api_cost_value = kwargs.get("api_cost")
+        api_discount_value = kwargs.get("api_discount_amount")
+        if api_cost_value is None:
+            matched_plan = next(
+                (plan for plan in fetch_cable_plans(provider) if str(plan.get("code")) == str(plan_code)),
+                None,
+            )
+            api_cost_value = matched_plan.get("amount", amount) if matched_plan else amount
+            api_discount_value = matched_plan.get("discount_amount", "0") if matched_plan else "0"
+        api_cost = Decimal(str(api_cost_value))
+        api_discount = Decimal(str(api_discount_value or "0"))
         
         if user.wallet_balance < amount:
             return {"status": "error", "message": f"Insufficient balance. Wallet balance is NGN {user.wallet_balance:,.2f}"}
@@ -374,8 +426,20 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         user.wallet_balance -= amount
         db.session.commit()
         
-        result = process_cable_tv(provider, smartcard, plan_code, float(amount), provider_phone)
-        success = settle_transaction(user, result, amount, "CABLE", smartcard, f"{provider} {plan_code}")
+        result = process_cable_tv(provider, smartcard, plan_code, float(api_cost), provider_phone)
+        success = settle_transaction(
+            user,
+            result,
+            amount,
+            "CABLE",
+            smartcard,
+            f"{provider} {plan_code}",
+            meta_data={
+                "api_cost": str(api_cost),
+                "api_discount_amount": str(api_discount),
+                "markup_amount": str(amount - api_cost),
+            },
+        )
         if success:
             return {"status": "success", "reference": result['reference'], "message": "Cable TV subscription successful"}
         else:
@@ -410,18 +474,86 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         else:
             return {"status": "error", "message": result.get("reason", "Payment failed")}
 
-    elif name == "generate_topup_link":
-        amount = Decimal(str(kwargs.get("amount")))
+    elif name == "get_funding_account":
         email = kwargs.get("email")
-        
-        result = generate_payment_link(email, amount, provider_phone, pass_fee_to_user=True)
+        if email and not user.email:
+            user.email = email
+            db.session.commit()
+
+        if not user.email:
+            return {"status": "error", "message": "I need an email address to set up your funding account. What's your email?"}
+
+        from wallet_service import get_or_create_dva
+        result = get_or_create_dva(user, db)
         if result.get("status") == "SUCCESS":
-            from app import ensure_deposit_transaction
-            ensure_deposit_transaction(user, result["reference"], result.get("net_amount", amount), user.phone, status="PENDING")
-            return {"status": "success", "gross_amount": float(result["gross_amount"]), "payment_url": result["payment_url"]}
-        else:
-            return {"status": "error", "message": result.get("reason", "Could not generate link")}
-            
+            return {
+                "status": "success",
+                "account_number": result["account_number"],
+                "bank_name": result.get("bank_name"),
+                "message": "Share this account number and bank name with the user. Tell them to transfer any amount and their wallet will be credited automatically, usually within a minute or two, minus a small percentage fee.",
+            }
+        return {"status": "error", "message": result.get("reason", "Could not set up a funding account right now.")}
+
+    elif name == "verify_betting":
+        platform = kwargs.get("platform")
+        account_id = kwargs.get("account_id")
+        from provider import verify_betting_account
+        verification = verify_betting_account(platform, account_id)
+        if verification.get("valid"):
+            return {"status": "success", "message": "Betting account verified", "account_name": verification.get("account_name")}
+        return {"status": "error", "message": verification.get("message", "Invalid betting account")}
+
+    elif name == "buy_betting":
+        platform = kwargs.get("platform")
+        account_id = kwargs.get("account_id")
+        amount = Decimal(str(kwargs.get("amount")))
+        from provider import process_betting_topup
+
+        charge_amount = amount + get_markup("BETTING", amount)
+        if user.wallet_balance < charge_amount:
+            return {"status": "error", "message": f"Insufficient balance. Required: NGN {charge_amount:,.2f}"}
+
+        user.wallet_balance -= charge_amount
+        db.session.commit()
+
+        result = process_betting_topup(platform, account_id, float(amount), provider_phone)
+        success = settle_transaction(user, result, charge_amount, "BETTING", account_id, f"{platform} betting top-up")
+        if success:
+            return {"status": "success", "reference": result['reference'], "message": "Betting wallet funded successfully"}
+        return {"status": "error", "message": result.get("reason", "Provider failed")}
+
+    elif name == "get_education_packages":
+        from provider import fetch_education_packages
+        packages = fetch_education_packages()
+        if not packages:
+            return {"status": "error", "message": "No packages available right now."}
+
+        listed = []
+        for pkg in packages:
+            base_cost = Decimal(str(pkg["amount"]))
+            cost = base_cost + get_markup("EDU", base_cost)
+            listed.append(f"- {pkg.get('name')}: ₦{cost} (System Code: {pkg.get('code')})")
+        return {"status": "success", "plans_list": "\n".join(listed), "message": "Present these options to the user clearly. Do not show the System Code to the user."}
+
+    elif name == "buy_education_pin":
+        exam = kwargs.get("exam")
+        quantity = int(kwargs.get("quantity", 1))
+        amount = Decimal(str(kwargs.get("amount")))
+        from provider import process_education_pin
+
+        charge_amount = amount + get_markup("EDU", amount)
+        if user.wallet_balance < charge_amount:
+            return {"status": "error", "message": f"Insufficient balance. Required: NGN {charge_amount:,.2f}"}
+
+        user.wallet_balance -= charge_amount
+        db.session.commit()
+
+        result = process_education_pin(exam, quantity, provider_phone)
+        success = settle_transaction(user, result, charge_amount, "EDU", exam, f"{exam} PIN x{quantity}")
+        if success:
+            return {"status": "success", "reference": result['reference'], "pins": result.get("pins", []), "message": "PIN generated successfully"}
+        return {"status": "error", "message": result.get("reason", "Provider failed")}
+
     return {"status": "error", "message": "Unknown tool"}
 
 
@@ -442,18 +574,19 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
         send_whatsapp_message(chat_id, "AI services are currently unavailable. Please check configuration.")
         return
         
-    # Get memory
-    state_data = user.state_data or {}
-    messages = state_data.get("messages", [])
-    
-    if not messages:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        
-    # Truncate history to last 15 items to save tokens (system + 14 msgs)
-    if len(messages) > 15:
-        messages = [messages[0]] + messages[-14:]
-        
+    # Keep the complete transcript in Supabase and build a safe recent context for Groq.
+    state_data = user.state_data if isinstance(user.state_data, dict) else {}
+    history = state_data.get("messages", [])
+    if not isinstance(history, list):
+        history = []
+    messages = build_context(history)
     messages.append({"role": "user", "content": text})
+    turn_start = len(messages) - 1
+    if not history or not any(message.get("role") == "system" for message in history if isinstance(message, dict)):
+        history = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+    history.append({"role": "user", "content": text})
+    user.state_data = {"messages": history}
+    db.session.commit()
     tools = define_tools()
     
     try:
@@ -507,15 +640,16 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
             response_message = response.choices[0].message
             
         # Final textual response
-        final_text = response_message.content
+        final_text = clean_whatsapp_text(response_message.content)
         if final_text:
             messages.append({"role": "assistant", "content": final_text})
             
             from app import send_whatsapp_message
             send_whatsapp_message(chat_id, final_text)
             
-        # Save memory
-        user.state_data = {"messages": messages}
+        # Save only the generated part of this turn; older history remains intact.
+        history.extend(messages[turn_start + 1:])
+        user.state_data = {"messages": history}
         db.session.commit()
         
     except Exception as e:

@@ -18,6 +18,10 @@ class User(db.Model):
     name = db.Column(db.String(100), default="User")
     wallet_balance = db.Column(db.Numeric(10, 2), default=0.00, nullable=False)
 
+    # Website login (same wallet/user record as the WhatsApp bot)
+    email = db.Column(db.String(120), unique=True, nullable=True, index=True)
+    password_hash = db.Column(db.String(255), nullable=True)
+
     # User Flow & State Management
     current_state = db.Column(db.String(50), default="IDLE", nullable=False)
     state_data = db.Column(db.JSON, default=dict)

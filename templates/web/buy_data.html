@@ -1,0 +1,45 @@
+{% extends "web/base.html" %}
+{% block content %}
+{% include "web/_service_nav.html" %}
+<main class="page-shell">
+  <div class="page-heading"><div><h1>Buy data</h1><p>Choose a bundle and send it to any number instantly.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
+  <div class="form-card">
+    <form method="GET" action="{{ url_for('web.buy_data') }}">
+      <label>Network</label>
+      <select name="network" onchange="this.form.submit()">
+        {% for net in ["MTN", "AIRTEL", "GLO", "9MOBILE"] %}
+        <option value="{{ net }}" {{ "selected" if net == network }}>{{ net }}</option>
+        {% endfor %}
+      </select>
+    </form>
+
+    {% if plans %}
+    <form method="POST" action="{{ url_for('web.buy_data') }}">
+      <input type="hidden" name="network" value="{{ network }}">
+      <label>Recipient phone number</label>
+      <input name="phone" placeholder="08012345678" required>
+      <label>Data plan</label>
+      <select name="plan_code" required>
+        <option value="" disabled selected>Select a data plan</option>
+        {% for plan in plans %}
+        <option value="{{ plan.code }}" data-amount="{{ plan.amount }}">{{ plan.name }} - ₦{{ "%.2f"|format(plan.amount) }}</option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="amount" id="data-amount" required>
+      <button type="submit">Buy Data</button>
+    </form>
+    {% else %}
+    <p>No data plans are available right now.</p>
+    {% endif %}
+  </div>
+</main>
+<script>
+  const planSelect = document.querySelector('select[name="plan_code"]');
+  const amountInput = document.getElementById('data-amount');
+  if (planSelect && amountInput) {
+    planSelect.addEventListener('change', () => {
+      amountInput.value = planSelect.options[planSelect.selectedIndex].dataset.amount;
+    });
+  }
+</script>
+{% endblock %}

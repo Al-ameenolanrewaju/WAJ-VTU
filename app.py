@@ -6,9 +6,10 @@ import hmac
 import secrets
 import requests
 import threading
+from dotenv import load_dotenv
 from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from markupsafe import escape
 from sqlalchemy import inspect, text, func, or_
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort
@@ -16,7 +17,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 1. Import db, User, and Transaction directly from models.py
 from models import db, User, Transaction, ServiceMarkup, PaymentFeeTier, AdminAuditLog
-from wallet_service import generate_payment_link
+from wallet_service import generate_payment_link, get_or_create_dva, get_payment_fee_percentage
 
 # Import provider functions from the ClubKonnect adapter.
 from provider import (
@@ -31,14 +32,20 @@ from provider import (
     verify_betting_account,
     process_betting_topup,
     fetch_education_packages,
-    process_education_pin
+    process_education_pin,
+    fetch_account_balance,
 )
+load_dotenv()
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+# Registered near the bottom of this file (after `db.init_app(app)` and the
+# startup block below) to avoid a circular import — web.py imports `app`
+# from this module, so it must exist before web.py is imported.
 secret_key = os.getenv("SECRET_KEY")
 if not secret_key:
     raise RuntimeError("SECRET_KEY environment variable is required for secure sessions")
 app.config['SECRET_KEY'] = secret_key
+app.config['DEBUG'] = os.getenv('FLASK_ENV', '').strip().lower() == 'development'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV', '').strip().lower() == 'production' or os.getenv('APP_BASE_URL', '').lower().startswith('https://')
@@ -50,8 +57,14 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is required")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+if not DATABASE_URL.startswith("postgresql://"):
+    raise RuntimeError("DATABASE_URL must point to a Supabase PostgreSQL database; local SQLite is not supported")
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,
+    'pool_recycle': 300,
+}
 ALLOW_DB_MUTATIONS = os.getenv("ALLOW_DB_MUTATIONS", "false").strip().lower() in {"1", "true", "yes", "on"}
 BRIDGE_BASE_URL = os.getenv("BRIDGE_URL") or os.getenv(
     "NODE_BRIDGE_URL", "http://localhost:3000"
@@ -71,9 +84,24 @@ META_API_VERSION = os.getenv("META_API_VERSION", "v20.0").strip()
 META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "").strip()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", ADMIN_USERNAME).strip().lower()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "").strip()
+app.config['ADMIN_EMAIL'] = ADMIN_EMAIL
+app.config['RESEND_API_KEY'] = RESEND_API_KEY
+app.config['RESEND_FROM_EMAIL'] = RESEND_FROM_EMAIL
 
 # 2. Bind the single db instance from models.py to app
 db.init_app(app)
+
+from auth import auth_bp  # noqa: E402
+app.register_blueprint(auth_bp)
+# web.py imports `app` from this module, so it must be imported after `app`
+# is defined above (deferred import avoids a circular-import error).
+def _register_web_blueprint():
+    from web import web_bp
+    app.register_blueprint(web_bp)
+_register_web_blueprint()
 
 
 def ensure_database_schema():
@@ -91,6 +119,8 @@ def ensure_database_schema():
             "dva_account_number": "VARCHAR(20)",
             "dva_bank_name": "VARCHAR(50)",
             "version_id": "INTEGER NOT NULL DEFAULT 1",
+            "email": "VARCHAR(120)",
+            "password_hash": "VARCHAR(255)",
         },
         "transactions": {
             "meta_data": json_type,
@@ -107,6 +137,17 @@ def ensure_database_schema():
                     text(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_type}')
                 )
     db.session.commit()
+
+    # ORM-level unique=True on User.email doesn't add a DB constraint when the
+    # column is added via ALTER TABLE above, so create the unique index
+    # explicitly (partial index skips NULLs, since most users have no email).
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("users")} if "users" in existing_tables else set()
+    if "users" in existing_tables and "ix_users_email_unique" not in existing_indexes:
+        where_clause = "WHERE email IS NOT NULL" if dialect == "postgresql" else ""
+        db.session.execute(
+            text(f'CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email_unique ON "users" (email) {where_clause}')
+        )
+        db.session.commit()
 
 
 SERVICE_TYPES = ("DATA_MTN", "DATA_AIRTEL", "DATA_GLO", "DATA_9MOBILE", "AIRTIME", "CABLE", "ELECTRICITY", "BETTING", "EDU")
@@ -154,12 +195,6 @@ def _masked_database_target():
 
 with app.app_context():
     print(f"[startup] Connecting to database -> {_masked_database_target()}")
-    if DATABASE_URL.startswith("sqlite://"):
-        print(
-            "[startup] WARNING: DATABASE_URL is SQLite. On Render (and most hosts) the "
-            "filesystem is wiped on every deploy/restart, so all users and transactions "
-            "will be lost each time you redeploy. Use a persistent Postgres URL instead."
-        )
 
 if ALLOW_DB_MUTATIONS:
     with app.app_context():
@@ -305,7 +340,8 @@ def add_security_headers(response):
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data:; "
         "object-src 'none'; "
         "base-uri 'self'; "
@@ -357,7 +393,7 @@ def get_user_session_data(user):
         return {}
 
 
-def settle_transaction(user, result, amount, transaction_type, recipient, description):
+def settle_transaction(user, result, amount, transaction_type, recipient, description, meta_data=None):
     """Persist a successful provider result or refund the reserved wallet amount."""
     amount = Decimal(str(amount))
     if result.get("status") == "SUCCESS":
@@ -369,7 +405,7 @@ def settle_transaction(user, result, amount, transaction_type, recipient, descri
             recipient=recipient,
             status="SUCCESS",
             description=description,
-            meta_data=result.get("data", {}),
+            meta_data={**result.get("data", {}), **(meta_data or {})},
         )
         db.session.add(tx)
         db.session.commit()
@@ -481,6 +517,16 @@ def record_admin_audit(username, action, success, reason=None):
 
 
 def require_admin_auth():
+    website_user_id = session.get("user_id")
+    if website_user_id and ADMIN_EMAIL:
+        website_user = db.session.get(User, website_user_id)
+        if website_user and (website_user.email or "").strip().lower() == ADMIN_EMAIL:
+            record_admin_audit(website_user.email, "login", True, "Successful website admin login")
+            return None
+        if website_user:
+            record_admin_audit(website_user.email or "unknown", "login", False, "Website user is not an administrator")
+            return jsonify({"status": "error", "reason": "Administrator access required"}), 403
+
     auth = request.authorization
     username = auth.username if auth else ""
     if not ADMIN_USERNAME or not ADMIN_PASSWORD:
@@ -589,6 +635,61 @@ def paystack_webhook():
         return jsonify({"status": "ignored"}), 200
 
     data = event.get("data") or {}
+
+    # Bank transfer into a Dedicated Virtual Account: Paystack sends this with
+    # channel "dedicated_nuban" and no custom metadata (the customer just
+    # transferred an arbitrary amount), so the user is matched by
+    # customer_code instead of phone, and our fee is deducted from whatever
+    # amount arrived rather than pre-added at checkout.
+    if data.get("channel") == "dedicated_nuban":
+        return _handle_dva_charge(data)
+
+    return _handle_checkout_link_charge(data)
+
+
+def _handle_dva_charge(data):
+    reference = str(data.get("reference", "")).strip()
+    customer_code = ((data.get("customer") or {}).get("customer_code") or "").strip()
+    try:
+        paid_gross = (Decimal(str(data.get("amount", 0))) / Decimal("100")).quantize(Decimal("0.01"))
+    except Exception:
+        return jsonify({"status": "error", "reason": "Invalid payment amount"}), 400
+
+    if not reference or not customer_code or paid_gross <= 0:
+        return jsonify({"status": "error", "reason": "Invalid DVA payment payload"}), 400
+
+    user = User.query.filter_by(paystack_customer_code=customer_code).first()
+    if not user:
+        app.logger.error("DVA charge.success for unknown customer_code=%s reference=%s", customer_code, reference)
+        return jsonify({"status": "error", "reason": "Unknown customer"}), 400
+
+    fee_rate = get_payment_fee_percentage(paid_gross) / Decimal("100")
+    net_credit = (paid_gross * (Decimal("1.00") - fee_rate)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    tx = Transaction.query.filter_by(reference=reference).first()
+    if tx is not None:
+        if tx.status == "SUCCESS":
+            if not (tx.meta_data or {}).get("credited"):
+                reconcile_successful_deposit(user, tx, net_credit, paid_gross, data)
+            return jsonify({"status": "ok", "duplicate": True, "credited_amount": str(net_credit)}), 200
+    else:
+        tx = Transaction(
+            user=user,
+            reference=reference,
+            amount=net_credit,
+            type="DEPOSIT",
+            recipient=user.phone,
+            status="SUCCESS",
+            description=f"Bank transfer to {user.dva_bank_name or 'dedicated account'}; gross paid NGN {paid_gross:,.2f}",
+            meta_data={},
+        )
+        db.session.add(tx)
+
+    reconcile_successful_deposit(user, tx, net_credit, paid_gross, data)
+    return jsonify({"status": "ok", "credited_amount": str(net_credit)}), 200
+
+
+def _handle_checkout_link_charge(data):
     reference = str(data.get("reference", "")).strip()
     metadata = data.get("metadata") or {}
     phone = str(metadata.get("phone_number", "")).strip()
@@ -727,7 +828,6 @@ def categorize_data_plans(plans):
     return categorized
 
 
-@app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint for Render monitoring."""
@@ -837,6 +937,10 @@ ADMIN_BASE_TEMPLATE = """
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
         body { background-color: #f1f5f9; color: #1e293b; }
+        .account-badge { display:inline-block; padding:3px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+        .account-badge.website { background:#fef3c7; color:#92400e; }
+        .account-badge.whatsapp { background:#dcfce7; color:#166534; }
+        .account-badge.linked { background:#dbeafe; color:#1e40af; }
 
         .navbar {
             background-color: #0f172a;
@@ -872,10 +976,12 @@ ADMIN_BASE_TEMPLATE = """
 
         .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
         .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 24px; }
-        .card-grid { display: flex; gap: 20px; margin-bottom: 25px; }
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 25px; }
         .card { background: white; padding: 20px; border-radius: 8px; flex: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .card h3 { font-size: 12px; color: #64748b; text-transform: uppercase; margin-bottom: 8px; }
         .card p { font-size: 24px; font-weight: bold; color: #0f172a; }
+        .card small { display:block; color:#94a3b8; font-size:12px; line-height:1.4; margin-top:8px; }
+        .dashboard-heading { margin: 28px 0 12px; color:#0f172a; font-size:18px; }
 
         table { width: 100%; background: white; border-collapse: collapse; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
@@ -1011,6 +1117,41 @@ def admin_dashboard():
     successful_txs = Transaction.query.filter_by(status="SUCCESS").all()
     total_inflow = sum((tx.amount for tx in successful_txs if tx.type == "DEPOSIT"), Decimal("0.00"))
     total_outflow = sum((tx.amount for tx in successful_txs if tx.type != "DEPOSIT"), Decimal("0.00"))
+    markup_rates = {
+        row.service_type: Decimal(str(row.markup_amount))
+        for row in ServiceMarkup.query.all()
+    }
+    data_rates = [rate for service, rate in markup_rates.items() if service.startswith("DATA_")]
+    default_data_rate = sum(data_rates, Decimal("0.00")) / len(data_rates) if data_rates else Decimal("0.00")
+
+    def estimated_markup(tx):
+        if tx.type == "DEPOSIT":
+            return Decimal("0.00")
+        stored_markup = (tx.meta_data or {}).get("markup_amount") if isinstance(tx.meta_data, dict) else None
+        if stored_markup is not None:
+            return Decimal(str(stored_markup))
+        rate = markup_rates.get(tx.type, default_data_rate if tx.type == "DATA" else Decimal("0.00"))
+        if rate <= 0:
+            return Decimal("0.00")
+        return (Decimal(str(tx.amount)) * rate / (Decimal("100.00") + rate)).quantize(Decimal("0.01"))
+
+    def api_discount(tx):
+        if not isinstance(tx.meta_data, dict):
+            return Decimal("0.00")
+        return Decimal(str(tx.meta_data.get("api_discount_amount", "0.00")))
+
+    total_markup_earned = sum((estimated_markup(tx) for tx in successful_txs), Decimal("0.00"))
+    total_api_discount = sum((api_discount(tx) for tx in successful_txs), Decimal("0.00"))
+    today_markup_earned = sum(
+        (
+            estimated_markup(tx)
+            for tx in successful_txs
+            if normalize_datetime(tx.created_at) and normalize_datetime(tx.created_at) >= start_of_day
+        ),
+        Decimal("0.00"),
+    )
+    provider_balance_result = fetch_account_balance()
+    provider_balance = provider_balance_result.get("balance")
     today_inflow = sum(
         (
             tx.amount
@@ -1090,12 +1231,21 @@ def admin_dashboard():
         """
 
     content = f"""
+    <h2 class="dashboard-heading">Provider & margin</h2>
+    <div class="card-grid">
+        <div class="card"><h3>ClubKonnect Balance</h3><p>{'₦{:,.2f}'.format(provider_balance) if provider_balance is not None else 'Unavailable'}</p><small>{escape(provider_balance_result.get('reason', 'Live provider balance'))}</small></div>
+        <div class="card"><h3>Estimated Markup Earned</h3><p>₦{total_markup_earned:,.2f}</p><small>Customer charges minus estimated API cost</small></div>
+        <div class="card"><h3>API Discounts Captured</h3><p>₦{total_api_discount:,.2f}</p><small>Provider discounts saved on eligible plans</small></div>
+        <div class="card"><h3>Markup Earned Today</h3><p>₦{today_markup_earned:,.2f}</p><small>Based on successful service sales</small></div>
+    </div>
+    <h2 class="dashboard-heading">Business overview</h2>
     <div class="card-grid">
         <div class="card"><h3>Total Inflow</h3><p>₦{total_inflow:,.2f}</p></div>
         <div class="card"><h3>Total Outflow</h3><p>₦{total_outflow:,.2f}</p></div>
         <div class="card"><h3>Today's Inflow</h3><p>₦{today_inflow:,.2f}</p></div>
         <div class="card"><h3>Today's Outflow</h3><p>₦{today_outflow:,.2f}</p></div>
     </div>
+    <h2 class="dashboard-heading">Operations</h2>
     <div class="card-grid">
         <div class="card"><h3>Total User Balances</h3><p>₦{total_user_balances:,.2f}</p></div>
         <div class="card"><h3>Total Transactions</h3><p>{total_transactions}</p></div>
@@ -1157,10 +1307,22 @@ def admin_users():
 
     user_rows = ""
     for u in users:
+        has_website_login = bool(u.email and u.password_hash)
+        has_whatsapp_identity = bool(u.whatsapp_id and not str(u.whatsapp_id).startswith("web_"))
+        if has_website_login and has_whatsapp_identity:
+            account_type = "Linked"
+            account_class = "linked"
+        elif has_website_login:
+            account_type = "Website"
+            account_class = "website"
+        else:
+            account_type = "WhatsApp"
+            account_class = "whatsapp"
         user_rows += f"""
         <tr>
             <td>#{escape(u.id)}</td>
             <td><b>{escape(u.phone)}</b></td>
+            <td><span class="account-badge {account_class}">{account_type}</span><br><small>{escape(u.email or 'WhatsApp only')}</small></td>
             <td>{escape(format_admin_datetime(u.created_at))}</td>
             <td>₦{u.wallet_balance:,.2f}</td>
             <td><code>{escape(u.current_state)}</code></td>
@@ -1188,10 +1350,10 @@ def admin_users():
     </div>
     <table>
         <thead>
-            <tr><th>User ID</th><th>Phone Number</th><th>Joined</th><th>Wallet Balance</th><th>Bot State</th><th>Manual Wallet Top-up</th></tr>
+            <tr><th>User ID</th><th>Phone Number</th><th>Account Source</th><th>Joined</th><th>Wallet Balance</th><th>Bot State</th><th>Manual Wallet Top-up</th></tr>
         </thead>
         <tbody>
-            {user_rows if user_rows else '<tr><td colspan="6" style="text-align:center;">No users found</td></tr>'}
+            {user_rows if user_rows else '<tr><td colspan="7" style="text-align:center;">No users found</td></tr>'}
         </tbody>
     </table>
     """
@@ -1809,4 +1971,4 @@ def run_scheduled_tasks():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=app.config['DEBUG'])

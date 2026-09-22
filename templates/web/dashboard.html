@@ -1,0 +1,84 @@
+{% extends "web/base.html" %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<header>
+  <div class="header-top">
+    <div>
+      <div class="dashboard-brand">WAJ VTU</div>
+      <div class="greeting">Welcome back, <strong>{{ user.name or "there" }}</strong></div>
+    </div>
+    <div class="header-tools">
+      {% if is_admin %}<a class="admin-link" href="{{ url_for('admin_dashboard') }}">Admin panel</a>{% endif %}
+      <a class="avatar" href="{{ url_for('auth.logout') }}" title="Log out">{{ (user.name or "U")[0]|upper }}</a>
+    </div>
+  </div>
+
+  <div class="balance-card">
+    <div class="balance-label">Available wallet balance</div>
+    <div class="balance-amount"><span>₦</span>{{ "{:,.2f}".format(user.wallet_balance) }}</div>
+    <div class="wallet-hint"><span>Use your balance for any service</span><strong>● Ready to use</strong></div>
+    <div class="balance-actions">
+      <a class="btn-primary" href="{{ url_for('web.fund_wallet') }}">＋ Add money</a>
+      <a class="btn-secondary" href="{{ url_for('web.transactions_page') }}">View history</a>
+    </div>
+  </div>
+</header>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div class="flash-wrap">
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endwith %}
+
+<main class="section">
+  <div class="dashboard-layout">
+    <section class="dashboard-panel">
+      <div class="dashboard-section-label">
+        <div><div class="section-title" style="margin-bottom:0;">Quick services</div><p>Choose what you want to pay for</p></div>
+      </div>
+      <div class="services-grid">
+    <a class="service-tile" href="{{ url_for('web.airtime_page') }}">
+      <div class="service-icon icon-airtime">📱</div><strong>Airtime</strong><small>Recharge a number</small>
+    </a>
+    <a class="service-tile" href="{{ url_for('web.buy_data') }}">
+      <div class="service-icon icon-data">📶</div><strong>Data</strong><small>Buy a data bundle</small>
+    </a>
+    <a class="service-tile" href="{{ url_for('web.electricity_page') }}">
+      <div class="service-icon icon-electric">⚡</div><strong>Electricity</strong><small>Pay a power bill</small>
+    </a>
+    <a class="service-tile" href="{{ url_for('web.cable_page') }}">
+      <div class="service-icon icon-tv">📺</div><strong>TV</strong><small>Renew subscription</small>
+    </a>
+    <a class="service-tile" href="{{ url_for('web.education_page') }}">
+      <div class="service-icon icon-exam">📄</div><strong>Exam PIN</strong><small>WAEC or JAMB</small>
+    </a>
+    <a class="service-tile" href="{{ url_for('web.betting_page') }}">
+      <div class="service-icon icon-betting">🎯</div><strong>Betting</strong><small>Fund your wallet</small>
+    </a>
+      </div>
+    </section>
+
+    <section class="dashboard-panel">
+      <div class="tx-header">
+        <div><div class="section-title" style="margin-bottom:0;">Recent activity</div><div class="section-kicker">Your latest payments and wallet updates</div></div>
+        <a href="{{ url_for('web.transactions_page') }}">See all</a>
+      </div>
+      <div class="tx-list">
+        {% for tx in transactions %}
+        <div class="tx-item">
+          <div class="tx-icon icon-{{ tx.type|lower if tx.type|lower in ['data','airtime','electric','tv'] else 'more' }}">
+            {% if tx.type == 'DATA' %}📶{% elif tx.type == 'AIRTIME' %}📱{% elif tx.type == 'ELECTRICITY' %}⚡{% elif tx.type == 'CABLE' %}📺{% elif tx.type == 'BETTING' %}🎯{% elif tx.type == 'EDU' %}📄{% elif tx.type == 'DEPOSIT' %}＋{% else %}•••{% endif %}
+          </div>
+          <div class="tx-details"><div class="tx-title">{{ tx.type|title }}{% if tx.recipient %} — {{ tx.recipient }}{% endif %}</div><div class="tx-meta">{{ tx.created_at.strftime("%b %d, %I:%M %p") }}</div></div>
+          <div class="tx-right"><div class="tx-amount">{{ "+" if tx.type == "DEPOSIT" else "-" }}₦{{ "{:,.2f}".format(tx.amount) }}</div><div class="tx-status status-{{ 'success' if tx.status == 'SUCCESS' else ('pending' if tx.status == 'PENDING' else 'failed') }}">{{ tx.status|title }}</div></div>
+        </div>
+        {% else %}<div class="tx-item"><div class="tx-details"><div class="tx-title">No transactions yet</div><div class="tx-meta">Your activity will appear here.</div></div></div>{% endfor %}
+      </div>
+    </section>
+  </div>
+</main>
+{% endblock %}
