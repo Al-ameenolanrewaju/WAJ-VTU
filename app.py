@@ -65,6 +65,12 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,
     'pool_recycle': 300,
 }
+if DATABASE_URL.startswith("postgresql://"):
+    # Supabase pooler connections can arrive with an empty search_path.
+    # Pin DDL and queries to the standard schema used by this application.
+    app.config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {
+        'options': '-csearch_path=public'
+    }
 ALLOW_DB_MUTATIONS = os.getenv("ALLOW_DB_MUTATIONS", "false").strip().lower() in {"1", "true", "yes", "on"}
 BRIDGE_BASE_URL = os.getenv("BRIDGE_URL") or os.getenv(
     "NODE_BRIDGE_URL", "http://localhost:3000"
@@ -198,6 +204,8 @@ with app.app_context():
 
 if ALLOW_DB_MUTATIONS:
     with app.app_context():
+        # Create every currently declared model, including tables added after
+        # the original deployment (such as scheduled_tasks and saved_services).
         db.create_all()
         ensure_database_schema()
         seed_service_markups()
