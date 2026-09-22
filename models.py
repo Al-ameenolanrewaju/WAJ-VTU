@@ -73,6 +73,22 @@ class Transaction(db.Model):
         return f"<Transaction {self.reference} - {self.type} - {self.status}>"
 
 
+class SavedService(db.Model):
+    __tablename__ = 'saved_services'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    service_type = db.Column(db.String(20), nullable=False, index=True)
+    label = db.Column(db.String(100), nullable=False)
+    provider = db.Column(db.String(50), nullable=True)
+    identifier = db.Column(db.String(100), nullable=False)
+    service_metadata = db.Column(db.JSON, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+
+    def __repr__(self):
+        return f"<SavedService {self.service_type} - {self.label}>"
+
+
 class ScheduledTask(db.Model):
     __tablename__ = 'scheduled_tasks'
 

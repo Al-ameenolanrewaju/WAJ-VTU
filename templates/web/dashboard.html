@@ -24,6 +24,36 @@
   </div>
 </header>
 
+<div class="dashboard-bot-ad">
+  <div class="bot-ad">
+    <div class="bot-ad-copy">
+      <div class="bot-ad-label">WAJ VTU on WhatsApp</div>
+      <h2>Use the bot when you’re on the go</h2>
+      <p>Buy data, airtime, pay bills and check services directly from WhatsApp.</p>
+    </div>
+    <a class="bot-ad-cta" href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU" target="_blank" rel="noopener">Open WhatsApp bot</a>
+  </div>
+</div>
+
+{% if saved_services %}
+<section class="section" style="padding-top:0;">
+  <div class="dashboard-panel">
+    <div class="tx-header">
+      <div><div class="section-title" style="margin-bottom:0;">Saved services</div><div class="section-kicker">Start repeat payments faster</div></div>
+    </div>
+    <div class="tx-list">
+      {% for saved in saved_services %}
+      <div class="tx-item">
+        <div class="tx-icon icon-more">★</div>
+        <div class="tx-details"><div class="tx-title">{{ saved.label }}</div><div class="tx-meta">{{ saved.service_type|title }}{% if saved.provider %} · {{ saved.provider }}{% endif %} · {{ saved.identifier }}</div></div>
+        <div class="tx-right"><form method="POST" action="{{ url_for('web.delete_saved_service', saved_service_id=saved.id) }}"><button type="submit" class="btn-secondary" style="padding:7px 10px;">Remove</button></form></div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
   <div class="flash-wrap">

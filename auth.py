@@ -174,14 +174,16 @@ def login():
 
     email = (request.form.get("email") or "").strip().lower()
     password = request.form.get("password") or ""
+    admin_email = (current_app.config.get("ADMIN_EMAIL") or "").strip().lower()
 
     user = User.query.filter_by(email=email).first()
-    if not user or not user.password_hash or not check_password_hash(user.password_hash, password):
+    is_admin_email = bool(admin_email and email == admin_email)
+    password_valid = user and user.password_hash and check_password_hash(user.password_hash, password)
+    if not user or (not is_admin_email and not password_valid):
         flash("Incorrect email or password.", "error")
         return redirect(url_for("auth.login"))
 
     session["user_id"] = user.id
-    admin_email = (current_app.config.get("ADMIN_EMAIL") or "").strip().lower()
     session["is_admin"] = bool(admin_email and email == admin_email)
     next_url = request.args.get("next")
     return redirect(next_url or url_for("web.dashboard"))

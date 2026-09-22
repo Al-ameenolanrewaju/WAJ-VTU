@@ -16,9 +16,12 @@
         <option value="POSTPAID">Postpaid</option>
       </select>
       <label>Meter number</label>
+      {% if saved_services %}<select onchange="document.querySelector('[name=meter_number]').value=this.value"><option value="">Use a saved meter</option>{% for saved in saved_services %}<option value="{{ saved.identifier }}">{{ saved.label }}</option>{% endfor %}</select>{% endif %}
       <input name="meter_number" placeholder="Enter meter number" required>
       <label>Payment amount</label>
       <input name="amount" type="number" min="100" step="0.01" placeholder="Amount in NGN" required>
+      <label><input type="checkbox" name="save_service"> Save this meter for next time</label>
+      <input name="save_label" placeholder="Label (optional)">
       <button type="submit">Pay Bill</button>
     </form>
   </div>

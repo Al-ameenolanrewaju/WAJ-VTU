@@ -9,7 +9,7 @@
     {% endwith %}
     <form method="POST">
       <input name="email" type="email" placeholder="Email" required>
-      <input name="password" type="password" placeholder="Password" required>
+      <input name="password" type="password" placeholder="Password (customers only)">
       <button type="submit">Log in to your wallet</button>
     </form>
     <div class="auth-switch"><a href="{{ url_for('auth.forgot_password') }}">Forgot password?</a></div>

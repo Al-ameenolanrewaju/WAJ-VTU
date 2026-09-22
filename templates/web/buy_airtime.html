@@ -13,9 +13,12 @@
         <option value="9MOBILE">9mobile</option>
       </select>
       <label>Recipient phone number</label>
+      {% if saved_services %}<select onchange="document.querySelector('[name=phone]').value=this.value"><option value="">Use a saved number</option>{% for saved in saved_services %}<option value="{{ saved.identifier }}">{{ saved.label }}</option>{% endfor %}</select>{% endif %}
       <input name="phone" placeholder="08012345678" required>
       <label>Amount</label>
       <input name="amount" type="number" min="50" step="0.01" placeholder="Amount in NGN" required>
+      <label><input type="checkbox" name="save_service"> Save this number for next time</label>
+      <input name="save_label" placeholder="Label (optional)">
       <button type="submit">Buy Airtime</button>
     </form>
   </div>

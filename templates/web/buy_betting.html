@@ -12,9 +12,12 @@
         {% endfor %}
       </select>
       <label>Customer ID</label>
+      {% if saved_services %}<select onchange="document.querySelector('[name=account_id]').value=this.value"><option value="">Use a saved account</option>{% for saved in saved_services %}<option value="{{ saved.identifier }}">{{ saved.label }}</option>{% endfor %}</select>{% endif %}
       <input name="account_id" placeholder="Enter your betting ID" required>
       <label>Top-up amount</label>
       <input name="amount" type="number" min="100" step="0.01" placeholder="Amount in NGN" required>
+      <label><input type="checkbox" name="save_service"> Save this account for next time</label>
+      <input name="save_label" placeholder="Label (optional)">
       <button type="submit">Fund Account</button>
     </form>
   </div>

@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}WAJ VTU{% endblock %}</title>
+<link rel="icon" type="image/jpeg" href="{{ url_for('static', filename='images/waj-vtu-logo.jpeg') }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -22,17 +23,21 @@
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width:100%; min-width:0; }
+  img, video { max-width:100%; height:auto; }
 
   body {
     font-family: 'Inter', sans-serif;
     background: var(--bg);
     color: var(--indigo);
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
 
   a { color: inherit; }
 
   .app {
+    width:100%;
     max-width: 1180px;
     margin: 0 auto;
     min-height: 100vh;
@@ -88,6 +93,7 @@
   .hero-actions .primary { background:var(--amber); color:var(--indigo); }
   .hero-actions .ghost { border:1px solid rgba(255,255,255,.25); color:#fff; }
   .hero-panel { background:#111; border:1px solid rgba(255,196,0,.38); border-radius:24px; padding:22px; box-shadow:0 28px 70px rgba(0,0,0,.34); }
+  .promo-image { display:block; width:100%; height:auto; max-height:560px; object-fit:contain; border-radius:14px; }
   .hero-panel-top { display:flex; justify-content:space-between; color:rgba(255,255,255,.65); font-size:12px; margin-bottom:28px; }
   .hero-balance { background:#fff; color:var(--indigo); border-radius:18px; padding:22px; }
   .hero-balance small { color:var(--slate); font-size:12px; }
@@ -99,13 +105,22 @@
   .feature { border-top:1px solid rgba(255,255,255,.16); padding-top:18px; }
   .feature b { display:block; font-family:'Space Grotesk',sans-serif; font-size:16px; margin-bottom:7px; }
   .feature span { color:rgba(255,255,255,.6); font-size:13px; line-height:1.5; }
+  .bot-ad { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:18px 20px; border-radius:16px; background:#111; border:1px solid rgba(255,196,0,.35); color:#fff; }
+  .bot-ad-copy { min-width:0; }
+  .bot-ad-label { color:var(--amber); font-size:11px; font-weight:800; letter-spacing:1px; text-transform:uppercase; margin-bottom:5px; }
+  .bot-ad h2 { font-family:'Space Grotesk',sans-serif; font-size:20px; margin-bottom:5px; }
+  .bot-ad p { color:rgba(255,255,255,.68); font-size:12px; line-height:1.45; }
+  .bot-ad-cta { flex-shrink:0; background:var(--amber); color:#090909; padding:11px 14px; border-radius:9px; text-decoration:none; font-size:12px; font-weight:800; }
+  .bot-ad-cta:hover { background:#fff; }
+  .home-bot-ad { margin:0 58px 56px; }
+  .dashboard-bot-ad { max-width:1120px; margin:24px auto 0; padding:0 34px; }
 
   .dashboard-page header { background:var(--indigo); padding:28px 34px 74px; border-radius:0 0 30px 30px; }
   .dashboard-page .balance-card { max-width:760px; margin:24px auto -66px; padding:28px 30px 26px; border-radius:22px; }
   .dashboard-page .balance-amount { font-size:46px; }
   .dashboard-page .section { max-width:1120px; margin:0 auto; padding:96px 34px 0; }
   .dashboard-layout { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(320px,.85fr); gap:24px; align-items:start; }
-  .dashboard-panel { background:var(--card); border:1px solid var(--border); border-radius:20px; padding:22px; box-shadow:0 12px 30px rgba(0,0,0,.06); }
+  .dashboard-panel { min-width:0; background:var(--card); border:1px solid var(--border); border-radius:20px; padding:22px; box-shadow:0 12px 30px rgba(0,0,0,.06); }
   .dashboard-panel .section-title { font-family:'Space Grotesk',sans-serif; font-size:19px; }
   .dashboard-panel .services-grid { margin-bottom:0; }
   .dashboard-panel .tx-list { max-height:440px; overflow:auto; }
@@ -447,6 +462,15 @@
     .site-nav-links a { padding:12px; border-radius:8px; }
     .site-nav-links a:hover { background:var(--bg); }
     .page-shell { padding:24px 16px 0; }
+    .page-heading { flex-direction:column; gap:10px; margin-bottom:18px; }
+    .page-heading h1 { font-size:26px; }
+    .page-back { padding-top:0; }
+    .form-card { padding:18px; }
+    .site-brand { font-size:19px; }
+    .bot-ad { align-items:flex-start; flex-direction:column; gap:13px; }
+    .bot-ad-cta { width:100%; text-align:center; }
+    .dashboard-bot-ad { padding:0 16px; }
+    .home-bot-ad { margin:0 20px 44px; }
     .page-heading h1 { font-size:25px; }
     .form-card { padding:20px; }
     .landing-nav { padding:20px; }
@@ -455,7 +479,19 @@
     .hero { grid-template-columns:1fr; gap:38px; padding:48px 20px 64px; }
     .hero h1 { font-size:50px; letter-spacing:-1.5px; }
     .hero-copy p { font-size:15px; }
+    .hero-panel { padding:10px; border-radius:16px; }
+    .promo-image { border-radius:10px; }
     .feature-strip { grid-template-columns:1fr; padding:0 20px 44px; gap:24px; }
+    .landing-nav-actions { gap:8px; }
+    .landing-nav-actions .nav-cta { padding:10px 11px; }
+    .services-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:9px; }
+    .service-tile { min-width:0; }
+    .dashboard-page .service-tile { min-height:108px; padding:14px 7px; }
+    .dashboard-page .service-tile small { max-width:100px; }
+    .tx-item { min-width:0; padding:12px; gap:8px; }
+    .tx-title { overflow-wrap:anywhere; }
+    .tx-amount { font-size:13px; }
+    .wallet-hint { align-items:flex-start; flex-direction:column; gap:4px; }
   }
 
   @media (max-width: 380px) {
@@ -468,6 +504,13 @@
     .hero h1 { font-size:42px; }
     .hero-mini-grid { grid-template-columns:1fr; }
     .dashboard-page .balance-actions { flex-direction:column; }
+    .dashboard-page header { padding-left:14px; padding-right:14px; }
+    .dashboard-page .balance-card { padding:18px; }
+    .dashboard-page .balance-amount { font-size:34px; }
+    .dashboard-page .section { padding-left:12px; padding-right:12px; }
+    .dashboard-bot-ad { padding-left:12px; padding-right:12px; }
+    .home-bot-ad { margin-left:12px; margin-right:12px; }
+    .hero-actions a { width:100%; text-align:center; }
   }
 </style>
 </head>

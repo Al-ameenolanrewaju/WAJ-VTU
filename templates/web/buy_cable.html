@@ -17,12 +17,15 @@
     <form method="POST" action="{{ url_for('web.cable_page') }}">
       <input type="hidden" name="provider" value="{{ provider }}">
       <label>Smartcard / IUC number</label>
+      {% if saved_services %}<select onchange="document.querySelector('[name=smartcard]').value=this.value"><option value="">Use a saved account</option>{% for saved in saved_services %}<option value="{{ saved.identifier }}">{{ saved.label }}</option>{% endfor %}</select>{% endif %}
       <input name="smartcard" placeholder="Enter customer number" required>
       <label>Subscription plan</label>
       <select name="plan_code" required>
         <option value="" disabled selected>Select a TV plan</option>
         {% for plan in plans %}<option value="{{ plan.code }}">{{ plan.name }} - ₦{{ "%.2f"|format(plan.amount) }}</option>{% endfor %}
       </select>
+      <label><input type="checkbox" name="save_service"> Save this account for next time</label>
+      <input name="save_label" placeholder="Label (optional)">
       <button type="submit">Subscribe</button>
     </form>
     {% else %}

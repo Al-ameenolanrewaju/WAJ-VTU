@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -7,6 +8,8 @@ import pytest
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("META_VERIFY_TOKEN", "meta-token")
 os.environ.setdefault("ALLOW_DB_MUTATIONS", "true")
+os.environ.setdefault("IS_TESTING", "true")
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from app import app
 
@@ -60,27 +63,31 @@ def test_admin_login_and_wallet_adjustment_are_audited(client):
         app_module.db.session.query(app_module.AdminAuditLog).delete()
         app_module.db.session.query(app_module.Transaction).delete()
         app_module.db.session.query(app_module.User).delete()
+        
+        app_module.ADMIN_EMAIL = "admin@example.com"
 
         user = app_module.User(
             whatsapp_id="2348000000001",
             phone="2348000000001",
             name="Audit User",
             wallet_balance=Decimal("10.00"),
+            email="admin@example.com"
         )
         app_module.db.session.add(user)
         app_module.db.session.commit()
         user_id = user.id
 
+    with client.session_transaction() as session:
+        session["user_id"] = user_id
+
     login_response = client.get(
         "/admin/dashboard",
-        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
     )
     assert login_response.status_code == 200
 
     bad_adjustment = client.post(
         f"/admin/user/{user_id}/fund",
         data={"amount": "999", "action_type": "DEBIT", "csrf_token": "invalid"},
-        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
     )
     assert bad_adjustment.status_code == 403
 
@@ -88,6 +95,68 @@ def test_admin_login_and_wallet_adjustment_are_audited(client):
         entries = app_module.AdminAuditLog.query.order_by(app_module.AdminAuditLog.created_at.desc()).all()
         assert any(entry.action == "login" and entry.success for entry in entries)
         assert any(entry.action == "wallet_adjustment" and not entry.success for entry in entries)
+
+
+def test_admin_email_login_does_not_require_password(client):
+    import app as app_module
+
+    test_key = uuid.uuid4().hex
+    admin_email = f"admin-{test_key}@example.com"
+    app_module.app.config["ADMIN_EMAIL"] = admin_email
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"web_admin_{test_key}",
+            phone=f"234{test_key[:10]}",
+            name="Admin",
+            email=admin_email,
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+    response = client.post("/login", data={"email": admin_email})
+
+    assert response.status_code == 302
+    with client.session_transaction() as session:
+        assert session["is_admin"] is True
+
+
+def test_saved_service_belongs_to_logged_in_user(client):
+    import app as app_module
+
+    test_key = uuid.uuid4().hex
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"web_saved_{test_key}",
+            phone=f"235{test_key[:10]}",
+            name="Saved Service User",
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+        user_id = user.id
+
+    with client.session_transaction() as session:
+        session["user_id"] = user_id
+
+    response = client.post(
+        "/saved-services",
+        data={
+            "service_type": "electricity",
+            "provider": "IKEDC",
+            "identifier": "MTR-12345",
+            "label": "Home meter",
+        },
+    )
+
+    assert response.status_code == 302
+    with app_module.app.app_context():
+        saved = app_module.SavedService.query.filter_by(user_id=user_id).one()
+        saved_id = saved.id
+        assert saved.identifier == "MTR-12345"
+
+    response = client.post(f"/saved-services/{saved_id}/delete")
+    assert response.status_code == 302
+    with app_module.app.app_context():
+        assert app_module.SavedService.query.get(saved_id) is None
 
 
 def test_meta_message_payload_is_accepted(client):
@@ -212,6 +281,7 @@ def test_admin_dashboard_shows_timestamps(client):
         app_module.db.session.query(app_module.Transaction).delete()
         app_module.db.session.query(app_module.User).delete()
 
+        app_module.ADMIN_EMAIL = "admin@example.com"
         user = app_module.User(
             whatsapp_id="user-100",
             phone="2348000000000",
@@ -220,6 +290,7 @@ def test_admin_dashboard_shows_timestamps(client):
             current_state="IDLE",
             created_at=created_at,
             updated_at=created_at,
+            email="admin@example.com"
         )
         app_module.db.session.add(user)
         app_module.db.session.flush()
@@ -236,14 +307,16 @@ def test_admin_dashboard_shows_timestamps(client):
         )
         app_module.db.session.add(tx)
         app_module.db.session.commit()
+        user_id = user.id
+
+    with client.session_transaction() as session:
+        session["user_id"] = user_id
 
     dashboard_response = client.get(
         "/admin/dashboard",
-        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
     )
     users_response = client.get(
         "/admin/users",
-        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
     )
 
     assert dashboard_response.status_code == 200
@@ -268,14 +341,20 @@ def test_paystack_webhook_credits_balance_and_shows_in_admin_dashboard(client):
         app_module.db.session.query(app_module.Transaction).delete()
         app_module.db.session.query(app_module.User).delete()
 
+        app_module.ADMIN_EMAIL = "admin@example.com"
         user = app_module.User(
             whatsapp_id="2348000000000",
             phone="2348000000000",
             name="Demo Wallet User",
             wallet_balance=Decimal("0.00"),
+            email="admin@example.com"
         )
         app_module.db.session.add(user)
         app_module.db.session.commit()
+        user_id = user.id
+        
+    with client.session_transaction() as session:
+        session["user_id"] = user_id
 
     payload = {
         "event": "charge.success",
@@ -311,7 +390,6 @@ def test_paystack_webhook_credits_balance_and_shows_in_admin_dashboard(client):
 
     dashboard_response = client.get(
         "/admin/dashboard",
-        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
     )
     assert dashboard_response.status_code == 200
     assert b"DEP_TEST_1001" in dashboard_response.data
@@ -360,6 +438,14 @@ def test_dynamic_paystack_fee_tiers_are_admin_editable(client):
     app_module.ADMIN_PASSWORD = "secret"
 
     with app_module.app.app_context():
+        app_module.ADMIN_EMAIL = "admin@example.com"
+        user = app_module.User(
+            whatsapp_id="admin-123",
+            phone="2348000000002",
+            name="Admin User",
+            email="admin@example.com"
+        )
+        app_module.db.session.add(user)
         app_module.db.session.query(app_module.PaymentFeeTier).delete()
         app_module.db.session.add_all([
             app_module.PaymentFeeTier(label="BELOW_1000", min_amount=Decimal("0.00"), max_amount=Decimal("999.99"), fee_percentage=Decimal("2.50")),
@@ -367,14 +453,17 @@ def test_dynamic_paystack_fee_tiers_are_admin_editable(client):
             app_module.PaymentFeeTier(label="ABOVE_20000", min_amount=Decimal("20000.00"), max_amount=None, fee_percentage=Decimal("1.00")),
         ])
         app_module.db.session.commit()
+        user_id = user.id
 
     assert calculate_paystack_gross(Decimal("500.00")) == Decimal("512.82")
     assert calculate_paystack_gross(Decimal("5000.00")) == Decimal("5076.14")
     assert calculate_paystack_gross(Decimal("25000.00")) == Decimal("25252.53")
 
+    with client.session_transaction() as session:
+        session["user_id"] = user_id
+
     response = client.get(
         "/admin/settings",
-        headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
     )
 
     assert response.status_code == 200

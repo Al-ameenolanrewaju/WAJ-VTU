@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 
-from models import db, Transaction
+from models import db, Transaction, SavedService
 from auth import login_required, current_user
 from chat_agent import execute_tool
 from flask import current_app as app  # Use current_app to avoid circular imports
@@ -18,6 +18,71 @@ from provider import verify_smartcard, verify_meter, fetch_cable_plans, fetch_da
 from wallet_service import generate_payment_link
 
 web_bp = Blueprint("web", __name__)
+
+SAVED_SERVICE_TYPES = {"airtime", "electricity", "cable", "betting"}
+
+
+def saved_services_for(user):
+    return (
+        SavedService.query.filter_by(user_id=user.id)
+        .order_by(SavedService.service_type, SavedService.created_at.desc())
+        .all()
+    )
+
+def persist_saved_service(user, service_type, identifier, provider=None, label="", meter_type=""):
+    identifier = (identifier or "").strip()
+    provider = (provider or "").strip().upper() or None
+    if not identifier:
+        return False
+    duplicate = SavedService.query.filter_by(
+        user_id=user.id, service_type=service_type, provider=provider, identifier=identifier
+    ).first()
+    if duplicate:
+        return False
+    db.session.add(SavedService(
+        user_id=user.id,
+        service_type=service_type,
+        label=(label or f"{provider or service_type.title()} - {identifier}").strip()[:100],
+        provider=provider,
+        identifier=identifier,
+        service_metadata={"meter_type": (meter_type or "").strip().upper()},
+    ))
+    db.session.commit()
+    return True
+
+
+
+@web_bp.route("/saved-services", methods=["POST"])
+@login_required
+def save_service():
+    user = current_user()
+    service_type = (request.form.get("service_type") or "").strip().lower()
+    identifier = (request.form.get("identifier") or "").strip()
+    provider = (request.form.get("provider") or "").strip().upper() or None
+    label = (request.form.get("label") or "").strip()[:100]
+    if service_type not in SAVED_SERVICE_TYPES or not identifier:
+        flash("Enter a valid service to save.", "error")
+        return redirect(request.referrer or url_for("web.dashboard"))
+
+    if not label:
+        label = f"{provider or service_type.title()} - {identifier}"
+    if persist_saved_service(user, service_type, identifier, provider, label, request.form.get("meter_type", "")):
+        flash("Saved for next time.", "success")
+    else:
+        flash("That service is already saved.", "message")
+    return redirect(request.referrer or url_for("web.dashboard"))
+
+
+@web_bp.route("/saved-services/<int:saved_service_id>/delete", methods=["POST"])
+@login_required
+def delete_saved_service(saved_service_id):
+    saved_service = SavedService.query.filter_by(
+        id=saved_service_id, user_id=current_user().id
+    ).first_or_404()
+    db.session.delete(saved_service)
+    db.session.commit()
+    flash("Saved service removed.", "success")
+    return redirect(request.referrer or url_for("web.dashboard"))
 
 
 @web_bp.route("/")
@@ -67,6 +132,7 @@ def dashboard():
         "web/dashboard.html",
         user=user,
         transactions=recent,
+        saved_services=saved_services_for(user),
         services=SERVICES,
         is_admin=is_admin,
     )
@@ -126,7 +192,11 @@ def buy_data():
 @login_required
 def airtime_page():
     user = current_user()
-    return render_template("web/buy_airtime.html", user=user)
+    return render_template(
+        "web/buy_airtime.html",
+        user=user,
+        saved_services=SavedService.query.filter_by(user_id=user.id, service_type="airtime").all(),
+    )
 
 
 @web_bp.route("/buy/airtime", methods=["POST"])
@@ -139,6 +209,8 @@ def buy_airtime():
         "phone": request.form.get("phone") or user.phone,
     }
     result = execute_tool(app, db, user, user.phone, "buy_airtime", payload)
+    if request.form.get("save_service") and persist_saved_service(user, "airtime", payload["phone"], payload["network"], request.form.get("save_label")):
+        flash("Phone number saved for next time.", "success")
     flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
     return redirect(url_for("web.dashboard"))
 
@@ -165,7 +237,13 @@ def cable_page():
                 "api_cost": base_amount,
                 "api_discount_amount": Decimal(str(plan.get("discount_amount", "0"))),
             })
-        return render_template("web/buy_cable.html", user=user, provider=provider, plans=cable_plans)
+        return render_template(
+            "web/buy_cable.html",
+            user=user,
+            provider=provider,
+            plans=cable_plans,
+            saved_services=SavedService.query.filter_by(user_id=user.id, service_type="cable").all(),
+        )
 
     provider = request.form.get("provider", "").upper()
     plan_code = request.form.get("plan_code", "")
@@ -186,6 +264,8 @@ def cable_page():
         "api_discount_amount": Decimal(str(selected_plan.get("discount_amount", "0"))),
     }
     result = execute_tool(app, db, user, user.phone, "buy_cable", payload)
+    if request.form.get("save_service") and persist_saved_service(user, "cable", payload["smartcard"], payload["provider"], request.form.get("save_label")):
+        flash("TV account saved for next time.", "success")
     flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
     return redirect(url_for("web.dashboard"))
 
@@ -210,7 +290,11 @@ def electricity_page():
     user = current_user()
 
     if request.method == "GET":
-        return render_template("web/buy_electricity.html", user=user)
+        return render_template(
+            "web/buy_electricity.html",
+            user=user,
+            saved_services=SavedService.query.filter_by(user_id=user.id, service_type="electricity").all(),
+        )
 
     payload = {
         "disco": request.form.get("disco"),
@@ -219,6 +303,8 @@ def electricity_page():
         "amount": request.form.get("amount"),
     }
     result = execute_tool(app, db, user, user.phone, "pay_electricity", payload)
+    if request.form.get("save_service") and persist_saved_service(user, "electricity", payload["meter_number"], payload["disco"], request.form.get("save_label"), payload["meter_type"]):
+        flash("Meter saved for next time.", "success")
     if result.get("status") == "success" and result.get("token"):
         flash(f"Payment successful. Token: {result['token']}", "success")
     else:
@@ -246,7 +332,11 @@ def betting_page():
     user = current_user()
 
     if request.method == "GET":
-        return render_template("web/buy_betting.html", user=user)
+        return render_template(
+            "web/buy_betting.html",
+            user=user,
+            saved_services=SavedService.query.filter_by(user_id=user.id, service_type="betting").all(),
+        )
 
     payload = {
         "platform": request.form.get("platform"),
@@ -254,6 +344,8 @@ def betting_page():
         "amount": request.form.get("amount"),
     }
     result = execute_tool(app, db, user, user.phone, "buy_betting", payload)
+    if request.form.get("save_service") and persist_saved_service(user, "betting", payload["account_id"], payload["platform"], request.form.get("save_label")):
+        flash("Betting account saved for next time.", "success")
     flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
     return redirect(url_for("web.dashboard"))
 

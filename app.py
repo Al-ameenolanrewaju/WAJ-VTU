@@ -16,7 +16,7 @@ from flask import Flask, request, jsonify, render_template_string, redirect, url
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 1. Import db, User, and Transaction directly from models.py
-from models import db, User, Transaction, ServiceMarkup, PaymentFeeTier, AdminAuditLog
+from models import db, User, Transaction, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog
 from wallet_service import generate_payment_link, get_or_create_dva, get_payment_fee_percentage
 
 # Import provider functions from the ClubKonnect adapter.
@@ -57,7 +57,7 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is required")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-if not DATABASE_URL.startswith("postgresql://"):
+if not DATABASE_URL.startswith("postgresql://") and not os.getenv("IS_TESTING") == "true":
     raise RuntimeError("DATABASE_URL must point to a Supabase PostgreSQL database; local SQLite is not supported")
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -518,28 +518,21 @@ def record_admin_audit(username, action, success, reason=None):
 
 def require_admin_auth():
     website_user_id = session.get("user_id")
-    if website_user_id and ADMIN_EMAIL:
-        website_user = db.session.get(User, website_user_id)
-        if website_user and (website_user.email or "").strip().lower() == ADMIN_EMAIL:
-            record_admin_audit(website_user.email, "login", True, "Successful website admin login")
-            return None
-        if website_user:
-            record_admin_audit(website_user.email or "unknown", "login", False, "Website user is not an administrator")
-            return jsonify({"status": "error", "reason": "Administrator access required"}), 403
+    if not website_user_id:
+        return redirect(url_for("auth.login", next=request.path))
 
-    auth = request.authorization
-    username = auth.username if auth else ""
-    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
-        record_admin_audit(username, "login", False, "Admin credentials are not configured")
-        return jsonify({"status": "error", "reason": "Admin credentials are not configured"}), 503
-    if not auth or not hmac.compare_digest(auth.username, ADMIN_USERNAME) or not hmac.compare_digest(auth.password, ADMIN_PASSWORD):
-        record_admin_audit(username, "login", False, "Invalid admin credentials")
-        response = jsonify({"status": "error", "reason": "Authentication required"})
-        response.status_code = 401
-        response.headers["WWW-Authenticate"] = 'Basic realm="WAJ VTU Admin"'
-        return response
-    record_admin_audit(username, "login", True, "Successful admin login")
-    return None
+    website_user = db.session.get(User, website_user_id)
+    if website_user and ADMIN_EMAIL and (website_user.email or "").strip().lower() == ADMIN_EMAIL:
+        record_admin_audit(website_user.email, "login", True, "Successful website admin login")
+        return None
+
+    record_admin_audit(
+        website_user.email if website_user else "unknown",
+        "login",
+        False,
+        "Website user is not an administrator",
+    )
+    return jsonify({"status": "error", "reason": "Administrator access required"}), 403
 
 
 def get_csrf_token():
