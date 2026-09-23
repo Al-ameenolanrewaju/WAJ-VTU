@@ -3,6 +3,15 @@
 {% include "web/_service_nav.html" %}
 <main class="page-shell">
   <div class="page-heading"><div><h1>Fund your wallet</h1><p>Add money securely with Paystack and use it across every service.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-wrap">
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
   <div class="form-card" style="max-width:560px;">
     <p style="font-size:13px; color:var(--slate); margin-bottom:14px;">
       Enter the amount you want to add. You will be redirected to secure Paystack checkout.

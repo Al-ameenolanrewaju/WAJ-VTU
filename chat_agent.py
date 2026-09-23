@@ -494,14 +494,6 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         from wallet_service import generate_payment_link
         result = generate_payment_link(user.email, amount, user.phone, pass_fee_to_user=True)
         if result.get("status") == "SUCCESS":
-            from app import ensure_deposit_transaction
-            ensure_deposit_transaction(
-                user,
-                result["reference"],
-                result.get("net_amount", amount),
-                user.phone,
-                status="PENDING",
-            )
             return {
                 "status": "success",
                 "payment_url": result["payment_url"],

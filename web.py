@@ -459,14 +459,6 @@ def fund_wallet():
             flash(result.get("reason", "Could not create the Paystack payment link."), "error")
             return redirect(url_for("web.fund_wallet"))
 
-        from app import ensure_deposit_transaction
-        ensure_deposit_transaction(
-            user,
-            result["reference"],
-            result.get("net_amount", amount),
-            user.phone,
-            status="PENDING",
-        )
         return redirect(result["payment_url"])
 
     return render_template("web/fund_wallet.html", user=user)

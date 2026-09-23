@@ -450,35 +450,6 @@ def settle_transaction(user, result, amount, transaction_type, recipient, descri
     return False
 
 
-def ensure_deposit_transaction(user, reference, amount, phone, status="PENDING", meta_data=None):
-    """Create or update a payment transaction so it appears in dashboards immediately."""
-    tx = Transaction.query.filter_by(reference=reference).first()
-    if tx is None:
-        tx = Transaction(
-            user_id=user.id,
-            reference=reference,
-            amount=Decimal(str(amount or "0.00")).quantize(Decimal("0.01")),
-            type="DEPOSIT",
-            recipient=phone,
-            status=status,
-            description="Paystack wallet funding",
-            meta_data=meta_data or {},
-        )
-        db.session.add(tx)
-    else:
-        tx.user_id = user.id
-        tx.amount = Decimal(str(amount or tx.amount)).quantize(Decimal("0.01"))
-        tx.recipient = phone or tx.recipient
-        tx.status = status
-        tx.description = tx.description or "Paystack wallet funding"
-        if meta_data is not None:
-            tx.meta_data = meta_data
-    if isinstance(tx.meta_data, dict):
-        tx.meta_data.setdefault("credited", status == "SUCCESS")
-    db.session.commit()
-    return tx
-
-
 def reconcile_deposit_transaction(transaction):
     """Credit a successful deposit exactly once and mark it as reconciled."""
     if transaction is None or transaction.type != "DEPOSIT" or transaction.status != "SUCCESS":
@@ -648,7 +619,6 @@ def initialize_payment():
     if result.get("status") != "SUCCESS":
         return jsonify(result), 502
 
-    ensure_deposit_transaction(user, result["reference"], result.get("net_amount", amount), phone, status="PENDING")
     return jsonify(result), 200
 
 
