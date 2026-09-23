@@ -448,7 +448,13 @@ def fund_wallet():
             flash("Enter a valid funding amount.", "error")
             return redirect(url_for("web.fund_wallet"))
 
-        result = generate_payment_link(user.email, amount, user.phone, pass_fee_to_user=True)
+        result = generate_payment_link(
+            user.email,
+            amount,
+            user.phone,
+            pass_fee_to_user=True,
+            payment_source="website",
+        )
         if result.get("status") != "SUCCESS":
             flash(result.get("reason", "Could not create the Paystack payment link."), "error")
             return redirect(url_for("web.fund_wallet"))

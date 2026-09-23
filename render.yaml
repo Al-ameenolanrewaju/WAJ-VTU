@@ -18,13 +18,13 @@ services:
       - key: SECRET_KEY
         sync: false # Required: set a persistent secret in the Render dashboard
       - key: APP_BASE_URL
-        value: https://waj-vtu.onrender.com
+        value: https://wajvtu.com.ng
       - key: PUBLIC_BASE_URL
-        value: https://waj-vtu.onrender.com
+        value: https://wajvtu.com.ng
       - key: PAYSTACK_SECRET_KEY
         sync: false
       - key: PAYSTACK_CALLBACK_URL
-        value: https://waj-vtu.onrender.com/payments/paystack/callback
+        value: https://wajvtu.com.ng/payments/paystack/callback
       - key: META_API_TOKEN
         sync: false # Required for official WhatsApp Cloud API sending
       - key: META_PHONE_NUMBER_ID

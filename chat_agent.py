@@ -195,13 +195,14 @@ def define_tools():
             "type": "function",
             "function": {
                 "name": "get_funding_account",
-                "description": "Get the user's permanent dedicated bank account number for funding their wallet. The user can transfer any amount to this account at any time; the wallet is credited automatically. Requires the user to have an email on file — ask for one first if they don't.",
+                "description": "Create a one-time Paystack checkout link for adding a specific amount to the user's wallet. Requires the user's email and the amount to add.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "email": {"type": "string", "description": "User's email address (required the first time; not needed again once the account exists)"}
+                        "email": {"type": "string", "description": "User's email address"},
+                        "amount": {"type": "number", "description": "The amount to add to the wallet in Naira"}
                     },
-                    "required": []
+                    "required": ["amount"]
                 }
             }
         },
@@ -483,16 +484,30 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         if not user.email:
             return {"status": "error", "message": "I need an email address to set up your funding account. What's your email?"}
 
-        from wallet_service import get_or_create_dva
-        result = get_or_create_dva(user, db)
+        try:
+            amount = Decimal(str(kwargs.get("amount", "0"))).quantize(Decimal("0.01"))
+        except Exception:
+            amount = Decimal("0")
+        if amount <= 0:
+            return {"status": "error", "message": "Please provide a valid amount to add to your wallet."}
+
+        from wallet_service import generate_payment_link
+        result = generate_payment_link(user.email, amount, user.phone, pass_fee_to_user=True)
         if result.get("status") == "SUCCESS":
+            from app import ensure_deposit_transaction
+            ensure_deposit_transaction(
+                user,
+                result["reference"],
+                result.get("net_amount", amount),
+                user.phone,
+                status="PENDING",
+            )
             return {
                 "status": "success",
-                "account_number": result["account_number"],
-                "bank_name": result.get("bank_name"),
-                "message": "Share this account number and bank name with the user. Tell them to transfer any amount and their wallet will be credited automatically, usually within a minute or two, minus a small percentage fee.",
+                "payment_url": result["payment_url"],
+                "message": f"Open this secure Paystack link to add NGN {amount:,.2f} to your wallet: {result['payment_url']}",
             }
-        return {"status": "error", "message": result.get("reason", "Could not set up a funding account right now.")}
+        return {"status": "error", "message": result.get("reason", "Could not create a Paystack payment link right now.")}
 
     elif name == "verify_betting":
         platform = kwargs.get("platform")

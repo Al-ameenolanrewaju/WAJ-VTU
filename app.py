@@ -17,7 +17,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 1. Import db, User, and Transaction directly from models.py
 from models import db, User, Transaction, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog
-from wallet_service import generate_payment_link, get_or_create_dva, get_payment_fee_percentage
+from wallet_service import generate_payment_link, get_payment_fee_percentage
 
 # Import provider functions from the ClubKonnect adapter.
 from provider import (
@@ -613,6 +613,23 @@ def validate_csrf_token():
         abort(403)
 
 
+def verify_paystack_transaction(reference):
+    """Fetch the authoritative checkout result for browser callbacks."""
+    try:
+        response = requests.get(
+            f"https://api.paystack.co/transaction/verify/{quote(reference, safe='')}",
+            headers={"Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"},
+            timeout=15,
+        )
+        data = response.json()
+        if response.status_code == 200 and data.get("status") and data.get("data", {}).get("status") == "success":
+            return data["data"]
+        app.logger.warning("Paystack verification failed for reference=%s: %s", reference, data.get("message"))
+    except (requests.RequestException, ValueError) as exc:
+        app.logger.error("Paystack verification error for reference=%s: %s", reference, exc)
+    return None
+
+
 @app.route("/payments/initialize", methods=["POST"])
 def initialize_payment():
     payload = request.get_json() or {}
@@ -639,10 +656,15 @@ def initialize_payment():
 def paystack_callback():
     reference = request.args.get("reference") or request.args.get("trxref")
     if reference:
+        verified_data = verify_paystack_transaction(reference)
+        if verified_data:
+            _handle_checkout_link_charge(verified_data)
         transaction = Transaction.query.filter_by(reference=reference).first()
-        if transaction:
-            reconcile_deposit_transaction(transaction)
         if transaction and transaction.status == "SUCCESS":
+            payment_data = (transaction.meta_data or {}).get("paystack") or {}
+            payment_source = (payment_data.get("metadata") or {}).get("payment_source")
+            if payment_source == "website":
+                return redirect(url_for("web.dashboard"), code=302)
             user_phone = normalize_phone_number((transaction.recipient or "").strip() or (transaction.user.phone if transaction.user else ""))
             whatsapp_link = f"https://wa.me/{user_phone}" if user_phone else "https://wa.me/"
             return redirect(whatsapp_link, code=302)
@@ -663,57 +685,7 @@ def paystack_webhook():
 
     data = event.get("data") or {}
 
-    # Bank transfer into a Dedicated Virtual Account: Paystack sends this with
-    # channel "dedicated_nuban" and no custom metadata (the customer just
-    # transferred an arbitrary amount), so the user is matched by
-    # customer_code instead of phone, and our fee is deducted from whatever
-    # amount arrived rather than pre-added at checkout.
-    if data.get("channel") == "dedicated_nuban":
-        return _handle_dva_charge(data)
-
     return _handle_checkout_link_charge(data)
-
-
-def _handle_dva_charge(data):
-    reference = str(data.get("reference", "")).strip()
-    customer_code = ((data.get("customer") or {}).get("customer_code") or "").strip()
-    try:
-        paid_gross = (Decimal(str(data.get("amount", 0))) / Decimal("100")).quantize(Decimal("0.01"))
-    except Exception:
-        return jsonify({"status": "error", "reason": "Invalid payment amount"}), 400
-
-    if not reference or not customer_code or paid_gross <= 0:
-        return jsonify({"status": "error", "reason": "Invalid DVA payment payload"}), 400
-
-    user = User.query.filter_by(paystack_customer_code=customer_code).first()
-    if not user:
-        app.logger.error("DVA charge.success for unknown customer_code=%s reference=%s", customer_code, reference)
-        return jsonify({"status": "error", "reason": "Unknown customer"}), 400
-
-    fee_rate = get_payment_fee_percentage(paid_gross) / Decimal("100")
-    net_credit = (paid_gross * (Decimal("1.00") - fee_rate)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    tx = Transaction.query.filter_by(reference=reference).first()
-    if tx is not None:
-        if tx.status == "SUCCESS":
-            if not (tx.meta_data or {}).get("credited"):
-                reconcile_successful_deposit(user, tx, net_credit, paid_gross, data)
-            return jsonify({"status": "ok", "duplicate": True, "credited_amount": str(net_credit)}), 200
-    else:
-        tx = Transaction(
-            user=user,
-            reference=reference,
-            amount=net_credit,
-            type="DEPOSIT",
-            recipient=user.phone,
-            status="SUCCESS",
-            description=f"Bank transfer to {user.dva_bank_name or 'dedicated account'}; gross paid NGN {paid_gross:,.2f}",
-            meta_data={},
-        )
-        db.session.add(tx)
-
-    reconcile_successful_deposit(user, tx, net_credit, paid_gross, data)
-    return jsonify({"status": "ok", "credited_amount": str(net_credit)}), 200
 
 
 def _handle_checkout_link_charge(data):
