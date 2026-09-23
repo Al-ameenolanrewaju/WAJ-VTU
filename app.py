@@ -380,7 +380,7 @@ def add_security_headers(response):
         "object-src 'none'; "
         "base-uri 'self'; "
         "frame-ancestors 'none'; "
-        "form-action 'self'; "
+        "form-action 'self' https://wajvtu.com.ng https://checkout.paystack.com; "
         "upgrade-insecure-requests"
     )
     return response
