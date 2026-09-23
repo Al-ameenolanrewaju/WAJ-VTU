@@ -459,6 +459,6 @@ def fund_wallet():
             flash(result.get("reason", "Could not create the Paystack payment link."), "error")
             return redirect(url_for("web.fund_wallet"))
 
-        return redirect(result["payment_url"])
+        return redirect(result["payment_url"], code=303)
 
     return render_template("web/fund_wallet.html", user=user)

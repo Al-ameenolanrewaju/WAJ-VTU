@@ -17,7 +17,7 @@
       Enter the amount you want to add. You will be redirected to secure Paystack checkout.
     </p>
 
-    <form method="POST" action="{{ url_for('web.fund_wallet') }}">
+    <form method="POST" action="{{ url_for('web.fund_wallet') }}" onsubmit="const button = this.querySelector('button[type=submit]'); button.disabled = true; button.textContent = 'Opening Paystack...';">
       <input name="amount" type="number" min="100" step="0.01" placeholder="Amount (NGN)" required>
       <button type="submit" class="btn-primary" style="width:100%;">Continue to Paystack</button>
     </form>
