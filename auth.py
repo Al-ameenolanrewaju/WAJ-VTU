@@ -57,6 +57,15 @@ def current_user():
     return User.query.get(user_id)
 
 
+def start_user_session(user, email):
+    session.permanent = True
+    session["user_id"] = user.id
+    session["is_admin"] = bool(
+        current_app.config.get("ADMIN_EMAIL")
+        and email == current_app.config["ADMIN_EMAIL"]
+    )
+
+
 def reset_serializer():
     return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="waj-vtu-password-reset")
 
@@ -138,8 +147,7 @@ def signup():
             db.session.rollback()
             flash("That email or phone number is already in use. Log in instead.", "error")
             return redirect(url_for("auth.login"))
-        session["user_id"] = existing.id
-        session["is_admin"] = bool(current_app.config.get("ADMIN_EMAIL") and email == current_app.config["ADMIN_EMAIL"])
+        start_user_session(existing, email)
         flash("Your existing wallet has been linked to this website login.", "success")
         return redirect(url_for("web.dashboard"))
 
@@ -158,8 +166,7 @@ def signup():
             db.session.rollback()
             flash("That email is already in use. Log in instead.", "error")
             return redirect(url_for("auth.login"))
-        session["user_id"] = user.id
-        session["is_admin"] = bool(current_app.config.get("ADMIN_EMAIL") and email == current_app.config["ADMIN_EMAIL"])
+        start_user_session(user, email)
         return redirect(url_for("web.dashboard"))
     except Exception as e:
         import traceback
@@ -183,8 +190,8 @@ def login():
         flash("Incorrect email or password.", "error")
         return redirect(url_for("auth.login"))
 
-    session["user_id"] = user.id
-    session["is_admin"] = bool(admin_email and email == admin_email)
+    start_user_session(user, email)
+    flash("Login successful. Welcome back to WAJ VTU.", "success")
     next_url = request.args.get("next")
     return redirect(next_url or url_for("web.dashboard"))
 
@@ -232,5 +239,5 @@ def reset_password(token):
 
 @auth_bp.route("/logout")
 def logout():
-    session.pop("user_id", None)
+    session.clear()
     return redirect(url_for("auth.login"))

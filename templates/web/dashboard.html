@@ -1,6 +1,32 @@
 {% extends "web/base.html" %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block content %}
+{% if purchase_receipt %}
+<div class="receipt-backdrop" id="purchase-receipt" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
+  <div class="receipt-modal">
+    <div class="receipt-top">
+      <div><div class="receipt-success">Payment successful</div><h2 id="receipt-title">Your receipt</h2></div>
+      <button class="receipt-close" type="button" onclick="closeReceipt()" aria-label="Close receipt">&times;</button>
+    </div>
+    <div class="receipt-amount"><small>Amount charged</small><strong>₦{{ "{:,.2f}".format(purchase_receipt.amount|float) }}</strong></div>
+    <div class="receipt-row"><span>Service</span><strong>{{ purchase_receipt.service }}</strong></div>
+    <div class="receipt-row"><span>Reference</span><strong>{{ purchase_receipt.reference }}</strong></div>
+    {% if purchase_receipt.recipient %}<div class="receipt-row"><span>Recipient</span><strong>{{ purchase_receipt.recipient }}</strong></div>{% endif %}
+    {% if purchase_receipt.token %}<div class="receipt-extra"><strong>Electricity token:</strong><br>{{ purchase_receipt.token }}</div>{% endif %}
+    {% if purchase_receipt.pins %}<div class="receipt-extra"><strong>PIN(s):</strong><br>{{ purchase_receipt.pins|join(", ") }}</div>{% endif %}
+    <div class="receipt-actions"><button type="button" class="secondary" onclick="closeReceipt()">Done</button><button type="button" onclick="window.print()">Print receipt</button></div>
+  </div>
+</div>
+<script>
+  function closeReceipt() {
+    const receipt = document.getElementById("purchase-receipt");
+    if (receipt) receipt.remove();
+  }
+  document.getElementById("purchase-receipt").addEventListener("click", function (event) {
+    if (event.target === this) closeReceipt();
+  });
+</script>
+{% endif %}
 <header>
   <div class="header-top">
     <div>
@@ -9,6 +35,7 @@
     </div>
     <div class="header-tools">
       {% if is_admin %}<a class="admin-link" href="{{ url_for('admin_dashboard') }}">Admin panel</a>{% endif %}
+      <span class="notification-dot" title="Notifications" aria-label="Notifications">●</span>
       <a class="avatar" href="{{ url_for('auth.logout') }}" title="Log out">{{ (user.name or "U")[0]|upper }}</a>
     </div>
   </div>
@@ -35,6 +62,16 @@
   </div>
 </div>
 
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div class="flash-wrap dashboard-flashes">
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endwith %}
+
 {% if saved_services %}
 <section class="section" style="padding-top:0;">
   <div class="dashboard-panel">
@@ -53,16 +90,6 @@
   </div>
 </section>
 {% endif %}
-
-{% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-  <div class="flash-wrap">
-    {% for category, message in messages %}
-      <div class="flash {{ category }}">{{ message }}</div>
-    {% endfor %}
-  </div>
-  {% endif %}
-{% endwith %}
 
 <main class="section">
   <div class="dashboard-layout">

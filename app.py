@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from markupsafe import escape
 from sqlalchemy import inspect, text, func, or_
-from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 1. Import db, User, and Transaction directly from models.py
@@ -49,6 +49,7 @@ app.config['DEBUG'] = os.getenv('FLASK_ENV', '').strip().lower() == 'development
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV', '').strip().lower() == 'production' or os.getenv('APP_BASE_URL', '').lower().startswith('https://')
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['PREFERRED_URL_SCHEME'] = 'https'
 
 # --- CONFIGURATION ---
@@ -108,6 +109,31 @@ def _register_web_blueprint():
     from web import web_bp
     app.register_blueprint(web_bp)
 _register_web_blueprint()
+
+
+@app.route("/sitemap.xml")
+def sitemap():
+    """Expose public pages to search engines without indexing private screens."""
+    public_endpoints = ("web.home", "auth.login", "auth.signup", "auth.forgot_password")
+    base_url = APP_BASE_URL
+    urls = []
+    for endpoint in public_endpoints:
+        urls.append(f"  <url><loc>{escape(f'{base_url}{url_for(endpoint)}')}</loc></url>")
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(urls)
+        + "\n</urlset>\n"
+    )
+    return Response(xml, mimetype="application/xml")
+
+
+@app.route("/robots.txt")
+def robots():
+    return Response(
+        f"User-agent: *\nAllow: /\nDisallow: /dashboard\nDisallow: /admin\nSitemap: {APP_BASE_URL}/sitemap.xml\n",
+        mimetype="text/plain",
+    )
 
 
 def ensure_database_schema():

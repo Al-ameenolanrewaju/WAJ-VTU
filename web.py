@@ -8,7 +8,7 @@ both surfaces and can't drift apart.
 """
 from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, url_for, flash, session
 
 from models import db, Transaction, SavedService
 from auth import login_required, current_user
@@ -49,6 +49,26 @@ def persist_saved_service(user, service_type, identifier, provider=None, label="
     ))
     db.session.commit()
     return True
+
+
+def redirect_after_purchase(user, result, service, payload):
+    """Store one successful purchase for the dashboard receipt modal."""
+    if result.get("status") == "success":
+        transaction = Transaction.query.filter_by(
+            user_id=user.id, reference=result.get("reference")
+        ).first()
+        session["purchase_receipt"] = {
+            "service": service,
+            "reference": result.get("reference") or "Pending reference",
+            "amount": str(transaction.amount) if transaction else str(payload.get("amount", "0")),
+            "recipient": transaction.recipient if transaction else (
+                payload.get("phone") or payload.get("meter_number") or payload.get("smartcard") or payload.get("account_id") or ""
+            ),
+            "description": transaction.description if transaction else "Purchase completed successfully",
+            "token": result.get("token"),
+            "pins": result.get("pins") or [],
+        }
+    return redirect(url_for("web.dashboard"))
 
 
 
@@ -135,6 +155,7 @@ def dashboard():
         saved_services=saved_services_for(user),
         services=SERVICES,
         is_admin=is_admin,
+        purchase_receipt=session.pop("purchase_receipt", None),
     )
 
 
@@ -181,7 +202,7 @@ def buy_data():
     }
     result = execute_tool(app, db, user, user.phone, "buy_data", payload)
     flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
-    return redirect(url_for("web.dashboard"))
+    return redirect_after_purchase(user, result, "Data", payload)
 
 
 # --------------------------------------------------------------------------
@@ -212,7 +233,7 @@ def buy_airtime():
     if request.form.get("save_service") and persist_saved_service(user, "airtime", payload["phone"], payload["network"], request.form.get("save_label")):
         flash("Phone number saved for next time.", "success")
     flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
-    return redirect(url_for("web.dashboard"))
+    return redirect_after_purchase(user, result, "Airtime", payload)
 
 
 # --------------------------------------------------------------------------
@@ -267,7 +288,7 @@ def cable_page():
     if request.form.get("save_service") and persist_saved_service(user, "cable", payload["smartcard"], payload["provider"], request.form.get("save_label")):
         flash("TV account saved for next time.", "success")
     flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
-    return redirect(url_for("web.dashboard"))
+    return redirect_after_purchase(user, result, "Cable TV", payload)
 
 
 @web_bp.route("/verify/smartcard")
@@ -309,7 +330,7 @@ def electricity_page():
         flash(f"Payment successful. Token: {result['token']}", "success")
     else:
         flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
-    return redirect(url_for("web.dashboard"))
+    return redirect_after_purchase(user, result, "Electricity", payload)
 
 
 @web_bp.route("/verify/meter")
@@ -347,7 +368,7 @@ def betting_page():
     if request.form.get("save_service") and persist_saved_service(user, "betting", payload["account_id"], payload["platform"], request.form.get("save_label")):
         flash("Betting account saved for next time.", "success")
     flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
-    return redirect(url_for("web.dashboard"))
+    return redirect_after_purchase(user, result, "Betting", payload)
 
 
 @web_bp.route("/verify/betting")
@@ -403,7 +424,7 @@ def education_page():
         flash(f"PIN(s): {', '.join(result['pins'])}", "success")
     else:
         flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
-    return redirect(url_for("web.dashboard"))
+    return redirect_after_purchase(user, result, "Education PIN", payload)
 
 
 # --------------------------------------------------------------------------
