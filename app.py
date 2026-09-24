@@ -91,6 +91,7 @@ META_API_TOKEN = os.getenv("META_API_TOKEN", "").strip()
 META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "").strip()
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0").strip()
 META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "").strip()
+WHATSAPP_BOT_PHONE = os.getenv("WHATSAPP_BOT_PHONE", "2348102314725").strip()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", ADMIN_USERNAME).strip().lower()
@@ -646,7 +647,8 @@ def paystack_callback():
                 transaction.meta_data = payment_meta
                 db.session.commit()
             return_message = quote("Wallet funded successfully. You can continue your purchase here.")
-            whatsapp_link = f"https://wa.me/{user_phone}?text={return_message}" if user_phone else "https://wa.me/"
+            bot_phone = normalize_phone_number(WHATSAPP_BOT_PHONE)
+            whatsapp_link = f"https://wa.me/{bot_phone}?text={return_message}" if bot_phone else "https://wa.me/"
             return redirect(whatsapp_link, code=302)
         return render_template_string("<h2>Payment is being processed</h2><p>Your transaction is still pending confirmation.</p><a href=\"/\">Refresh</a>")
     return render_template_string("<h2>Payment status unavailable</h2><p>The Paystack callback did not include a valid reference.</p>")
