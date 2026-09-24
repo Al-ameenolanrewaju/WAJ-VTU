@@ -1007,16 +1007,19 @@ ADMIN_BASE_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VTU Admin Control Panel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-        body { background-color: #f1f5f9; color: #1e293b; }
+        :root { --admin-ink:#090909; --admin-amber:#ffc400; --admin-bg:#f5f5f2; --admin-card:#ffffff; --admin-muted:#626262; --admin-border:#e4e4e0; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+        body { background-color: var(--admin-bg); color: var(--admin-ink); -webkit-font-smoothing: antialiased; }
         .account-badge { display:inline-block; padding:3px 8px; border-radius:999px; font-size:11px; font-weight:700; }
         .account-badge.website { background:#fef3c7; color:#92400e; }
         .account-badge.whatsapp { background:#dcfce7; color:#166534; }
         .account-badge.linked { background:#dbeafe; color:#1e40af; }
 
         .navbar {
-            background-color: #0f172a;
+            background-color: var(--admin-ink);
             padding: 0 30px;
             min-height: 60px;
             display: flex;
@@ -1024,10 +1027,10 @@ ADMIN_BASE_TEMPLATE = """
             justify-content: space-between;
             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
         }
-        .navbar .brand { color: #ffffff; font-size: 18px; font-weight: bold; text-decoration: none; }
+        .navbar .brand { color: #ffffff; font-family:'Space Grotesk',sans-serif; font-size: 20px; font-weight: 700; text-decoration: none; }
         .navbar .nav-links { display: flex; flex-wrap: wrap; gap: 10px; list-style: none; margin: 0; padding: 0; }
         .navbar .nav-links a {
-            color: #94a3b8;
+            color: #bdbdbd;
             text-decoration: none;
             padding: 8px 16px;
             border-radius: 6px;
@@ -1035,7 +1038,7 @@ ADMIN_BASE_TEMPLATE = """
             font-weight: 500;
             display: inline-block;
         }
-        .navbar .nav-links a:hover, .navbar .nav-links a.active { background-color: #2563eb; color: #ffffff; }
+        .navbar .nav-links a:hover, .navbar .nav-links a.active { background-color: var(--admin-amber); color: var(--admin-ink); }
         .nav-toggle {
             display: none;
             background: transparent;
@@ -1047,22 +1050,22 @@ ADMIN_BASE_TEMPLATE = """
             cursor: pointer;
         }
 
-        .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
+        .container { max-width: 1180px; margin: 30px auto; padding: 0 28px; }
         .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 24px; }
         .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 25px; }
-        .card { background: white; padding: 20px; border-radius: 8px; flex: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .card h3 { font-size: 12px; color: #64748b; text-transform: uppercase; margin-bottom: 8px; }
-        .card p { font-size: 24px; font-weight: bold; color: #0f172a; }
-        .card small { display:block; color:#94a3b8; font-size:12px; line-height:1.4; margin-top:8px; }
-        .dashboard-heading { margin: 28px 0 12px; color:#0f172a; font-size:18px; }
+        .card { background: var(--admin-card); padding: 22px; border:1px solid var(--admin-border); border-radius: 16px; flex: 1; box-shadow: 0 12px 30px rgba(0,0,0,.06); }
+        .card h3 { font-size: 11px; color: var(--admin-muted); text-transform: uppercase; letter-spacing:.5px; margin-bottom: 8px; }
+        .card p { font-family:'Space Grotesk',sans-serif; font-size: 28px; font-weight: 700; color: var(--admin-ink); }
+        .card small { display:block; color:#969696; font-size:12px; line-height:1.4; margin-top:8px; }
+        .dashboard-heading { margin: 32px 0 14px; color:var(--admin-ink); font-family:'Space Grotesk',sans-serif; font-size:20px; }
 
-        table { width: 100%; background: white; border-collapse: collapse; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
-        th { background: #1e293b; color: white; font-weight: 600; }
+        table { width: 100%; background: var(--admin-card); border-collapse: collapse; border:1px solid var(--admin-border); border-radius: 14px; overflow: hidden; box-shadow: 0 12px 30px rgba(0,0,0,.05); }
+        th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--admin-border); font-size: 13px; }
+        th { background: var(--admin-ink); color: white; font-weight: 600; }
 
-        input, select, button { padding: 7px 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px; }
-        button { background-color: #2563eb; color: white; border: none; font-weight: 600; cursor: pointer; }
-        button:hover { background-color: #1d4ed8; }
+        input, select, button { padding: 9px 12px; border-radius: 9px; border: 1px solid var(--admin-border); font-size: 13px; }
+        button { background-color: var(--admin-amber); color: var(--admin-ink); border: none; font-weight: 700; cursor: pointer; }
+        button:hover { background-color: #e5b000; }
 
         .badge-success { color: #16a34a; font-weight: bold; }
         .badge-failed { color: #dc2626; font-weight: bold; }
