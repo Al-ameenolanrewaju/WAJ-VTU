@@ -326,6 +326,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
     elif name == "buy_data":
         network = str(kwargs.get("network") or "").upper()
         plan_code = kwargs.get("plan_code")
+        requested_amount = kwargs.get("amount")
         phone = kwargs.get("phone")
 
         selected_plan = next(
@@ -340,6 +341,16 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
         base_amount = Decimal(str(selected_plan.get("variation_amount", "0")))
         charge_amount = (base_amount + get_markup(f"DATA_{network}", base_amount)).quantize(Decimal("0.01"))
+        try:
+            requested_amount = Decimal(str(requested_amount)).quantize(Decimal("0.01"))
+        except Exception:
+            return {"status": "error", "message": "The selected data price is invalid. Please fetch the plans again."}
+
+        if requested_amount != charge_amount:
+            return {
+                "status": "error",
+                "message": f"The price for this plan has changed. Current price is NGN {charge_amount:,.2f}. Please fetch the plans again before purchasing.",
+            }
         
         if user.wallet_balance < charge_amount:
             return {"status": "error", "message": f"Insufficient balance. Requires NGN {charge_amount:,.2f}. Wallet balance is NGN {user.wallet_balance:,.2f}"}

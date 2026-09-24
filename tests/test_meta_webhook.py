@@ -284,7 +284,7 @@ def test_data_purchase_applies_margin_from_selected_plan(monkeypatch, client):
             {
                 "network": "MTN",
                 "plan_code": "5GB",
-                "amount": "1.00",
+                "amount": "526.81",
                 "phone": user.phone,
             },
         )
