@@ -14,6 +14,7 @@
     {% if purchase_receipt.recipient %}<div class="receipt-row"><span>Recipient</span><strong>{{ purchase_receipt.recipient }}</strong></div>{% endif %}
     {% if purchase_receipt.token %}<div class="receipt-extra"><strong>Electricity token:</strong><br>{{ purchase_receipt.token }}</div>{% endif %}
     {% if purchase_receipt.pins %}<div class="receipt-extra"><strong>PIN(s):</strong><br>{{ purchase_receipt.pins|join(", ") }}</div>{% endif %}
+    <img class="receipt-image" src="{{ url_for('web.receipt_image', reference=purchase_receipt.reference) }}" alt="Photo receipt">
     <div class="receipt-actions"><button type="button" class="secondary" onclick="closeReceipt()">Done</button><button type="button" onclick="window.print()">Print receipt</button></div>
   </div>
 </div>

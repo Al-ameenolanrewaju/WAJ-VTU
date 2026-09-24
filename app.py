@@ -770,17 +770,8 @@ def send_whatsapp_message(recipient, text):
         return False
 
 
-def send_whatsapp_receipt(recipient, reference):
-    """Generate and send a PNG receipt for a completed transaction."""
-    meta_api_token = os.getenv("META_API_TOKEN", META_API_TOKEN).strip()
-    meta_phone_number_id = os.getenv("META_PHONE_NUMBER_ID", META_PHONE_NUMBER_ID).strip()
-    if not meta_api_token or not meta_phone_number_id:
-        return False
-
-    transaction = Transaction.query.filter_by(reference=reference, status="SUCCESS").first()
-    if transaction is None:
-        return False
-
+def generate_receipt_png(transaction):
+    """Render a successful transaction as a PNG image."""
     image = Image.new("RGB", (900, 650), "#f7f4ec")
     draw = ImageDraw.Draw(image)
     title_font = ImageFont.load_default(size=42)
@@ -810,6 +801,20 @@ def send_whatsapp_receipt(recipient, reference):
     image_buffer = BytesIO()
     image.save(image_buffer, format="PNG")
     image_buffer.seek(0)
+    return image_buffer
+
+
+def send_whatsapp_receipt(recipient, reference):
+    """Generate and send a PNG receipt for a completed transaction."""
+    meta_api_token = os.getenv("META_API_TOKEN", META_API_TOKEN).strip()
+    meta_phone_number_id = os.getenv("META_PHONE_NUMBER_ID", META_PHONE_NUMBER_ID).strip()
+    if not meta_api_token or not meta_phone_number_id:
+        return False
+
+    transaction = Transaction.query.filter_by(reference=reference, status="SUCCESS").first()
+    if transaction is None:
+        return False
+    image_buffer = generate_receipt_png(transaction)
     api_version = os.getenv("META_API_VERSION", META_API_VERSION).strip()
     base_url = f"https://graph.facebook.com/{api_version}/{meta_phone_number_id}"
     headers = {"Authorization": f"Bearer {meta_api_token}"}

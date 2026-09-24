@@ -23,6 +23,13 @@ def clean_whatsapp_text(text):
     return cleaned
 
 
+def requested_photo_receipt(text):
+    normalized = str(text or "").lower()
+    return "receipt" in normalized and any(
+        word in normalized for word in ("photo", "image", "picture", "png", "send")
+    )
+
+
 def build_context(history, max_user_turns=3):
     """Keep full history in the database while sending complete recent turns to Groq."""
     if not isinstance(history, list):
@@ -606,6 +613,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
             return
         return
         
+    photo_receipt_requested = requested_photo_receipt(text)
     client = get_groq_client()
     if not client:
         from app import send_whatsapp_message
@@ -661,11 +669,15 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 result = execute_tool(app, db, user, provider_phone, func_name, func_args)
                 print(f"[Agent] Tool result: {result}")
 
-                if result.get("status") == "success" and result.get("reference"):
+                receipt_reference = result.get("reference")
+                if func_name == "get_transaction_history" and result.get("status") == "success":
+                    transactions = result.get("transactions") or []
+                    receipt_reference = transactions[0].get("reference") if transactions else None
+                if photo_receipt_requested and receipt_reference:
                     from app import send_whatsapp_receipt
                     threading.Thread(
                         target=send_whatsapp_receipt,
-                        args=(chat_id, result["reference"]),
+                        args=(chat_id, receipt_reference),
                         daemon=True,
                     ).start()
 

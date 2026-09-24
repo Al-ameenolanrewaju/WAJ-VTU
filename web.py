@@ -8,7 +8,7 @@ both surfaces and can't drift apart.
 """
 from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session
+from flask import Blueprint, render_template, request, redirect, url_for, flash, session, send_file
 
 from models import db, Transaction, SavedService
 from auth import login_required, current_user
@@ -156,6 +156,23 @@ def dashboard():
         services=SERVICES,
         is_admin=is_admin,
         purchase_receipt=session.pop("purchase_receipt", None),
+    )
+
+
+@web_bp.route("/receipts/<reference>.png")
+@login_required
+def receipt_image(reference):
+    user = current_user()
+    transaction = Transaction.query.filter_by(
+        user_id=user.id, reference=reference, status="SUCCESS"
+    ).first_or_404()
+    from app import generate_receipt_png
+    image_buffer = generate_receipt_png(transaction)
+    return send_file(
+        image_buffer,
+        mimetype="image/png",
+        download_name=f"waj-vtu-{reference}.png",
+        max_age=0,
     )
 
 
