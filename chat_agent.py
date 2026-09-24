@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import threading
 from decimal import Decimal
 from datetime import datetime
 from groq import Groq
@@ -58,7 +59,7 @@ You have access to tools to fetch plans and execute transactions.
 RULES:
 1. When a user asks for a service, FIRST use the fetching tool to see available plans and their EXACT `plan_code` and `amount`.
 2. FORMAT BEAUTIFULLY FOR WHATSAPP: Use relevant emojis (e.g. 🌐, 📺, ⚡, 💸) and WhatsApp bold text (e.g. *1GB* - *₦500*) to make the chat visually stunning and highly engaging. Present options as a clean, numbered list with double line breaks between items. DO NOT summarize the list or leave any plans out. You MUST list every single plan. DO NOT show the `plan_code` or internal codes to the user, only show the plan name and price.
-3. When confirmed, use the purchase tool with the exact `plan_code` and `amount`.
+3. Before any purchase, repeat the selected plan, exact price, recipient, and ask the user to confirm. Only purchase after a clear confirmation. When confirmed, use the exact `plan_code` and `amount`.
 4. If a purchase fails, inform the user politely.
 5. KEEP YOUR RESPONSES SHORT AND FRIENDLY.
 6. **MULTI-LANGUAGE SUPPORT**: If the user speaks to you in Hausa, Igbo, Yoruba, or Nigerian Pidgin, YOU MUST RESPOND IN THAT EXACT NATIVE LANGUAGE. Translate your responses naturally while executing the underlying tools normally in English.
@@ -659,6 +660,14 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 
                 result = execute_tool(app, db, user, provider_phone, func_name, func_args)
                 print(f"[Agent] Tool result: {result}")
+
+                if result.get("status") == "success" and result.get("reference"):
+                    from app import send_whatsapp_receipt
+                    threading.Thread(
+                        target=send_whatsapp_receipt,
+                        args=(chat_id, result["reference"]),
+                        daemon=True,
+                    ).start()
 
                 if func_name == "get_data_plans" and result.get("status") == "success":
                     final_text = result["display_plans"]

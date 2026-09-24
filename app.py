@@ -1,3 +1,5 @@
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
 import os
 import json
 import uuid
@@ -765,6 +767,82 @@ def send_whatsapp_message(recipient, text):
         return response.ok
     except Exception as e:
         print(f"Failed to deliver WhatsApp message: {e}")
+        return False
+
+
+def send_whatsapp_receipt(recipient, reference):
+    """Generate and send a PNG receipt for a completed transaction."""
+    meta_api_token = os.getenv("META_API_TOKEN", META_API_TOKEN).strip()
+    meta_phone_number_id = os.getenv("META_PHONE_NUMBER_ID", META_PHONE_NUMBER_ID).strip()
+    if not meta_api_token or not meta_phone_number_id:
+        return False
+
+    transaction = Transaction.query.filter_by(reference=reference, status="SUCCESS").first()
+    if transaction is None:
+        return False
+
+    image = Image.new("RGB", (900, 650), "#f7f4ec")
+    draw = ImageDraw.Draw(image)
+    title_font = ImageFont.load_default(size=42)
+    heading_font = ImageFont.load_default(size=28)
+    body_font = ImageFont.load_default(size=24)
+    small_font = ImageFont.load_default(size=20)
+    draw.rectangle((40, 40, 860, 610), fill="#ffffff", outline="#d8c9a5", width=3)
+    draw.text((80, 80), "WAJ VTU", fill="#1c2148", font=title_font)
+    draw.text((80, 145), "PAYMENT RECEIPT", fill="#b7791f", font=heading_font)
+    draw.line((80, 195, 820, 195), fill="#d8c9a5", width=2)
+
+    rows = [
+        ("Service", transaction.type),
+        ("Amount", f"NGN {Decimal(str(transaction.amount)):,.2f}"),
+        ("Recipient", transaction.recipient or "-"),
+        ("Reference", transaction.reference),
+        ("Status", transaction.status),
+        ("Date", transaction.created_at.strftime("%Y-%m-%d %H:%M UTC")),
+    ]
+    y_position = 235
+    for label, value in rows:
+        draw.text((80, y_position), label, fill="#687080", font=body_font)
+        draw.text((350, y_position), str(value)[:34], fill="#1c2148", font=body_font)
+        y_position += 52
+    draw.text((80, 565), "Thank you for using WAJ VTU", fill="#687080", font=small_font)
+
+    image_buffer = BytesIO()
+    image.save(image_buffer, format="PNG")
+    image_buffer.seek(0)
+    api_version = os.getenv("META_API_VERSION", META_API_VERSION).strip()
+    base_url = f"https://graph.facebook.com/{api_version}/{meta_phone_number_id}"
+    headers = {"Authorization": f"Bearer {meta_api_token}"}
+    try:
+        upload = requests.post(
+            f"{base_url}/media",
+            files={"file": ("waj-vtu-receipt.png", image_buffer, "image/png")},
+            data={"messaging_product": "whatsapp", "type": "image/png"},
+            headers=headers,
+            timeout=20,
+        )
+        upload_data = upload.json()
+        media_id = upload_data.get("id")
+        if not upload.ok or not media_id:
+            print(f"WhatsApp receipt upload failed: {upload.text}")
+            return False
+
+        response = requests.post(
+            f"{base_url}/messages",
+            json={
+                "messaging_product": "whatsapp",
+                "to": str(recipient).split("@", 1)[0].replace("+", ""),
+                "type": "image",
+                "image": {"id": media_id, "caption": f"Receipt: {transaction.reference}"},
+            },
+            headers={**headers, "Content-Type": "application/json"},
+            timeout=20,
+        )
+        if not response.ok:
+            print(f"WhatsApp receipt send failed: {response.text}")
+        return response.ok
+    except (requests.RequestException, ValueError) as exc:
+        print(f"WhatsApp receipt error: {exc}")
         return False
 
 
