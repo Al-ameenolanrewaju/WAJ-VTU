@@ -155,6 +155,7 @@ def dashboard():
         saved_services=saved_services_for(user),
         services=SERVICES,
         is_admin=is_admin,
+        whatsapp_linked=bool(user.whatsapp_id and not str(user.whatsapp_id).startswith("web_")),
         purchase_receipt=session.pop("purchase_receipt", None),
     )
 

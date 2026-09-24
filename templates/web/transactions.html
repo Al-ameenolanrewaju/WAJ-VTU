@@ -17,6 +17,12 @@
         </div>
       </div>
     </div>
+    {% if tx.status == "SUCCESS" %}
+    <details class="transaction-receipt">
+      <summary>View photo receipt</summary>
+      <img src="{{ url_for('web.receipt_image', reference=tx.reference) }}" alt="Photo receipt for {{ tx.reference }}">
+    </details>
+    {% endif %}
     {% else %}
     <div class="tx-item"><div class="tx-details"><div class="tx-title">No transactions yet</div></div></div>
     {% endfor %}

@@ -55,11 +55,11 @@
 <div class="dashboard-bot-ad">
   <div class="bot-ad">
     <div class="bot-ad-copy">
-      <div class="bot-ad-label">WAJ VTU on WhatsApp</div>
-      <h2>Use the bot when you’re on the go</h2>
-      <p>Buy data, airtime, pay bills and check services directly from WhatsApp.</p>
+      <div class="bot-ad-label">{% if whatsapp_linked %}WhatsApp linked{% else %}Link your WhatsApp{% endif %}</div>
+      <h2>{% if whatsapp_linked %}Your wallet is connected{% else %}Connect your WhatsApp bot{% endif %}</h2>
+      <p>{% if whatsapp_linked %}Use the same wallet on the website and WhatsApp.{% else %}Open WhatsApp with this phone number to connect the same wallet automatically.{% endif %}</p>
     </div>
-    <a class="bot-ad-cta" href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU" target="_blank" rel="noopener">Open WhatsApp bot</a>
+    <a class="bot-ad-cta" href="https://wa.me/2348102314725?text=LINK%20WAJ%20VTU" target="_blank" rel="noopener">{% if whatsapp_linked %}Open WhatsApp{% else %}Link WhatsApp{% endif %}</a>
   </div>
 </div>
 
@@ -134,6 +134,12 @@
           <div class="tx-details"><div class="tx-title">{{ tx.type|title }}{% if tx.recipient %} — {{ tx.recipient }}{% endif %}</div><div class="tx-meta">{{ tx.created_at.strftime("%b %d, %I:%M %p") }}</div></div>
           <div class="tx-right"><div class="tx-amount">{{ "+" if tx.type == "DEPOSIT" else "-" }}₦{{ "{:,.2f}".format(tx.amount) }}</div><div class="tx-status status-{{ 'success' if tx.status == 'SUCCESS' else ('pending' if tx.status == 'PENDING' else 'failed') }}">{{ tx.status|title }}</div></div>
         </div>
+        {% if tx.status == "SUCCESS" %}
+        <details class="transaction-receipt">
+          <summary>View photo receipt</summary>
+          <img src="{{ url_for('web.receipt_image', reference=tx.reference) }}" alt="Photo receipt for {{ tx.reference }}">
+        </details>
+        {% endif %}
         {% else %}<div class="tx-item"><div class="tx-details"><div class="tx-title">No transactions yet</div><div class="tx-meta">Your activity will appear here.</div></div></div>{% endfor %}
       </div>
     </section>
