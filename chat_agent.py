@@ -317,7 +317,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         plans = []
         for plan in variations:
             base_cost = Decimal(str(plan.get("variation_amount")))
-            cost = base_cost + get_markup(f"DATA_{network}", base_cost)
+            cost = (base_cost + get_markup(f"DATA_{network}", base_cost)).quantize(Decimal("0.01"))
             plans.append(
                 f"- {plan.get('name')}: ₦{cost} (System Code: {plan.get('variation_code')})"
             )
