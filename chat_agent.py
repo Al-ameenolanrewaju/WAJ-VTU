@@ -35,7 +35,7 @@ def clean_whatsapp_text(text):
 def requested_photo_receipt(text):
     normalized = str(text or "").lower()
     return "receipt" in normalized and any(
-        word in normalized for word in ("photo", "image", "picture", "png", "send")
+        word in normalized for word in ("photo", "image", "picture", "png", "send", "download")
     )
 
 
@@ -648,6 +648,22 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
             from app import send_whatsapp_message
             send_whatsapp_message(chat_id, "🤖 AI support has been resumed. How can I help you today?")
             return
+        return
+
+    if requested_photo_receipt(text):
+        from models import Transaction
+        from app import send_whatsapp_message, send_whatsapp_receipt
+        latest_transaction = Transaction.query.filter_by(
+            user_id=user.id, status="SUCCESS"
+        ).order_by(Transaction.created_at.desc()).first()
+        if latest_transaction is None:
+            send_whatsapp_message(chat_id, "I could not find a completed transaction to receipt yet.")
+            return
+        receipt_sent = send_whatsapp_receipt(chat_id, latest_transaction.reference)
+        if receipt_sent:
+            send_whatsapp_message(chat_id, "Here is your photo receipt.")
+        else:
+            send_whatsapp_message(chat_id, "I found the transaction, but the photo receipt service is unavailable right now.")
         return
         
     photo_receipt_requested = requested_photo_receipt(text)
