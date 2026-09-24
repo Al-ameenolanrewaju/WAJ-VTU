@@ -239,6 +239,63 @@ def test_webhook_ignores_non_message_events(client):
     assert response.get_json()["status"] == "ignored"
 
 
+def test_data_purchase_applies_margin_from_selected_plan(monkeypatch, client):
+    import app as app_module
+    import chat_agent
+    import provider
+
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"234{uuid.uuid4().hex[:10]}",
+            phone=f"234{uuid.uuid4().hex[:10]}",
+            wallet_balance=Decimal("1000.00"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+        monkeypatch.setattr(
+            provider,
+            "fetch_data_variations",
+            lambda network: [{
+                "name": "5GB plan",
+                "variation_code": "5GB",
+                "variation_amount": "478.92",
+            }],
+        )
+        captured = {}
+
+        def fake_purchase(phone, network, plan_code, amount):
+            captured["amount"] = amount
+            return {"status": "SUCCESS", "reference": "DATA-TEST"}
+
+        monkeypatch.setattr(provider, "process_data_purchase", fake_purchase)
+        monkeypatch.setattr(
+            app_module,
+            "get_markup",
+            lambda service_type, base_amount: base_amount * Decimal("0.10"),
+        )
+
+        result = chat_agent.execute_tool(
+            app_module.app,
+            app_module.db,
+            user,
+            user.phone,
+            "buy_data",
+            {
+                "network": "MTN",
+                "plan_code": "5GB",
+                "amount": "1.00",
+                "phone": user.phone,
+            },
+        )
+
+        assert result["status"] == "success"
+        assert captured["amount"] == 478.92
+        assert user.wallet_balance == Decimal("473.19")
+        transaction = app_module.Transaction.query.filter_by(reference="DATA-TEST").one()
+        assert transaction.amount == Decimal("526.81")
+
+
 def test_send_whatsapp_message_uses_meta_api(monkeypatch):
     import app
 

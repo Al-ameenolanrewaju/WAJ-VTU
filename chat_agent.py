@@ -324,23 +324,35 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         return {"status": "success", "plans_list": "\n".join(plans), "message": "Present these options to the user clearly. Do not show the System Code to the user."}
         
     elif name == "buy_data":
-        network = kwargs.get("network")
+        network = str(kwargs.get("network") or "").upper()
         plan_code = kwargs.get("plan_code")
-        amount = Decimal(str(kwargs.get("amount")))
         phone = kwargs.get("phone")
+
+        selected_plan = next(
+            (
+                plan for plan in fetch_data_variations(network)
+                if str(plan.get("variation_code")) == str(plan_code)
+            ),
+            None,
+        )
+        if not selected_plan:
+            return {"status": "error", "message": "Select a valid data plan."}
+
+        base_amount = Decimal(str(selected_plan.get("variation_amount", "0")))
+        charge_amount = (base_amount + get_markup(f"DATA_{network}", base_amount)).quantize(Decimal("0.01"))
         
-        if user.wallet_balance < amount:
-            return {"status": "error", "message": f"Insufficient balance. Wallet balance is NGN {user.wallet_balance:,.2f}"}
+        if user.wallet_balance < charge_amount:
+            return {"status": "error", "message": f"Insufficient balance. Requires NGN {charge_amount:,.2f}. Wallet balance is NGN {user.wallet_balance:,.2f}"}
             
-        user.wallet_balance -= amount
+        user.wallet_balance -= charge_amount
         db.session.commit()
         
-        result = process_data_purchase(phone, network, plan_code, float(amount))
+        result = process_data_purchase(phone, network, plan_code, float(base_amount))
         if result.get("status") == "SUCCESS":
             tx = Transaction(
                 user_id=user.id,
                 reference=result['reference'],
-                amount=amount,
+                amount=charge_amount,
                 type='DATA',
                 recipient=phone,
                 status='SUCCESS',
@@ -350,7 +362,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
             db.session.commit()
             return {"status": "success", "reference": result['reference'], "message": f"Successfully purchased data for {phone}"}
         else:
-            user.wallet_balance += amount
+            user.wallet_balance += charge_amount
             db.session.commit()
             return {"status": "error", "message": result.get("reason", "Provider failed")}
 
