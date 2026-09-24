@@ -18,7 +18,7 @@ from flask import Flask, request, jsonify, render_template_string, redirect, url
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 1. Import db, User, and Transaction directly from models.py
-from models import db, User, Transaction, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog
+from models import db, User, Transaction, InboundMessage, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog
 from wallet_service import generate_payment_link, get_payment_fee_percentage
 
 # Import provider functions from the ClubKonnect adapter.
@@ -920,6 +920,7 @@ def whatsapp_webhook():
 
 def process_webhook_payload(req_data):
     with app.app_context():
+        message_id = req_data.get("message_id") or req_data.get("id")
         if "entry" in req_data:
             for entry in req_data.get("entry", []):
                 for change in entry.get("changes", []):
@@ -929,6 +930,7 @@ def process_webhook_payload(req_data):
                         continue
 
                     first_message = messages[0]
+                    message_id = first_message.get("id") or message_id
                     sender = first_message.get("from") or first_message.get("sender")
                     text = ""
                     if first_message.get("type") == "text":
@@ -959,6 +961,25 @@ def process_webhook_payload(req_data):
             if not is_status:
                 print(f"[webhook] No sender extracted from payload: {req_data}", flush=True)
             return
+
+        if message_id:
+            existing_message = InboundMessage.query.filter_by(
+                provider="whatsapp", message_id=str(message_id)
+            ).first()
+            if existing_message:
+                return
+            try:
+                db.session.add(InboundMessage(
+                    provider="whatsapp",
+                    message_id=str(message_id),
+                    sender=str(chat_id),
+                ))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                if InboundMessage.query.filter_by(provider="whatsapp", message_id=str(message_id)).first():
+                    return
+                raise
 
         provider_phone = str(chat_id).split("@", 1)[0]
 
@@ -1045,6 +1066,7 @@ ADMIN_BASE_TEMPLATE = """
 
         .badge-success { color: #16a34a; font-weight: bold; }
         .badge-failed { color: #dc2626; font-weight: bold; }
+        .badge-pending { color: #b45309; font-weight: bold; }
 
         @media (max-width: 768px) {
             .navbar {
@@ -1250,7 +1272,10 @@ def admin_dashboard():
 
     tx_rows = ""
     for tx in recent_transactions:
-        status_cls = "badge-success" if tx.status == "SUCCESS" else "badge-failed"
+        status_cls = {
+            "SUCCESS": "badge-success",
+            "PENDING": "badge-pending",
+        }.get(tx.status, "badge-failed")
         tx_rows += f"""
         <tr>
             <td><code>{escape(tx.reference)}</code></td>
@@ -1283,27 +1308,28 @@ def admin_dashboard():
         """
 
     content = f"""
-    <h2 class="dashboard-heading">Provider & margin</h2>
+    <h2 class="dashboard-heading">Money & provider</h2>
     <div class="card-grid">
         <div class="card"><h3>ClubKonnect Balance</h3><p>{'₦{:,.2f}'.format(provider_balance) if provider_balance is not None else 'Unavailable'}</p><small>{escape(provider_balance_result.get('reason', 'Live provider balance'))}</small></div>
         <div class="card"><h3>Estimated Markup Earned</h3><p>₦{total_markup_earned:,.2f}</p><small>Customer charges minus estimated API cost</small></div>
         <div class="card"><h3>API Discounts Captured</h3><p>₦{total_api_discount:,.2f}</p><small>Provider discounts saved on eligible plans</small></div>
         <div class="card"><h3>Markup Earned Today</h3><p>₦{today_markup_earned:,.2f}</p><small>Based on successful service sales</small></div>
     </div>
-    <h2 class="dashboard-heading">Business overview</h2>
+    <h2 class="dashboard-heading">Cash flow</h2>
     <div class="card-grid">
         <div class="card"><h3>Total Inflow</h3><p>₦{total_inflow:,.2f}</p></div>
         <div class="card"><h3>Total Outflow</h3><p>₦{total_outflow:,.2f}</p></div>
         <div class="card"><h3>Today's Inflow</h3><p>₦{today_inflow:,.2f}</p></div>
         <div class="card"><h3>Today's Outflow</h3><p>₦{today_outflow:,.2f}</p></div>
     </div>
-    <h2 class="dashboard-heading">Operations</h2>
+    <h2 class="dashboard-heading">Customers & activity</h2>
     <div class="card-grid">
         <div class="card"><h3>Total User Balances</h3><p>₦{total_user_balances:,.2f}</p></div>
         <div class="card"><h3>Total Transactions</h3><p>{total_transactions}</p></div>
         <div class="card"><h3>Total Customers</h3><p>{total_users}</p></div>
         <div class="card"><h3>Active Customers</h3><p>{active_customers}</p></div>
     </div>
+    <h2 class="dashboard-heading">Transaction health</h2>
     <div class="card-grid">
         <div class="card"><h3>Successful</h3><p>{successful_transactions}</p></div>
         <div class="card"><h3>Failed</h3><p>{failed_transactions}</p></div>
@@ -1891,7 +1917,10 @@ def admin_transactions():
 
     tx_rows = ""
     for tx in transactions:
-        status_cls = "badge-success" if tx.status == "SUCCESS" else "badge-failed"
+        status_cls = {
+            "SUCCESS": "badge-success",
+            "PENDING": "badge-pending",
+        }.get(tx.status, "badge-failed")
         tx_rows += f"""
         <tr>
             <td><code>{escape(tx.reference)}</code></td>

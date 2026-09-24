@@ -434,7 +434,7 @@ def education_page():
     payload = {
         "exam": exam,
         "quantity": quantity,
-        "amount": base_amount,
+        "amount": base_amount + get_markup("EDU", base_amount),
     }
     result = execute_tool(app, db, user, user.phone, "buy_education_pin", payload)
     if result.get("status") == "success" and result.get("pins"):

@@ -77,6 +77,22 @@ class Transaction(db.Model):
         return f"<Transaction {self.reference} - {self.type} - {self.status}>"
 
 
+class InboundMessage(db.Model):
+    __tablename__ = "inbound_messages"
+
+    id = db.Column(db.Integer, primary_key=True)
+    provider = db.Column(db.String(30), nullable=False, default="whatsapp")
+    message_id = db.Column(db.String(200), nullable=False)
+    sender = db.Column(db.String(50), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default="PROCESSING")
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+    processed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("provider", "message_id", name="uq_inbound_provider_message"),
+    )
+
+
 class SavedService(db.Model):
     __tablename__ = 'saved_services'
 

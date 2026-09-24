@@ -6,6 +6,15 @@ from decimal import Decimal
 from datetime import datetime
 from groq import Groq
 
+
+def normalize_purchase_amount(value):
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"))
+    except Exception:
+        return None
+    return amount if amount > 0 else None
+
+
 def get_groq_client():
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -264,7 +273,8 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
     from provider import (
         fetch_data_variations, process_data_purchase, process_airtime_purchase,
         fetch_cable_plans, verify_smartcard, process_cable_tv,
-        verify_meter as provider_verify_meter, process_electricity_payment
+        verify_meter as provider_verify_meter, process_electricity_payment,
+        fetch_education_packages
     )
     from app import get_markup, settle_transaction
     from models import Transaction, ScheduledTask
@@ -394,8 +404,10 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
     elif name == "buy_airtime":
         network = kwargs.get("network")
-        amount = Decimal(str(kwargs.get("amount")))
+        amount = normalize_purchase_amount(kwargs.get("amount"))
         phone = kwargs.get("phone")
+        if amount is None:
+            return {"status": "error", "message": "Enter a valid positive airtime amount."}
         
         charge_amount = amount + get_markup("AIRTIME", amount)
         if user.wallet_balance < charge_amount:
@@ -442,7 +454,9 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         provider = kwargs.get("provider")
         smartcard = kwargs.get("smartcard")
         plan_code = kwargs.get("plan_code")
-        amount = Decimal(str(kwargs.get("amount")))
+        amount = normalize_purchase_amount(kwargs.get("amount"))
+        if amount is None:
+            return {"status": "error", "message": "Select a valid cable plan price."}
         api_cost_value = kwargs.get("api_cost")
         api_discount_value = kwargs.get("api_discount_amount")
         if api_cost_value is None:
@@ -454,6 +468,9 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
             api_discount_value = matched_plan.get("discount_amount", "0") if matched_plan else "0"
         api_cost = Decimal(str(api_cost_value))
         api_discount = Decimal(str(api_discount_value or "0"))
+        expected_amount = (api_cost + get_markup("CABLE", api_cost)).quantize(Decimal("0.01"))
+        if amount != expected_amount:
+            return {"status": "error", "message": f"The cable plan price has changed. Current price is NGN {expected_amount:,.2f}. Please fetch the plans again."}
         
         if user.wallet_balance < amount:
             return {"status": "error", "message": f"Insufficient balance. Wallet balance is NGN {user.wallet_balance:,.2f}"}
@@ -497,7 +514,9 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         disco = kwargs.get("disco")
         meter = kwargs.get("meter_number")
         mtype = kwargs.get("meter_type")
-        amount = Decimal(str(kwargs.get("amount")))
+        amount = normalize_purchase_amount(kwargs.get("amount"))
+        if amount is None:
+            return {"status": "error", "message": "Enter a valid positive electricity amount."}
         
         charge_amount = amount + get_markup("ELECTRICITY", amount)
         if user.wallet_balance < charge_amount:
@@ -551,7 +570,9 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
     elif name == "buy_betting":
         platform = kwargs.get("platform")
         account_id = kwargs.get("account_id")
-        amount = Decimal(str(kwargs.get("amount")))
+        amount = normalize_purchase_amount(kwargs.get("amount"))
+        if amount is None:
+            return {"status": "error", "message": "Enter a valid positive betting amount."}
         from provider import process_betting_topup
 
         charge_amount = amount + get_markup("BETTING", amount)
@@ -582,9 +603,25 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
     elif name == "buy_education_pin":
         exam = kwargs.get("exam")
-        quantity = int(kwargs.get("quantity", 1))
-        amount = Decimal(str(kwargs.get("amount")))
+        try:
+            quantity = int(kwargs.get("quantity", 1))
+        except (TypeError, ValueError):
+            quantity = 0
+        amount = normalize_purchase_amount(kwargs.get("amount"))
+        if quantity < 1 or quantity > 10 or amount is None:
+            return {"status": "error", "message": "Enter a valid PIN quantity and price."}
         from provider import process_education_pin
+
+        package = next(
+            (item for item in fetch_education_packages() if str(item.get("code")) == str(exam)),
+            None,
+        )
+        if not package:
+            return {"status": "error", "message": "Select a valid education package."}
+        base_total = Decimal(str(package.get("amount", "0"))) * quantity
+        expected_amount = (base_total + get_markup("EDU", base_total)).quantize(Decimal("0.01"))
+        if amount != expected_amount:
+            return {"status": "error", "message": f"The PIN price has changed. Current price is NGN {expected_amount:,.2f}. Please fetch the packages again."}
 
         charge_amount = amount + get_markup("EDU", amount)
         if user.wallet_balance < charge_amount:
