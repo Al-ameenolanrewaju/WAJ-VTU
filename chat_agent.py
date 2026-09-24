@@ -22,7 +22,7 @@ def clean_whatsapp_text(text):
     return cleaned
 
 
-def build_context(history, max_user_turns=12):
+def build_context(history, max_user_turns=6):
     """Keep full history in the database while sending complete recent turns to Groq."""
     if not isinstance(history, list):
         history = []
@@ -626,7 +626,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
             temperature=0,
             tools=tools,
             tool_choice="auto",
-            max_tokens=2000
+            max_tokens=1000
         )
         
         response_message = response.choices[0].message
@@ -665,7 +665,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 temperature=0,
                 tools=tools,
                 tool_choice="auto",
-                max_tokens=2000
+                max_tokens=1000
             )
             response_message = response.choices[0].message
             
