@@ -22,7 +22,7 @@ def clean_whatsapp_text(text):
     return cleaned
 
 
-def build_context(history, max_user_turns=6):
+def build_context(history, max_user_turns=3):
     """Keep full history in the database while sending complete recent turns to Groq."""
     if not isinstance(history, list):
         history = []
@@ -626,7 +626,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
             temperature=0,
             tools=tools,
             tool_choice="auto",
-            max_tokens=1000
+            max_tokens=700
         )
         
         response_message = response.choices[0].message
@@ -635,6 +635,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
         while response_message.tool_calls:
             msg_dump = response_message.model_dump(exclude_none=True)
             messages.append(msg_dump)
+            follow_up_names = set()
             
             for tool_call in response_message.tool_calls:
                 func_name = tool_call.function.name
@@ -658,14 +659,27 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                     "name": func_name,
                     "content": json.dumps(result)
                 })
+
+                follow_up_names.update({
+                    "get_data_plans": {"buy_data"},
+                    "get_cable_plans": {"buy_cable"},
+                    "verify_meter": {"pay_electricity"},
+                    "verify_betting": {"buy_betting"},
+                    "get_education_packages": {"buy_education_pin"},
+                }.get(func_name, set()))
+
+            follow_up_tools = [
+                tool for tool in tools
+                if tool["function"]["name"] in follow_up_names
+            ]
                 
             response = client.chat.completions.create(
                 messages=messages,
                 model="openai/gpt-oss-120b",
                 temperature=0,
-                tools=tools,
-                tool_choice="auto",
-                max_tokens=1000
+                tools=follow_up_tools,
+                tool_choice="auto" if follow_up_tools else "none",
+                max_tokens=700
             )
             response_message = response.choices[0].message
             
