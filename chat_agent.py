@@ -315,13 +315,20 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
             return {"status": "error", "message": "No plans available right now."}
         
         plans = []
-        for plan in variations:
+        display_plans = []
+        for index, plan in enumerate(variations, start=1):
             base_cost = Decimal(str(plan.get("variation_amount")))
             cost = (base_cost + get_markup(f"DATA_{network}", base_cost)).quantize(Decimal("0.01"))
             plans.append(
                 f"- {plan.get('name')}: ₦{cost} (System Code: {plan.get('variation_code')})"
             )
-        return {"status": "success", "plans_list": "\n".join(plans), "message": "Present these options to the user clearly. Do not show the System Code to the user."}
+            display_plans.append(f"{index}. {plan.get('name')}: ₦{cost:,.2f}")
+        return {
+            "status": "success",
+            "plans_list": "\n".join(plans),
+            "display_plans": "\n\n".join(display_plans),
+            "message": "Present these options to the user clearly. Do not show the System Code to the user.",
+        }
         
     elif name == "buy_data":
         network = str(kwargs.get("network") or "").upper()
@@ -652,6 +659,15 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 
                 result = execute_tool(app, db, user, provider_phone, func_name, func_args)
                 print(f"[Agent] Tool result: {result}")
+
+                if func_name == "get_data_plans" and result.get("status") == "success":
+                    final_text = result["display_plans"]
+                    messages.append({"role": "assistant", "content": final_text})
+                    send_whatsapp_message(chat_id, final_text)
+                    history.extend(messages[turn_start + 1:])
+                    user.state_data = {"messages": history}
+                    db.session.commit()
+                    return
                 
                 messages.append({
                     "role": "tool",
