@@ -1,9 +1,11 @@
 <nav class="site-nav">
-  <a class="site-brand" href="{{ url_for('web.dashboard') }}">WAJ VTU</a>
+  <a class="site-brand" href="{{ url_for('web.dashboard') }}">WAJ <span>VTU</span></a>
   <button class="site-menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" onclick="const menu = this.nextElementSibling; const open = menu.classList.toggle('open'); this.setAttribute('aria-expanded', open);">☰</button>
   <div class="site-nav-links">
-    <a href="{{ url_for('web.dashboard') }}">Dashboard</a>
-    <a href="{{ url_for('web.transactions_page') }}">Transactions</a>
+    <a href="{{ url_for('web.dashboard') }}" class="{{ 'active' if request.path == url_for('web.dashboard') else '' }}">Dashboard</a>
+    <a href="{{ url_for('web.buy_data') }}" class="{{ 'active' if request.path == url_for('web.buy_data') else '' }}">Data</a>
+    <a href="{{ url_for('web.airtime_page') }}" class="{{ 'active' if request.path == url_for('web.airtime_page') else '' }}">Airtime</a>
+    <a href="{{ url_for('web.transactions_page') }}" class="{{ 'active' if request.path == url_for('web.transactions_page') else '' }}">Transactions</a>
     <a class="site-nav-balance" href="{{ url_for('web.fund_wallet') }}">Fund wallet</a>
     <a href="{{ url_for('auth.logout') }}">Log out</a>
   </div>

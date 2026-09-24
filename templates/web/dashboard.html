@@ -1,6 +1,7 @@
 {% extends "web/base.html" %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block content %}
+{% include "web/_service_nav.html" %}
 {% if purchase_receipt %}
 <div class="receipt-backdrop" id="purchase-receipt" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
   <div class="receipt-modal">
@@ -31,7 +32,6 @@
 <header>
   <div class="header-top">
     <div>
-      <div class="dashboard-brand">WAJ VTU</div>
       <div class="greeting">Welcome back, <strong>{{ user.name or "there" }}</strong></div>
     </div>
     <div class="header-tools">
