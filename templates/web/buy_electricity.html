@@ -1,6 +1,7 @@
 {% extends "web/base.html" %}
 {% block content %}
 {% include "web/_service_nav.html" %}
+{% include "web/_header.html" %}
 <main class="page-shell">
   <div class="page-heading"><div><h1>Electricity bill</h1><p>Pay your power bill securely and get your token instantly.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
   <div class="form-card">

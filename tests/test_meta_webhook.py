@@ -563,3 +563,26 @@ def test_dynamic_paystack_fee_tiers_are_admin_editable(client):
     assert b"Paystack Fee Tiers" in response.data
     assert b"Below 1000" in response.data
     assert b"More than 20,000" in response.data
+
+
+def test_education_packages_exclude_neco(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "CLUBKONNECT_USERID", "test-user")
+    monkeypatch.setattr(provider, "CLUBKONNECT_APIKEY", "test-key")
+    monkeypatch.setattr(
+        provider,
+        "_provider_request",
+        lambda endpoint, params: {
+            "EXAM_TYPE": [
+                {"PRODUCT_CODE": "waecdirect", "PRODUCT_DESCRIPTION": "WAEC Result Checker PIN", "PRODUCT_AMOUNT": "5350"},
+                {"PRODUCT_CODE": "neco-pin", "PRODUCT_DESCRIPTION": "NECO Result Checker PIN", "PRODUCT_AMOUNT": "4500"},
+                {"PRODUCT_CODE": "jamb-utme", "PRODUCT_DESCRIPTION": "JAMB UTME PIN", "PRODUCT_AMOUNT": "5700"},
+            ]
+        },
+    )
+
+    packages = provider.fetch_education_packages()
+
+    assert [package["code"] for package in packages] == ["waecdirect", "jamb-utme"]

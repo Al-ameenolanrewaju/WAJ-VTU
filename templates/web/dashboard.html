@@ -29,28 +29,7 @@
   });
 </script>
 {% endif %}
-<header>
-  <div class="header-top">
-    <div>
-      <div class="greeting">Welcome back, <strong>{{ user.name or "there" }}</strong></div>
-    </div>
-    <div class="header-tools">
-      {% if is_admin %}<a class="admin-link" href="{{ url_for('admin_dashboard') }}">Admin panel</a>{% endif %}
-      <span class="notification-dot" title="Notifications" aria-label="Notifications">●</span>
-      <a class="avatar" href="{{ url_for('auth.logout') }}" title="Log out">{{ (user.name or "U")[0]|upper }}</a>
-    </div>
-  </div>
-
-  <div class="balance-card">
-    <div class="balance-label">Available wallet balance</div>
-    <div class="balance-amount"><span>₦</span>{{ "{:,.2f}".format(user.wallet_balance) }}</div>
-    <div class="wallet-hint"><span>Use your balance for any service</span><strong>● Ready to use</strong></div>
-    <div class="balance-actions">
-      <a class="btn-primary" href="{{ url_for('web.fund_wallet') }}">＋ Add money</a>
-      <a class="btn-secondary" href="{{ url_for('web.transactions_page') }}">View history</a>
-    </div>
-  </div>
-</header>
+{% include "web/_header.html" %}
 
 <div class="dashboard-bot-ad">
   <div class="bot-ad">

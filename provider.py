@@ -507,6 +507,8 @@ def fetch_education_packages():
                 raw_amount = item.get("PRODUCT_AMOUNT")
                 if not code or not name or raw_amount in (None, "") or code in seen_codes:
                     continue
+                if "neco" in f"{code} {name}".lower():
+                    continue
                 try:
                     amount = float(raw_amount)
                 except (TypeError, ValueError):
