@@ -129,6 +129,32 @@ def fetch_account_balance():
         return {"status": "FAILED", "reason": str(exc)}
 
 
+def fetch_swiftbills_balance():
+    """Fetch the current SwiftBills wallet balance for the admin dashboard."""
+    if MOCK_MODE:
+        return {"status": "SUCCESS", "balance": 8100.00}
+    if not SWIFTBILLS_API_KEY:
+        return {"status": "FAILED", "reason": "SwiftBills credentials are missing"}
+    try:
+        response = _swiftbills_request("user")
+        if not isinstance(response, dict):
+            return {"status": "FAILED", "reason": "SwiftBills user endpoint returned an unexpected payload", "data": response}
+        raw_balance = (
+            response.get("wallet balance")
+            or response.get("wallet_balance")
+            or response.get("balance")
+            or response.get("wallet")
+        )
+        if raw_balance is None:
+            return {"status": "FAILED", "reason": response.get("message", "SwiftBills balance was not returned"), "data": response}
+        return {"status": "SUCCESS", "balance": float(str(raw_balance).replace(",", "")), "data": response}
+    except (TypeError, ValueError):
+        return {"status": "FAILED", "reason": "SwiftBills returned an invalid balance"}
+    except Exception as exc:
+        logger.exception("Failed to fetch SwiftBills balance")
+        return {"status": "FAILED", "reason": str(exc)}
+
+
 # --- DATA SERVICES ---
 
 

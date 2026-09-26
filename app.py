@@ -36,6 +36,7 @@ from provider import (
     fetch_education_packages,
     process_education_pin,
     fetch_account_balance,
+    fetch_swiftbills_balance,
 )
 load_dotenv()
 app = Flask(__name__)
@@ -1399,6 +1400,8 @@ def admin_dashboard():
     )
     provider_balance_result = fetch_account_balance()
     provider_balance = provider_balance_result.get("balance")
+    swiftbills_balance_result = fetch_swiftbills_balance()
+    swiftbills_balance = swiftbills_balance_result.get("balance")
     today_inflow = sum(
         (
             tx.amount
@@ -1509,6 +1512,7 @@ def admin_dashboard():
     <h2 class="dashboard-heading">Money & provider</h2>
     <div class="card-grid">
         <div class="card"><h3>ClubKonnect Balance</h3><p>{'₦{:,.2f}'.format(provider_balance) if provider_balance is not None else 'Unavailable'}</p><small>{escape(provider_balance_result.get('reason', 'Live provider balance'))}</small></div>
+        <div class="card"><h3>SwiftBills Balance</h3><p>{'₦{:,.2f}'.format(swiftbills_balance) if swiftbills_balance is not None else 'Unavailable'}</p><small>{escape(swiftbills_balance_result.get('reason', 'Live SwiftBills balance'))}</small></div>
         <div class="card"><h3>Estimated Markup Earned</h3><p>₦{total_markup_earned:,.2f}</p><small>Customer charges minus estimated API cost</small></div>
         <div class="card"><h3>API Discounts Captured</h3><p>₦{total_api_discount:,.2f}</p><small>Provider discounts saved on eligible plans</small></div>
         <div class="card"><h3>Markup Earned Today</h3><p>₦{today_markup_earned:,.2f}</p><small>Based on successful service sales</small></div>
