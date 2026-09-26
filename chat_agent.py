@@ -118,7 +118,8 @@ def define_tools():
                         "network": {"type": "string", "enum": ["MTN", "AIRTEL", "GLO", "9MOBILE"]},
                         "plan_code": {"type": "string", "description": "The exact variation_code or plan_code"},
                         "amount": {"type": "number", "description": "The exact cost"},
-                        "phone": {"type": "string", "description": "The 11-digit recipient phone number"}
+                        "phone": {"type": "string", "description": "The 11-digit recipient phone number"},
+                        "confirm": {"type": "boolean", "description": "Set to true only after the user explicitly confirms the exact plan, price, and recipient."}
                     },
                     "required": ["network", "plan_code", "amount", "phone"]
                 }
@@ -398,6 +399,13 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
                 "status": "error",
                 "message": f"The price for this plan has changed. Current price is NGN {charge_amount:,.2f}. Please fetch the plans again before purchasing.",
             }
+
+        confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
+        if not confirmed:
+            return {
+                "status": "pending_confirmation",
+                "message": f"Please confirm: you want to buy {selected_plan.get('name')} for NGN {charge_amount:,.2f} on {network} for {phone}. Reply YES to proceed.",
+            }
         
         if user.wallet_balance < charge_amount:
             return {"status": "error", "message": f"Insufficient balance. Requires NGN {charge_amount:,.2f}. Wallet balance is NGN {user.wallet_balance:,.2f}"}
@@ -434,6 +442,13 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
             return {"status": "error", "message": "Enter a valid positive airtime amount."}
         
         charge_amount = amount + get_markup("AIRTIME", amount)
+        confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
+        if not confirmed:
+            return {
+                "status": "pending_confirmation",
+                "message": f"Please confirm: you want to buy airtime worth NGN {charge_amount:,.2f} for {phone} on {network}. Reply YES to proceed.",
+            }
+
         if user.wallet_balance < charge_amount:
             return {"status": "error", "message": f"Insufficient balance. Requires NGN {charge_amount:,.2f}. Wallet balance is NGN {user.wallet_balance:,.2f}"}
             
@@ -498,6 +513,13 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         if amount != expected_amount:
             return {"status": "error", "message": f"The cable plan price has changed. Current price is NGN {expected_amount:,.2f}. Please fetch the plans again."}
         
+        confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
+        if not confirmed:
+            return {
+                "status": "pending_confirmation",
+                "message": f"Please confirm: you want to renew {provider} with plan {plan_code} for NGN {amount:,.2f} on smartcard {smartcard}. Reply YES to proceed.",
+            }
+
         if user.wallet_balance < amount:
             return {"status": "error", "message": f"Insufficient balance. Wallet balance is NGN {user.wallet_balance:,.2f}"}
             
@@ -551,6 +573,13 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
             return {"status": "error", "message": "Enter a valid positive electricity amount."}
         
         charge_amount = amount + get_markup("ELECTRICITY", amount)
+        confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
+        if not confirmed:
+            return {
+                "status": "pending_confirmation",
+                "message": f"Please confirm: you want to pay NGN {charge_amount:,.2f} for meter {meter} under {disco}. Reply YES to proceed.",
+            }
+
         if user.wallet_balance < charge_amount:
             return {"status": "error", "message": f"Insufficient balance. Required: NGN {charge_amount:,.2f}"}
             
@@ -613,6 +642,13 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         from provider import process_betting_topup
 
         charge_amount = amount + get_markup("BETTING", amount)
+        confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
+        if not confirmed:
+            return {
+                "status": "pending_confirmation",
+                "message": f"Please confirm: you want to fund betting account {account_id} with NGN {charge_amount:,.2f} on {platform}. Reply YES to proceed.",
+            }
+
         if user.wallet_balance < charge_amount:
             return {"status": "error", "message": f"Insufficient balance. Required: NGN {charge_amount:,.2f}"}
 

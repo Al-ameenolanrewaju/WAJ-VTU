@@ -325,15 +325,22 @@ def merge_user_accounts(primary_user, secondary_user):
         primary_user.password_hash = secondary_user.password_hash
     if not primary_user.name and secondary_user.name:
         primary_user.name = secondary_user.name
-    if (not primary_user.whatsapp_id or str(primary_user.whatsapp_id).startswith("web_")) and secondary_user.whatsapp_id:
-        primary_user.whatsapp_id = secondary_user.whatsapp_id
+
     if not primary_user.phone:
         primary_user.phone = secondary_user.phone
-    primary_user.phone = normalize_phone_number(primary_user.phone) or normalize_phone_number(secondary_user.phone)
-    primary_user.whatsapp_id = normalize_phone_number(primary_user.whatsapp_id) or primary_user.whatsapp_id
+    preferred_phone = normalize_phone_number(primary_user.phone) or normalize_phone_number(secondary_user.phone)
+    if preferred_phone:
+        primary_user.phone = preferred_phone
 
     Transaction.query.filter_by(user_id=secondary_user.id).update({"user_id": primary_user.id})
     db.session.delete(secondary_user)
+    db.session.flush()
+
+    if not primary_user.whatsapp_id or str(primary_user.whatsapp_id).startswith("web_"):
+        primary_user.whatsapp_id = normalize_phone_number(secondary_user.whatsapp_id) or normalize_phone_number(primary_user.phone) or primary_user.whatsapp_id
+    else:
+        primary_user.whatsapp_id = normalize_phone_number(primary_user.whatsapp_id) or primary_user.whatsapp_id
+
     db.session.commit()
     return primary_user
 
@@ -486,6 +493,11 @@ def claim_whatsapp_link_token(phone_number, token):
     if user is None:
         return False
 
+    conflicting_user = User.query.filter_by(whatsapp_id=normalized_phone).first()
+    if conflicting_user and conflicting_user.id != user.id:
+        user = merge_user_accounts(user, conflicting_user)
+
+    user.phone = normalize_phone_number(user.phone) or normalized_phone
     user.whatsapp_id = normalized_phone
     db.session.commit()
     return True
