@@ -75,10 +75,12 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_recycle': 300,
 }
 if DATABASE_URL.startswith("postgresql://"):
-    # Supabase pooler connections can arrive with an empty search_path.
-    # Pin DDL and queries to the standard schema used by this application.
+    # Supabase/Render pooler connections can reject reused prepared statements.
+    # Disable that optimization to avoid recurring "DuplicatePreparedStatement"
+    # errors during startup and webhook traffic.
     app.config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {
-        'options': '-csearch_path=public'
+        'options': '-csearch_path=public',
+        'prepare_threshold': 0,
     }
 ALLOW_DB_MUTATIONS = os.getenv("ALLOW_DB_MUTATIONS", "false").strip().lower() in {"1", "true", "yes", "on"}
 BRIDGE_BASE_URL = os.getenv("BRIDGE_URL") or os.getenv(
