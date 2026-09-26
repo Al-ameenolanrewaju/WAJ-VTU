@@ -76,11 +76,11 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 }
 if DATABASE_URL.startswith("postgresql://"):
     # Supabase/Render pooler connections can reject reused prepared statements.
-    # Disable that optimization to avoid recurring "DuplicatePreparedStatement"
-    # errors during startup and webhook traffic.
+    # Disable the prepared-statement cache to avoid recurring
+    # "DuplicatePreparedStatement" errors during startup and webhook traffic.
     app.config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {
         'options': '-csearch_path=public',
-        'prepare_threshold': 0,
+        'prepared_statement_cache_size': 0,
     }
 ALLOW_DB_MUTATIONS = os.getenv("ALLOW_DB_MUTATIONS", "false").strip().lower() in {"1", "true", "yes", "on"}
 BRIDGE_BASE_URL = os.getenv("BRIDGE_URL") or os.getenv(
