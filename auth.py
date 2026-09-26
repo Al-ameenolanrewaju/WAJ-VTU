@@ -33,7 +33,10 @@ def normalize_phone(raw):
     """
     if raw is None:
         return ""
-    normalized = str(raw).strip().replace(" ", "").replace("+", "")
+    normalized = str(raw).strip().replace(" ", "")
+    normalized = normalized.split("@", 1)[0].replace("+", "")
+    if normalized.startswith("00"):
+        normalized = normalized[2:]
     if normalized.startswith("234"):
         return normalized
     if normalized.startswith("0") and len(normalized) == 11:
@@ -134,9 +137,10 @@ def signup():
     # Link to an existing WhatsApp-created account with the same phone number,
     # rather than creating a second wallet for the same person.
     existing = User.query.filter_by(phone=phone).first()
-
+    if not existing:
+        existing = User.query.filter_by(email=email).first()
     if existing:
-        if existing.email:
+        if existing.email and existing.email != email:
             flash("That phone number is already linked to an account. Log in or reset your password.", "error")
             return redirect(url_for("auth.login"))
         existing.email = email

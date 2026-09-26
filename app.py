@@ -296,12 +296,44 @@ STATES = {
 def normalize_phone_number(phone_number):
     if phone_number is None:
         return ""
-    normalized = str(phone_number).strip().replace(" ", "").replace("+", "")
+    normalized = str(phone_number).strip().replace(" ", "")
+    normalized = normalized.split("@", 1)[0].replace("+", "")
+    if normalized.startswith("00"):
+        normalized = normalized[2:]
     if normalized.startswith("234"):
         return normalized
     if normalized.startswith("0") and len(normalized) == 11:
         return "234" + normalized[1:]
     return normalized
+
+
+def merge_user_accounts(primary_user, secondary_user):
+    if primary_user is None or secondary_user is None or primary_user.id == secondary_user.id:
+        return primary_user or secondary_user
+
+    if primary_user.wallet_balance is None:
+        primary_user.wallet_balance = Decimal("0.00")
+    if secondary_user.wallet_balance is None:
+        secondary_user.wallet_balance = Decimal("0.00")
+
+    primary_user.wallet_balance += secondary_user.wallet_balance
+    if not primary_user.email and secondary_user.email:
+        primary_user.email = secondary_user.email
+    if not primary_user.password_hash and secondary_user.password_hash:
+        primary_user.password_hash = secondary_user.password_hash
+    if not primary_user.name and secondary_user.name:
+        primary_user.name = secondary_user.name
+    if (not primary_user.whatsapp_id or str(primary_user.whatsapp_id).startswith("web_")) and secondary_user.whatsapp_id:
+        primary_user.whatsapp_id = secondary_user.whatsapp_id
+    if not primary_user.phone:
+        primary_user.phone = secondary_user.phone
+    primary_user.phone = normalize_phone_number(primary_user.phone) or normalize_phone_number(secondary_user.phone)
+    primary_user.whatsapp_id = normalize_phone_number(primary_user.whatsapp_id) or primary_user.whatsapp_id
+
+    Transaction.query.filter_by(user_id=secondary_user.id).update({"user_id": primary_user.id})
+    db.session.delete(secondary_user)
+    db.session.commit()
+    return primary_user
 
 
 INJECTION_PATTERNS = (
@@ -405,12 +437,69 @@ def add_security_headers(response):
     return response
 
 
+def generate_whatsapp_link_token(user):
+    """Create a signed, time-limited link token for binding a WhatsApp number to a user account."""
+    if user is None or getattr(user, "id", None) is None:
+        return ""
+
+    user_id = int(user.id)
+    expiry = int((datetime.now(timezone.utc) + timedelta(minutes=30)).timestamp())
+    nonce = secrets.token_urlsafe(18)
+    payload = f"{user_id}:{expiry}:{nonce}"
+    signature = hmac.new(
+        app.config["SECRET_KEY"].encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{payload}:{signature}"
+
+
+def claim_whatsapp_link_token(phone_number, token):
+    """Verify a link token and attach the supplied WhatsApp number to the user account."""
+    normalized_phone = normalize_phone_number(phone_number)
+    if not normalized_phone or not token:
+        return False
+
+    try:
+        user_id_raw, expiry_raw, nonce, signature = str(token).strip().split(":", 3)
+        user_id = int(user_id_raw)
+        expiry = int(expiry_raw)
+    except (TypeError, ValueError):
+        return False
+
+    now = int(datetime.now(timezone.utc).timestamp())
+    if expiry < now:
+        return False
+
+    payload = f"{user_id}:{expiry}:{nonce}"
+    expected_signature = hmac.new(
+        app.config["SECRET_KEY"].encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected_signature, signature):
+        return False
+
+    user = User.query.get(user_id)
+    if user is None:
+        return False
+
+    user.whatsapp_id = normalized_phone
+    db.session.commit()
+    return True
+
+
 def get_or_create_user(phone_number):
     normalized_phone = normalize_phone_number(phone_number)
     if not normalized_phone:
         return None
 
-    user = User.query.filter_by(whatsapp_id=normalized_phone).first() or User.query.filter_by(phone=normalized_phone).first()
+    user = (
+        User.query.filter_by(whatsapp_id=normalized_phone).first()
+        or User.query.filter_by(phone=normalized_phone).first()
+        or User.query.filter(User.whatsapp_id == str(phone_number).split("@", 1)[0]).first()
+    )
+
     if not user:
         if not ALLOW_DB_MUTATIONS:
             return None
@@ -418,11 +507,18 @@ def get_or_create_user(phone_number):
         db.session.add(user)
         db.session.commit()
     else:
-        if user.whatsapp_id != normalized_phone:
-            user.whatsapp_id = normalized_phone
         if user.phone != normalized_phone:
             user.phone = normalized_phone
+        if user.whatsapp_id != normalized_phone:
+            user.whatsapp_id = normalized_phone
         db.session.commit()
+
+    duplicate_matches = User.query.filter(User.id != user.id).filter(
+        (User.phone == normalized_phone) | (User.whatsapp_id == normalized_phone) | (User.whatsapp_id == str(phone_number).split("@", 1)[0])
+    ).all()
+    for duplicate in duplicate_matches:
+        user = merge_user_accounts(user, duplicate)
+
     return user
 
 

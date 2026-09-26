@@ -38,7 +38,7 @@
       <h2>{% if whatsapp_linked %}Your wallet is connected{% else %}Connect your WhatsApp bot{% endif %}</h2>
       <p>{% if whatsapp_linked %}Use the same wallet on the website and WhatsApp.{% else %}Open WhatsApp with this phone number to connect the same wallet automatically.{% endif %}</p>
     </div>
-    <a class="bot-ad-cta" href="https://wa.me/2348102314725?text=LINK%20WAJ%20VTU" target="_blank" rel="noopener">{% if whatsapp_linked %}Open WhatsApp{% else %}Link WhatsApp{% endif %}</a>
+    <a class="bot-ad-cta" href="{{ whatsapp_link_url or 'https://wa.me/2348102314725?text=LINK%20WAJ%20VTU' }}" target="_blank" rel="noopener">{% if whatsapp_linked %}Open WhatsApp{% else %}Link WhatsApp{% endif %}</a>
   </div>
 </div>
 

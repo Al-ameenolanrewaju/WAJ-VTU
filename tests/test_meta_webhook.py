@@ -339,6 +339,80 @@ def test_data_purchase_applies_margin_from_selected_plan(monkeypatch, client):
         assert transaction.amount == Decimal("526.81")
 
 
+def test_data_purchase_accepts_normalized_plan_aliases(monkeypatch):
+    import app as app_module
+    import chat_agent
+    import provider
+
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"234{uuid.uuid4().hex[:10]}",
+            phone=f"234{uuid.uuid4().hex[:10]}",
+            wallet_balance=Decimal("1000.00"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+        monkeypatch.setattr(
+            provider,
+            "fetch_data_variations",
+            lambda network: [{
+                "name": "MTN 1GB Weekly (SME)",
+                "variation_code": "swiftbills:1:101",
+                "variation_amount": "450.00",
+            }],
+        )
+
+        def fake_purchase(phone, network, plan_code, amount):
+            assert plan_code == "swiftbills:1:101"
+            return {"status": "SUCCESS", "reference": "DATA-ALIAS-TEST"}
+
+        monkeypatch.setattr(provider, "process_data_purchase", fake_purchase)
+        monkeypatch.setattr(app_module, "get_markup", lambda service_type, base_amount: Decimal("0.00"))
+
+        result = chat_agent.execute_tool(
+            app_module.app,
+            app_module.db,
+            user,
+            user.phone,
+            "buy_data",
+            {
+                "network": "MTN",
+                "plan_code": "MTN_1GB_WEEKLY_SME",
+                "amount": "450.00",
+                "phone": user.phone,
+            },
+        )
+
+        assert result["status"] == "success"
+        assert result["reference"] == "DATA-ALIAS-TEST"
+
+
+def test_whatsapp_link_token_links_different_number_to_website_account():
+    import app as app_module
+
+    with app_module.app.app_context():
+        app_module.db.session.query(app_module.User).delete()
+
+        website_user = app_module.User(
+            whatsapp_id="web_123",
+            phone="2348000000001",
+            email="user@example.com",
+            name="Website User",
+            wallet_balance=Decimal("250.00"),
+        )
+        app_module.db.session.add(website_user)
+        app_module.db.session.commit()
+
+        token = app_module.generate_whatsapp_link_token(website_user)
+        assert token
+        assert app_module.claim_whatsapp_link_token("2348000000002", token) is True
+
+        refreshed = app_module.User.query.get(website_user.id)
+        assert refreshed.whatsapp_id == "2348000000002"
+        assert refreshed.phone == "2348000000001"
+
+
 def test_send_whatsapp_message_uses_meta_api(monkeypatch):
     import app
 

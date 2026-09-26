@@ -135,6 +135,8 @@ def transactions_page():
 @web_bp.route("/dashboard")
 @login_required
 def dashboard():
+    from app import generate_whatsapp_link_token
+
     user = current_user()
     recent = (
         Transaction.query.filter_by(user_id=user.id)
@@ -148,6 +150,11 @@ def dashboard():
         and app.config.get("ADMIN_EMAIL")
         and user.email.strip().lower() == app.config["ADMIN_EMAIL"].strip().lower()
     )
+    whatsapp_link_token = generate_whatsapp_link_token(user) if user else ""
+    whatsapp_link_url = ""
+    if whatsapp_link_token:
+        from urllib.parse import quote
+        whatsapp_link_url = f"https://wa.me/2348102314725?text={quote('LINK ' + whatsapp_link_token)}"
     return render_template(
         "web/dashboard.html",
         user=user,
@@ -156,6 +163,7 @@ def dashboard():
         services=SERVICES,
         is_admin=is_admin,
         whatsapp_linked=bool(user.whatsapp_id and not str(user.whatsapp_id).startswith("web_")),
+        whatsapp_link_url=whatsapp_link_url,
         purchase_receipt=session.pop("purchase_receipt", None),
     )
 

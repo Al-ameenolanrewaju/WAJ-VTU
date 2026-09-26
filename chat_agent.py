@@ -15,6 +15,13 @@ def normalize_purchase_amount(value):
     return amount if amount > 0 else None
 
 
+def normalize_plan_key(value):
+    if value is None:
+        return ""
+    text = str(value).strip().upper()
+    return re.sub(r"[^A-Z0-9]+", "_", text).strip("_")
+
+
 def get_groq_client():
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -354,16 +361,31 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         requested_amount = kwargs.get("amount")
         phone = kwargs.get("phone")
 
+        requested_key = normalize_plan_key(plan_code)
+        available_plans = fetch_data_variations(network)
         selected_plan = next(
             (
-                plan for plan in fetch_data_variations(network)
-                if str(plan.get("variation_code")) == str(plan_code)
+                plan for plan in available_plans
+                if normalize_plan_key(plan.get("variation_code")) == requested_key
+                or normalize_plan_key(plan.get("name")) == requested_key
             ),
             None,
         )
         if not selected_plan:
+            alias_variants = []
+            for plan in available_plans:
+                alias_variants.extend([
+                    str(plan.get("variation_code") or "").strip(),
+                    str(plan.get("name") or "").strip(),
+                ])
+            if requested_key:
+                return {
+                    "status": "error",
+                    "message": f"Select a valid data plan. Available options include: {', '.join(alias_variants[:5])}",
+                }
             return {"status": "error", "message": "Select a valid data plan."}
 
+        plan_code = str(selected_plan.get("variation_code") or plan_code)
         base_amount = Decimal(str(selected_plan.get("variation_amount", "0")))
         charge_amount = (base_amount + get_markup(f"DATA_{network}", base_amount)).quantize(Decimal("0.01"))
         try:
@@ -675,6 +697,15 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
             return
         return
 
+    if text.strip().upper().startswith("LINK "):
+        from app import claim_whatsapp_link_token, send_whatsapp_message
+        token = text.strip().split(None, 1)[1].strip()
+        if claim_whatsapp_link_token(chat_id, token):
+            send_whatsapp_message(chat_id, "✅ Your WhatsApp number is now linked to your WAJ VTU account.")
+            return
+        send_whatsapp_message(chat_id, "⚠️ That link is invalid or expired. Please generate a fresh link from the website dashboard.")
+        return
+
     if requested_photo_receipt(text):
         from models import Transaction
         from app import send_whatsapp_message, send_whatsapp_receipt
@@ -792,8 +823,8 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 messages=messages,
                 model="openai/gpt-oss-120b",
                 temperature=0,
-                tools=follow_up_tools,
-                tool_choice="auto" if follow_up_tools else "none",
+                tools=tools,
+                tool_choice="auto",
                 max_tokens=700
             )
             response_message = response.choices[0].message
