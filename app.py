@@ -76,11 +76,11 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 }
 if DATABASE_URL.startswith("postgresql://"):
     # Supabase/Render pooler connections can reject reused prepared statements.
-    # Disable the prepared-statement cache to avoid recurring
-    # "DuplicatePreparedStatement" errors during startup and webhook traffic.
+    # In Psycopg 3 the valid way to disable statement preparation is with
+    # prepare_threshold=None, not prepared_statement_cache_size.
     app.config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {
         'options': '-csearch_path=public',
-        'prepared_statement_cache_size': 0,
+        'prepare_threshold': None,
     }
 ALLOW_DB_MUTATIONS = os.getenv("ALLOW_DB_MUTATIONS", "false").strip().lower() in {"1", "true", "yes", "on"}
 BRIDGE_BASE_URL = os.getenv("BRIDGE_URL") or os.getenv(
