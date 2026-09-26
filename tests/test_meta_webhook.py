@@ -21,6 +21,19 @@ def client():
         yield client
 
 
+def test_pwa_manifest_and_service_worker_are_available(client):
+    manifest_response = client.get("/static/manifest.webmanifest")
+    assert manifest_response.status_code == 200
+    manifest = manifest_response.get_json()
+    assert manifest["name"] == "WAJ VTU"
+    assert manifest["display"] == "standalone"
+    assert manifest["start_url"] == "/"
+
+    worker_response = client.get("/static/service-worker.js")
+    assert worker_response.status_code == 200
+    assert "self.addEventListener('install'" in worker_response.get_data(as_text=True)
+
+
 def test_meta_verification_route(client):
     response = client.get(
         "/webhook?hub.mode=subscribe&hub.challenge=abc123&hub.verify_token=meta-token"
@@ -51,6 +64,36 @@ def test_blank_phone_does_not_create_default_user(client):
         assert app_module.get_or_create_user("") is None
         assert app_module.get_or_create_user(None) is None
         assert app_module.User.query.count() == 0
+
+
+def test_settle_transaction_records_provider_metadata(client):
+    import app as app_module
+
+    with app_module.app.app_context():
+        app_module.db.session.query(app_module.Transaction).delete()
+        app_module.db.session.query(app_module.User).delete()
+        user = app_module.User(
+            whatsapp_id="provider-trace-user",
+            phone="2348000000002",
+            name="Provider Trace",
+            wallet_balance=Decimal("1000.00"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+        result = {
+            "status": "SUCCESS",
+            "reference": "REF_PROVIDER_TRACE",
+            "provider": "swiftbills",
+            "provider_reference": "SB-REQ-1001",
+            "data": {"status": "success"},
+        }
+
+        assert app_module.settle_transaction(user, result, Decimal("250.00"), "DATA", "2348000000002", "Data purchase") is True
+
+        tx = app_module.Transaction.query.filter_by(reference="REF_PROVIDER_TRACE").one()
+        assert tx.provider_name == "swiftbills"
+        assert tx.provider_reference == "SB-REQ-1001"
 
 
 def test_admin_login_and_wallet_adjustment_are_audited(client):
@@ -571,6 +614,7 @@ def test_education_packages_exclude_neco(monkeypatch):
     monkeypatch.setattr(provider, "MOCK_MODE", False)
     monkeypatch.setattr(provider, "CLUBKONNECT_USERID", "test-user")
     monkeypatch.setattr(provider, "CLUBKONNECT_APIKEY", "test-key")
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "")
     monkeypatch.setattr(
         provider,
         "_provider_request",
@@ -586,3 +630,100 @@ def test_education_packages_exclude_neco(monkeypatch):
     packages = provider.fetch_education_packages()
 
     assert [package["code"] for package in packages] == ["waecdirect", "jamb-utme"]
+
+
+def test_non_data_services_prefer_clubkonnect_before_swiftbills(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "CLUBKONNECT_USERID", "club-user")
+    monkeypatch.setattr(provider, "CLUBKONNECT_APIKEY", "club-key")
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "swift-key")
+    calls = []
+
+    def fake_provider_request(endpoint, params):
+        calls.append("clubkonnect")
+        return {"status": "SUCCESS", "requestid": "CK-123", "msg": "OK"}
+
+    def fake_swift_request(endpoint, method="GET", payload=None):
+        calls.append("swiftbills")
+        return {"status": "SUCCESS", "message": "OK"}
+
+    monkeypatch.setattr(provider, "_provider_request", fake_provider_request)
+    monkeypatch.setattr(provider, "_swiftbills_request", fake_swift_request)
+
+    result = provider.process_airtime_purchase("08012345678", "MTN", 1000)
+
+    assert result["status"] == "SUCCESS"
+    assert result["provider"] == "clubkonnect"
+    assert calls == ["clubkonnect"]
+
+
+def test_data_comparison_keeps_lowest_swiftbills_plan_and_purchases_with_swiftbills(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "CLUBKONNECT_USERID", "club-user")
+    monkeypatch.setattr(provider, "CLUBKONNECT_APIKEY", "club-key")
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "swift-key")
+    monkeypatch.setattr(
+        provider,
+        "_fetch_clubkonnect_data_variations",
+        lambda network: [{
+            "name": "MTN 1GB SME (30 Days)",
+            "variation_code": "club-plan-1",
+            "variation_amount": 500,
+        }],
+    )
+    captured = {}
+
+    def fake_swift_request(endpoint, method="GET", payload=None):
+        captured["endpoint"] = endpoint
+        captured["method"] = method
+        captured["payload"] = payload
+        if method == "GET":
+            if endpoint.startswith("get-networks"):
+                return [{"id": 1, "network": "MTN"}]
+            return [{"plan_id": 101, "day": "30", "type": "SME", "network": "MTN", "datasize": "1GB", "price": 450}]
+        return {"status": "success", "message": "Data Purchase Successful."}
+
+    monkeypatch.setattr(provider, "_swiftbills_request", fake_swift_request)
+
+    plans = provider.fetch_data_variations("MTN")
+    assert len(plans) == 1
+    assert plans[0]["variation_code"] == "swiftbills:1:101"
+    assert plans[0]["variation_amount"] == 450
+
+    result = provider.process_data_purchase("08012345678", "MTN", plans[0]["variation_code"], 450)
+
+    assert result["status"] == "SUCCESS"
+    assert captured["endpoint"] == "data"
+    assert captured["method"] == "POST"
+    assert captured["payload"] == {
+        "network": 1,
+        "phone": "08012345678",
+        "data_plan": 101,
+        "request-id": result["reference"],
+    }
+
+
+def test_swiftbills_exam_catalog_includes_neco_and_other_exam_pins(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "CLUBKONNECT_USERID", "")
+    monkeypatch.setattr(provider, "CLUBKONNECT_APIKEY", "")
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "swift-key")
+    monkeypatch.setattr(
+        provider,
+        "_swiftbills_request",
+        lambda endpoint, method="GET", payload=None: [
+            {"id": "1", "name": "WAEC", "price": "3500"},
+            {"id": "2", "name": "NECO", "price": "2250"},
+            {"id": "3", "name": "NABTEB", "price": "1000"},
+        ],
+    )
+
+    packages = provider.fetch_education_packages()
+
+    assert [package["name"] for package in packages] == ["WAEC", "NECO", "NABTEB"]

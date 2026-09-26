@@ -44,7 +44,9 @@ def normalize_phone(raw):
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("user_id"):
+        if not session.get("user_id") or current_user() is None:
+            session.pop("user_id", None)
+            session.pop("is_admin", None)
             return redirect(url_for("auth.login", next=request.path))
         return view(*args, **kwargs)
     return wrapped

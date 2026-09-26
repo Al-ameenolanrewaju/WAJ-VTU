@@ -23,7 +23,7 @@
       <label>Subscription plan</label>
       <select name="plan_code" required>
         <option value="" disabled selected>Select a TV plan</option>
-        {% for plan in plans %}<option value="{{ plan.code }}">{{ plan.name }} - ₦{{ "%.2f"|format(plan.amount) }}</option>{% endfor %}
+        {% for plan in plans %}<option value="{{ plan.code }}">{{ plan.name }} - ₦{{ "{:,.2f}".format(plan.amount) }}</option>{% endfor %}
       </select>
       <label><input type="checkbox" name="save_service"> Save this account for next time</label>
       <input name="save_label" placeholder="Label (optional)">

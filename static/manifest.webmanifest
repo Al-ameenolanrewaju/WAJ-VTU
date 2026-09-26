@@ -1,0 +1,37 @@
+{
+  "name": "WAJ VTU",
+  "short_name": "WAJ VTU",
+  "description": "WAJ VTU airtime, data, electricity, cable, and wallet services",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#FFC400",
+  "orientation": "portrait-primary",
+  "lang": "en-US",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/static/images/waj-vtu-logo.jpeg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/images/waj-vtu-promo.jpeg",
+      "sizes": "1024x1024",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/static/images/waj-vtu-promo.jpeg",
+      "sizes": "1024x1024",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "WAJ VTU dashboard"
+    }
+  ],
+  "categories": ["utilities", "business"],
+  "id": "/"
+}

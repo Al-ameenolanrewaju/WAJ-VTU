@@ -115,7 +115,7 @@ SERVICES = [
     {"key": "cable", "label": "Cable TV", "icon": "📺", "url": "web.cable_page"},
     {"key": "electricity", "label": "Electricity", "icon": "⚡", "url": "web.electricity_page"},
     {"key": "betting", "label": "Betting", "icon": "🎯", "url": "web.betting_page"},
-    {"key": "education", "label": "WAEC/JAMB PINs", "icon": "🎓", "url": "web.education_page"},
+    {"key": "education", "label": "Exam PINs", "icon": "🎓", "url": "web.education_page"},
 ]
 
 

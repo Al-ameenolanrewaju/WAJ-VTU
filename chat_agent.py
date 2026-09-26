@@ -338,7 +338,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
             base_cost = Decimal(str(plan.get("variation_amount")))
             cost = (base_cost + get_markup(f"DATA_{network}", base_cost)).quantize(Decimal("0.01"))
             plans.append(
-                f"- {plan.get('name')}: ₦{cost} (System Code: {plan.get('variation_code')})"
+                f"- {plan.get('name')}: ₦{cost:,.2f} (System Code: {plan.get('variation_code')})"
             )
             display_plans.append(f"{index}. {plan.get('name')}: ₦{cost:,.2f}")
         return {
@@ -391,6 +391,8 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
                 amount=charge_amount,
                 type='DATA',
                 recipient=phone,
+                provider_name=str(result.get("provider") or "unknown").lower()[:30],
+                provider_reference=(result.get("provider_reference") or result.get("reference") or "")[:100],
                 status='SUCCESS',
                 description=f"{network} {plan_code} to {phone}"
             )
@@ -424,12 +426,14 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
                 amount=charge_amount,
                 type='AIRTIME',
                 recipient=phone,
+                provider_name=str(result.get("provider") or "unknown").lower()[:30],
+                provider_reference=(result.get("provider_reference") or result.get("reference") or "")[:100],
                 status='SUCCESS',
                 description=f"{network} Airtime to {phone}"
             )
             db.session.add(tx)
             db.session.commit()
-            return {"status": "success", "reference": result['reference'], "message": f"Successfully sent NGN {amount} airtime to {phone}"}
+            return {"status": "success", "reference": result['reference'], "message": f"Successfully sent NGN {amount:,.2f} airtime to {phone}"}
         else:
             user.wallet_balance += charge_amount
             db.session.commit()
@@ -446,7 +450,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
             base_cost = Decimal(str(plan["amount"]))
             cost = base_cost + get_markup("CABLE", base_cost)
             plans.append(
-                f"- {plan.get('name')}: ₦{cost} (System Code: {plan.get('code')})"
+                f"- {plan.get('name')}: ₦{cost:,.2f} (System Code: {plan.get('code')})"
             )
         return {"status": "success", "plans_list": "\n".join(plans), "message": "Present these options to the user clearly. Do not show the System Code to the user."}
         
@@ -496,6 +500,12 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
                 "markup_amount": str(amount - api_cost),
             },
         )
+        if success and result.get("status") == "SUCCESS":
+            tx = Transaction.query.filter_by(reference=result["reference"]).first()
+            if tx is not None:
+                tx.provider_name = str(result.get("provider") or tx.provider_name or "unknown").lower()[:30]
+                tx.provider_reference = (result.get("provider_reference") or tx.provider_reference or result.get("reference") or "")[:100]
+                db.session.commit()
         if success:
             return {"status": "success", "reference": result['reference'], "message": "Cable TV subscription successful"}
         else:
@@ -527,7 +537,12 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         
         result = process_electricity_payment(disco, meter, mtype, float(amount), provider_phone)
         success = settle_transaction(user, result, charge_amount, "ELECTRICITY", meter, f"{disco} electricity payment")
-        if success:
+        if success and result.get("status") == "SUCCESS":
+            tx = Transaction.query.filter_by(reference=result["reference"]).first()
+            if tx is not None:
+                tx.provider_name = str(result.get("provider") or tx.provider_name or "unknown").lower()[:30]
+                tx.provider_reference = (result.get("provider_reference") or tx.provider_reference or result.get("reference") or "")[:100]
+                db.session.commit()
             return {"status": "success", "reference": result['reference'], "token": result.get("token"), "message": "Payment successful"}
         else:
             return {"status": "error", "message": result.get("reason", "Payment failed")}
@@ -584,7 +599,12 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
         result = process_betting_topup(platform, account_id, float(amount), provider_phone)
         success = settle_transaction(user, result, charge_amount, "BETTING", account_id, f"{platform} betting top-up")
-        if success:
+        if success and result.get("status") == "SUCCESS":
+            tx = Transaction.query.filter_by(reference=result["reference"]).first()
+            if tx is not None:
+                tx.provider_name = str(result.get("provider") or tx.provider_name or "unknown").lower()[:30]
+                tx.provider_reference = (result.get("provider_reference") or tx.provider_reference or result.get("reference") or "")[:100]
+                db.session.commit()
             return {"status": "success", "reference": result['reference'], "message": "Betting wallet funded successfully"}
         return {"status": "error", "message": result.get("reason", "Provider failed")}
 
@@ -598,7 +618,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         for pkg in packages:
             base_cost = Decimal(str(pkg["amount"]))
             cost = base_cost + get_markup("EDU", base_cost)
-            listed.append(f"- {pkg.get('name')}: ₦{cost} (System Code: {pkg.get('code')})")
+            listed.append(f"- {pkg.get('name')}: ₦{cost:,.2f} (System Code: {pkg.get('code')})")
         return {"status": "success", "plans_list": "\n".join(listed), "message": "Present these options to the user clearly. Do not show the System Code to the user."}
 
     elif name == "buy_education_pin":
@@ -623,7 +643,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         if amount != expected_amount:
             return {"status": "error", "message": f"The PIN price has changed. Current price is NGN {expected_amount:,.2f}. Please fetch the packages again."}
 
-        charge_amount = amount + get_markup("EDU", amount)
+        charge_amount = amount
         if user.wallet_balance < charge_amount:
             return {"status": "error", "message": f"Insufficient balance. Required: NGN {charge_amount:,.2f}"}
 
@@ -632,7 +652,12 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
         result = process_education_pin(exam, quantity, provider_phone)
         success = settle_transaction(user, result, charge_amount, "EDU", exam, f"{exam} PIN x{quantity}")
-        if success:
+        if success and result.get("status") == "SUCCESS":
+            tx = Transaction.query.filter_by(reference=result["reference"]).first()
+            if tx is not None:
+                tx.provider_name = str(result.get("provider") or tx.provider_name or "unknown").lower()[:30]
+                tx.provider_reference = (result.get("provider_reference") or tx.provider_reference or result.get("reference") or "")[:100]
+                db.session.commit()
             return {"status": "success", "reference": result['reference'], "pins": result.get("pins", []), "message": "PIN generated successfully"}
         return {"status": "error", "message": result.get("reason", "Provider failed")}
 

@@ -58,10 +58,16 @@ app.config['PREFERRED_URL_SCHEME'] = 'https'
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is required")
+is_testing = os.getenv("IS_TESTING") == "true"
+is_development = os.getenv("FLASK_ENV", "").strip().lower() == "development"
+if is_testing and DATABASE_URL.startswith(("postgres://", "postgresql://")):
+    raise RuntimeError("Tests cannot run against PostgreSQL; use a local SQLite DATABASE_URL")
+if is_development and not is_testing:
+    DATABASE_URL = "sqlite:///local.db"
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-if not DATABASE_URL.startswith("postgresql://") and not os.getenv("IS_TESTING") == "true":
-    raise RuntimeError("DATABASE_URL must point to a Supabase PostgreSQL database; local SQLite is not supported")
+if not DATABASE_URL.startswith(("postgresql://", "sqlite://")):
+    raise RuntimeError("DATABASE_URL must use PostgreSQL in production or SQLite during local development/tests")
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
@@ -139,6 +145,14 @@ def robots():
     )
 
 
+@app.route("/manifest.webmanifest")
+@app.route("/static/manifest.webmanifest")
+def manifest():
+    manifest_path = os.path.join(app.static_folder, "manifest.webmanifest")
+    with open(manifest_path, "r", encoding="utf-8") as handle:
+        return jsonify(json.load(handle))
+
+
 def ensure_database_schema():
     """Add model columns to existing deployments that predate the current schema."""
     inspector = inspect(db.engine)
@@ -159,6 +173,8 @@ def ensure_database_schema():
         },
         "transactions": {
             "meta_data": json_type,
+            "provider_name": "VARCHAR(30)",
+            "provider_reference": "VARCHAR(100)",
         },
     }
 
@@ -433,6 +449,8 @@ def get_user_session_data(user):
 def settle_transaction(user, result, amount, transaction_type, recipient, description, meta_data=None):
     """Persist a successful provider result or refund the reserved wallet amount."""
     amount = Decimal(str(amount))
+    provider = result.get("provider") or (result.get("data") or {}).get("provider") or "unknown"
+    provider_reference = result.get("provider_reference") or (result.get("data") or {}).get("provider_reference")
     if result.get("status") == "SUCCESS":
         tx = Transaction(
             user_id=user.id,
@@ -440,6 +458,8 @@ def settle_transaction(user, result, amount, transaction_type, recipient, descri
             amount=amount,
             type=transaction_type,
             recipient=recipient,
+            provider_name=str(provider).lower()[:30],
+            provider_reference=(provider_reference or result.get("reference") or "")[:100],
             status="SUCCESS",
             description=description,
             meta_data={**result.get("data", {}), **(meta_data or {})},
@@ -921,11 +941,41 @@ def whatsapp_webhook():
         return jsonify({"status": "error", "reason": "Unauthorized"}), 401
 
     req_data = request.get_json() or {}
-    
+
+    if not isinstance(req_data, dict):
+        return jsonify({"status": "ignored"}), 200
+
+    has_message = False
+    sender = None
+    has_status_event = False
+
+    for entry in req_data.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            if "statuses" in value:
+                has_status_event = True
+                continue
+            messages = value.get("messages") or []
+            if not messages:
+                continue
+            has_message = True
+            first_message = messages[0]
+            sender = first_message.get("from") or first_message.get("sender")
+            if sender:
+                break
+        if sender:
+            break
+
+    if has_status_event or not has_message or not sender:
+        return jsonify({"status": "ignored"}), 200
+
+    if not ALLOW_DB_MUTATIONS and get_or_create_user(sender) is None:
+        return jsonify({"status": "ignored"}), 200
+
     # Spawn background thread for processing to avoid Meta timeout
     thread = threading.Thread(target=process_webhook_payload, args=(req_data,))
     thread.start()
-    
+
     return jsonify({"status": "success"}), 200
 
 def process_webhook_payload(req_data):
@@ -1281,6 +1331,18 @@ def admin_dashboard():
         .all()
     )
 
+    provider_summary = (
+        db.session.query(
+            Transaction.provider_name,
+            func.count(Transaction.id).label("count"),
+            func.sum(Transaction.amount).label("total_amount"),
+        )
+        .filter(Transaction.status == "SUCCESS")
+        .group_by(Transaction.provider_name)
+        .order_by(func.count(Transaction.id).desc())
+        .all()
+    )
+
     recent_transactions = Transaction.query.order_by(Transaction.id.desc()).limit(10).all()
 
     tx_rows = ""
@@ -1320,6 +1382,19 @@ def admin_dashboard():
         </tr>
         """
 
+    provider_cards = ""
+    for provider_name, count, total_amount in provider_summary:
+        display_name = (provider_name or "unknown").replace("_", " ").title()
+        provider_cards += f"""
+        <div class="card">
+            <h3>{escape(display_name)}</h3>
+            <p>{count}</p>
+            <small>Successful sales · ₦{Decimal(total_amount or 0):,.2f}</small>
+        </div>
+        """
+    if not provider_cards:
+        provider_cards = '<div class="card"><h3>No Provider Data</h3><p>0</p><small>No successful provider transactions yet</small></div>'
+
     content = f"""
     <h2 class="dashboard-heading">Money & provider</h2>
     <div class="card-grid">
@@ -1328,6 +1403,8 @@ def admin_dashboard():
         <div class="card"><h3>API Discounts Captured</h3><p>₦{total_api_discount:,.2f}</p><small>Provider discounts saved on eligible plans</small></div>
         <div class="card"><h3>Markup Earned Today</h3><p>₦{today_markup_earned:,.2f}</p><small>Based on successful service sales</small></div>
     </div>
+    <h2 class="dashboard-heading">Provider summary</h2>
+    <div class="card-grid">{provider_cards}</div>
     <h2 class="dashboard-heading">Cash flow</h2>
     <div class="card-grid">
         <div class="card"><h3>Total Inflow</h3><p>₦{total_inflow:,.2f}</p></div>
@@ -1909,11 +1986,14 @@ def admin_transactions():
         return auth_error
 
     status_filter = request.args.get("status", "ALL").upper()
+    provider_filter = (request.args.get("provider", "ALL") or "ALL").strip().lower()
     search_query = request.args.get("q", "").strip()
 
     query = Transaction.query
     if status_filter in {"SUCCESS", "PENDING", "FAILED", "REVERSED"}:
         query = query.filter(Transaction.status == status_filter)
+    if provider_filter and provider_filter != "all":
+        query = query.filter(Transaction.provider_name == provider_filter)
     if search_query:
         term = f"%{search_query}%"
         query = query.join(User, Transaction.user_id == User.id, isouter=True).filter(
@@ -1922,6 +2002,8 @@ def admin_transactions():
                 Transaction.type.ilike(term),
                 Transaction.recipient.ilike(term),
                 Transaction.description.ilike(term),
+                Transaction.provider_name.ilike(term),
+                Transaction.provider_reference.ilike(term),
                 User.phone.ilike(term),
             )
         )
@@ -1941,6 +2023,8 @@ def admin_transactions():
             <td>{escape(tx.type)}</td>
             <td>₦{tx.amount:,.2f}</td>
             <td>{escape(tx.recipient or '')}</td>
+            <td>{escape(tx.provider_name or 'unknown')}</td>
+            <td>{escape(tx.provider_reference or '')}</td>
             <td class="{escape(status_cls)}">{escape(tx.status)}</td>
             <td>{escape(format_admin_datetime(tx.created_at))}</td>
             <td><small>{escape(tx.description or '')}</small></td>
@@ -1948,9 +2032,11 @@ def admin_transactions():
         """
 
     statuses = ["ALL", "SUCCESS", "PENDING", "FAILED", "REVERSED"]
+    providers = ["ALL", "clubkonnect", "swiftbills", "mock"]
     q_param = quote(search_query)
+    provider_param = quote(provider_filter)
     filter_buttons = "".join(
-        f'<a href="/admin/transactions?status={status}&q={q_param}" style="{ "background:#2563eb; color:#fff;" if status == status_filter else "background:#e2e8f0; color:#0f172a;" } padding:6px 10px; border-radius:6px; text-decoration:none; font-size:12px; margin-right:8px;">{status}</a>'
+        f'<a href="/admin/transactions?status={status}&provider={provider_param}&q={q_param}" style="{ "background:#2563eb; color:#fff;" if status == status_filter else "background:#e2e8f0; color:#0f172a;" } padding:6px 10px; border-radius:6px; text-decoration:none; font-size:12px; margin-right:8px;">{status}</a>'
         for status in statuses
     )
 
@@ -1966,16 +2052,22 @@ def admin_transactions():
                 <option value="FAILED" {'selected' if status_filter == 'FAILED' else ''}>Failed</option>
                 <option value="REVERSED" {'selected' if status_filter == 'REVERSED' else ''}>Reversed</option>
             </select>
+            <select name="provider">
+                <option value="ALL" {'selected' if provider_filter == 'all' else ''}>All providers</option>
+                <option value="clubkonnect" {'selected' if provider_filter == 'clubkonnect' else ''}>ClubKonnect</option>
+                <option value="swiftbills" {'selected' if provider_filter == 'swiftbills' else ''}>SwiftBills</option>
+                <option value="mock" {'selected' if provider_filter == 'mock' else ''}>Mock</option>
+            </select>
             <button type="submit">Apply</button>
         </form>
     </div>
     <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:8px;">{filter_buttons}</div>
     <table>
         <thead>
-            <tr><th>Reference</th><th>Customer</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th><th>Timestamp</th><th>Description</th></tr>
+            <tr><th>Reference</th><th>Customer</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Provider</th><th>Provider Ref</th><th>Status</th><th>Timestamp</th><th>Description</th></tr>
         </thead>
         <tbody>
-            {tx_rows if tx_rows else '<tr><td colspan="8" style="text-align:center;">No transactions match the selected filter</td></tr>'}
+            {tx_rows if tx_rows else '<tr><td colspan="10" style="text-align:center;">No transactions match the selected filter</td></tr>'}
         </tbody>
     </table>
     """

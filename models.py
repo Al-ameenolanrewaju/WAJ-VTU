@@ -63,6 +63,8 @@ class Transaction(db.Model):
     type = db.Column(db.String(50), nullable=False, index=True)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     recipient = db.Column(db.String(50), nullable=True)
+    provider_name = db.Column(db.String(30), nullable=True, index=True)
+    provider_reference = db.Column(db.String(100), nullable=True, index=True)
 
     # PENDING, SUCCESS, FAILED
     status = db.Column(db.String(20), default='PENDING', nullable=False, index=True)

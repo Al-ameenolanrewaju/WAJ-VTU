@@ -3,10 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#FFC400">
+<meta name="description" content="WAJ VTU helps you buy airtime, data, electricity, cable TV, betting, and exam pins quickly.">
 <title>{% block title %}WAJ VTU{% endblock %}</title>
 <link rel="icon" type="image/jpeg" href="{{ url_for('static', filename='images/waj-vtu-logo.jpeg') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='images/waj-vtu-logo.jpeg') }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script defer src="{{ url_for('static', filename='install.js') }}"></script>
 <style>
   :root {
     --indigo: #090909;
@@ -486,6 +491,21 @@
   .reset-link-box { margin-top:16px; padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--bg); font-size:12px; }
   .reset-link-box span { display:block; color:var(--slate-light); margin-bottom:5px; }
   .reset-link-box a { color:var(--amber-dark); font-weight:700; word-break:break-word; }
+  .install-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--amber);
+    color: var(--indigo);
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .install-button[hidden] { display: none; }
 
   @media (max-width: 720px) {
     .app { max-width:480px; }
@@ -559,5 +579,6 @@
   <div class="app">
     {% block content %}{% endblock %}
   </div>
+  <button class="install-button" type="button" data-install-app hidden>Install app</button>
 </body>
 </html>

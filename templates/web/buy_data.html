@@ -23,7 +23,7 @@
       <select name="plan_code" required>
         <option value="" disabled selected>Select a data plan</option>
         {% for plan in plans %}
-        <option value="{{ plan.code }}" data-amount="{{ plan.amount }}">{{ plan.name }} - ₦{{ "%.2f"|format(plan.amount) }}</option>
+        <option value="{{ plan.code }}" data-amount="{{ plan.amount }}">{{ plan.name }} - ₦{{ "{:,.2f}".format(plan.amount) }}</option>
         {% endfor %}
       </select>
       <input type="hidden" name="amount" id="data-amount" required>

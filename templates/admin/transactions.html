@@ -17,7 +17,7 @@
 <br>
 <table>
     <thead>
-        <tr><th>Reference</th><th>User ID</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th><th>Description</th></tr>
+        <tr><th>Reference</th><th>User ID</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Provider</th><th>Provider Ref</th><th>Status</th><th>Description</th></tr>
     </thead>
     <tbody>
         {% for tx in transactions %}
@@ -27,6 +27,8 @@
             <td>{{ tx.type }}</td>
             <td>₦{{ "{:,.2f}".format(tx.amount) }}</td>
             <td>{{ tx.recipient }}</td>
+            <td>{{ tx.provider_name or 'unknown' }}</td>
+            <td><small>{{ tx.provider_reference or '' }}</small></td>
             <td class="badge-{{ tx.status|lower }}">{{ tx.status }}</td>
             <td><small>{{ tx.description or '' }}</small></td>
         </tr>

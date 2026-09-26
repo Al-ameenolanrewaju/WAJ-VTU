@@ -39,6 +39,10 @@ services:
         sync: false
       - key: CLUBKONNECT_BASE_URL
         value: https://www.nellobytesystems.com
+      - key: SWIFTBILLS_API_KEY
+        sync: false
+      - key: SWIFTBILLS_BASE_URL
+        value: https://swiftbills.com.ng/api
       - key: ADMIN_USERNAME
         sync: false
       - key: ADMIN_PASSWORD
