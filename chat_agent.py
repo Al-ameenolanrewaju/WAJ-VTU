@@ -362,6 +362,22 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         requested_amount = kwargs.get("amount")
         phone = kwargs.get("phone")
 
+        def remember_pending_confirmation():
+            if not hasattr(user, "state_data"):
+                return
+            state = user.state_data if isinstance(user.state_data, dict) else {}
+            state["pending_confirmation"] = {
+                "tool_name": name,
+                "kwargs": {
+                    "network": network,
+                    "plan_code": plan_code,
+                    "amount": requested_amount,
+                    "phone": phone,
+                },
+            }
+            user.state_data = state
+            db.session.commit()
+
         requested_key = normalize_plan_key(plan_code)
         available_plans = fetch_data_variations(network)
         selected_plan = next(
@@ -402,6 +418,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
         confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
         if not confirmed:
+            remember_pending_confirmation()
             return {
                 "status": "pending_confirmation",
                 "message": f"Please confirm: you want to buy {selected_plan.get('name')} for NGN {charge_amount:,.2f} on {network} for {phone}. Reply YES to proceed.",
@@ -438,12 +455,29 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         network = kwargs.get("network")
         amount = normalize_purchase_amount(kwargs.get("amount"))
         phone = kwargs.get("phone")
+
+        def remember_pending_confirmation():
+            if not hasattr(user, "state_data"):
+                return
+            state = user.state_data if isinstance(user.state_data, dict) else {}
+            state["pending_confirmation"] = {
+                "tool_name": name,
+                "kwargs": {
+                    "network": network,
+                    "amount": str(amount),
+                    "phone": phone,
+                },
+            }
+            user.state_data = state
+            db.session.commit()
+
         if amount is None:
             return {"status": "error", "message": "Enter a valid positive airtime amount."}
         
         charge_amount = amount + get_markup("AIRTIME", amount)
         confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
         if not confirmed:
+            remember_pending_confirmation()
             return {
                 "status": "pending_confirmation",
                 "message": f"Please confirm: you want to buy airtime worth NGN {charge_amount:,.2f} for {phone} on {network}. Reply YES to proceed.",
@@ -496,6 +530,25 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         smartcard = kwargs.get("smartcard")
         plan_code = kwargs.get("plan_code")
         amount = normalize_purchase_amount(kwargs.get("amount"))
+
+        def remember_pending_confirmation():
+            if not hasattr(user, "state_data"):
+                return
+            state = user.state_data if isinstance(user.state_data, dict) else {}
+            state["pending_confirmation"] = {
+                "tool_name": name,
+                "kwargs": {
+                    "provider": provider,
+                    "smartcard": smartcard,
+                    "plan_code": plan_code,
+                    "amount": str(amount),
+                    "api_cost": kwargs.get("api_cost"),
+                    "api_discount_amount": kwargs.get("api_discount_amount"),
+                },
+            }
+            user.state_data = state
+            db.session.commit()
+
         if amount is None:
             return {"status": "error", "message": "Select a valid cable plan price."}
         api_cost_value = kwargs.get("api_cost")
@@ -515,6 +568,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         
         confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
         if not confirmed:
+            remember_pending_confirmation()
             return {
                 "status": "pending_confirmation",
                 "message": f"Please confirm: you want to renew {provider} with plan {plan_code} for NGN {amount:,.2f} on smartcard {smartcard}. Reply YES to proceed.",
@@ -569,12 +623,30 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         meter = kwargs.get("meter_number")
         mtype = kwargs.get("meter_type")
         amount = normalize_purchase_amount(kwargs.get("amount"))
+
+        def remember_pending_confirmation():
+            if not hasattr(user, "state_data"):
+                return
+            state = user.state_data if isinstance(user.state_data, dict) else {}
+            state["pending_confirmation"] = {
+                "tool_name": name,
+                "kwargs": {
+                    "disco": disco,
+                    "meter_number": meter,
+                    "meter_type": mtype,
+                    "amount": str(amount),
+                },
+            }
+            user.state_data = state
+            db.session.commit()
+
         if amount is None:
             return {"status": "error", "message": "Enter a valid positive electricity amount."}
         
         charge_amount = amount + get_markup("ELECTRICITY", amount)
         confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
         if not confirmed:
+            remember_pending_confirmation()
             return {
                 "status": "pending_confirmation",
                 "message": f"Please confirm: you want to pay NGN {charge_amount:,.2f} for meter {meter} under {disco}. Reply YES to proceed.",
@@ -637,6 +709,22 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         platform = kwargs.get("platform")
         account_id = kwargs.get("account_id")
         amount = normalize_purchase_amount(kwargs.get("amount"))
+
+        def remember_pending_confirmation():
+            if not hasattr(user, "state_data"):
+                return
+            state = user.state_data if isinstance(user.state_data, dict) else {}
+            state["pending_confirmation"] = {
+                "tool_name": name,
+                "kwargs": {
+                    "platform": platform,
+                    "account_id": account_id,
+                    "amount": str(amount),
+                },
+            }
+            user.state_data = state
+            db.session.commit()
+
         if amount is None:
             return {"status": "error", "message": "Enter a valid positive betting amount."}
         from provider import process_betting_topup
@@ -644,6 +732,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         charge_amount = amount + get_markup("BETTING", amount)
         confirmed = kwargs.get("confirm") is True or str(kwargs.get("confirm") or "").strip().lower() in {"true", "yes", "confirm", "confirmed"}
         if not confirmed:
+            remember_pending_confirmation()
             return {
                 "status": "pending_confirmation",
                 "message": f"Please confirm: you want to fund betting account {account_id} with NGN {charge_amount:,.2f} on {platform}. Reply YES to proceed.",
@@ -740,6 +829,29 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
             send_whatsapp_message(chat_id, "✅ Your WhatsApp number is now linked to your WAJ VTU account.")
             return
         send_whatsapp_message(chat_id, "⚠️ That link is invalid or expired. Please generate a fresh link from the website dashboard.")
+        return
+
+    pending_confirmation = (user.state_data or {}).get("pending_confirmation") if isinstance(user.state_data, dict) else None
+    if pending_confirmation and str(text).strip().lower() in {"yes", "confirm", "confirmed"}:
+        tool_name = pending_confirmation.get("tool_name")
+        tool_kwargs = dict(pending_confirmation.get("kwargs") or {})
+        tool_kwargs["confirm"] = True
+        user.state_data = {k: v for k, v in (user.state_data or {}).items() if k != "pending_confirmation"}
+        db.session.commit()
+        result = execute_tool(app, db, user, provider_phone, tool_name, tool_kwargs)
+        if result.get("status") == "success":
+            from app import send_whatsapp_message
+            send_whatsapp_message(chat_id, result.get("message", "Purchase completed successfully."))
+            return
+        from app import send_whatsapp_message
+        send_whatsapp_message(chat_id, result.get("message", "I could not finish that purchase."))
+        return
+
+    if pending_confirmation and str(text).strip().lower() in {"no", "cancel"}:
+        user.state_data = {k: v for k, v in (user.state_data or {}).items() if k != "pending_confirmation"}
+        db.session.commit()
+        from app import send_whatsapp_message
+        send_whatsapp_message(chat_id, "Purchase cancelled.")
         return
 
     if requested_photo_receipt(text):

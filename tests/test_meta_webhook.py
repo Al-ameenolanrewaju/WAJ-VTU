@@ -442,6 +442,53 @@ def test_data_purchase_requires_explicit_confirmation(monkeypatch):
         assert user.wallet_balance == Decimal("1000.00")
 
 
+def test_yes_reply_confirms_pending_data_purchase(monkeypatch):
+    import app as app_module
+    import chat_agent
+    import provider
+
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"234{uuid.uuid4().hex[:10]}",
+            phone=f"234{uuid.uuid4().hex[:10]}",
+            wallet_balance=Decimal("1000.00"),
+            state_data={
+                "pending_confirmation": {
+                    "tool_name": "buy_data",
+                    "kwargs": {
+                        "network": "MTN",
+                        "plan_code": "swiftbills:1:101",
+                        "amount": "450.00",
+                        "phone": "2348000000001",
+                    },
+                }
+            },
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+        monkeypatch.setattr(provider, "fetch_data_variations", lambda network: [{
+            "name": "MTN 1GB Weekly",
+            "variation_code": "swiftbills:1:101",
+            "variation_amount": "450.00",
+        }])
+
+        def fake_purchase(phone, network, plan_code, amount):
+            return {"status": "SUCCESS", "reference": "CONFIRMED-DATA"}
+
+        monkeypatch.setattr(provider, "process_data_purchase", fake_purchase)
+        monkeypatch.setattr(app_module, "get_markup", lambda service_type, base_amount: Decimal("0.00"))
+        monkeypatch.setattr(chat_agent, "get_groq_client", lambda: None)
+
+        sent = []
+        monkeypatch.setattr(app_module, "send_whatsapp_message", lambda recipient, text: sent.append((recipient, text)) or True)
+
+        chat_agent.handle_chat_message(app_module.app, app_module.db, user, "YES", "123456", user.phone)
+
+        assert sent and "Successfully purchased data" in sent[-1][1]
+        assert user.state_data.get("pending_confirmation") is None
+
+
 def test_whatsapp_link_token_merges_conflicting_whatsapp_account():
     import app as app_module
 

@@ -225,6 +225,7 @@ def buy_data():
         "plan_code": plan_code,
         "amount": base_amount + get_markup(f"DATA_{network}", base_amount),
         "phone": request.form.get("phone") or user.phone,
+        "confirm": True,
     }
     result = execute_tool(app, db, user, user.phone, "buy_data", payload)
     flash(result.get("message", "Request processed."), "success" if result.get("status") == "success" else "error")
@@ -254,6 +255,7 @@ def buy_airtime():
         "network": request.form.get("network"),
         "amount": request.form.get("amount"),
         "phone": request.form.get("phone") or user.phone,
+        "confirm": True,
     }
     result = execute_tool(app, db, user, user.phone, "buy_airtime", payload)
     if request.form.get("save_service") and persist_saved_service(user, "airtime", payload["phone"], payload["network"], request.form.get("save_label")):
@@ -309,6 +311,7 @@ def cable_page():
         "amount": base_amount + get_markup("CABLE", base_amount),
         "api_cost": base_amount,
         "api_discount_amount": Decimal(str(selected_plan.get("discount_amount", "0"))),
+        "confirm": True,
     }
     result = execute_tool(app, db, user, user.phone, "buy_cable", payload)
     if request.form.get("save_service") and persist_saved_service(user, "cable", payload["smartcard"], payload["provider"], request.form.get("save_label")):
@@ -348,6 +351,7 @@ def electricity_page():
         "meter_number": request.form.get("meter_number"),
         "meter_type": request.form.get("meter_type"),
         "amount": request.form.get("amount"),
+        "confirm": True,
     }
     result = execute_tool(app, db, user, user.phone, "pay_electricity", payload)
     if request.form.get("save_service") and persist_saved_service(user, "electricity", payload["meter_number"], payload["disco"], request.form.get("save_label"), payload["meter_type"]):
@@ -389,6 +393,7 @@ def betting_page():
         "platform": request.form.get("platform"),
         "account_id": request.form.get("account_id"),
         "amount": request.form.get("amount"),
+        "confirm": True,
     }
     result = execute_tool(app, db, user, user.phone, "buy_betting", payload)
     if request.form.get("save_service") and persist_saved_service(user, "betting", payload["account_id"], payload["platform"], request.form.get("save_label")):
@@ -444,6 +449,7 @@ def education_page():
         "exam": exam,
         "quantity": quantity,
         "amount": base_amount + get_markup("EDU", base_amount),
+        "confirm": True,
     }
     result = execute_tool(app, db, user, user.phone, "buy_education_pin", payload)
     if result.get("status") == "success" and result.get("pins"):
