@@ -816,31 +816,60 @@ def test_dynamic_paystack_fee_tiers_are_admin_editable(client):
     assert b"More than 20,000" in response.data
 
 
-def test_education_packages_exclude_neco(monkeypatch):
+def test_education_packages_include_neco_when_swiftbills_has_it(monkeypatch):
     import provider
 
     monkeypatch.setattr(provider, "MOCK_MODE", False)
     monkeypatch.setattr(provider, "CLUBKONNECT_USERID", "test-user")
     monkeypatch.setattr(provider, "CLUBKONNECT_APIKEY", "test-key")
-    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "")
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "swift-key")
     monkeypatch.setattr(
         provider,
-        "_provider_request",
-        lambda endpoint, params: {
-            "EXAM_TYPE": [
-                {"PRODUCT_CODE": "waecdirect", "PRODUCT_DESCRIPTION": "WAEC Result Checker PIN", "PRODUCT_AMOUNT": "5350"},
-                {"PRODUCT_CODE": "neco-pin", "PRODUCT_DESCRIPTION": "NECO Result Checker PIN", "PRODUCT_AMOUNT": "4500"},
-                {"PRODUCT_CODE": "jamb-utme", "PRODUCT_DESCRIPTION": "JAMB UTME PIN", "PRODUCT_AMOUNT": "5700"},
-            ]
-        },
+        "_swiftbills_request",
+        lambda endpoint, method="GET", payload=None: [
+            {"id": "1", "name": "WAEC", "price": "3500"},
+            {"id": "2", "name": "NECO", "price": "2250"},
+            {"id": "3", "name": "NABTEB", "price": "1000"},
+        ],
     )
 
     packages = provider.fetch_education_packages()
 
-    assert [package["code"] for package in packages] == ["waecdirect", "jamb-utme"]
+    assert [package["name"] for package in packages] == ["WAEC", "NECO", "NABTEB"]
 
 
-def test_non_data_services_prefer_clubkonnect_before_swiftbills(monkeypatch):
+def test_airtime_prefers_clubkonnect_then_swiftbills_fallback(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "CLUBKONNECT_USERID", "club-user")
+    monkeypatch.setattr(provider, "CLUBKONNECT_APIKEY", "club-key")
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "swift-key")
+    calls = []
+
+    def fake_provider_request(endpoint, params):
+        calls.append("clubkonnect")
+        return {"status": "FAILED", "msg": "Airtime order failed"}
+
+    def fake_swift_request(endpoint, method="GET", payload=None):
+        calls.append("swiftbills")
+        if method == "GET":
+            if endpoint.startswith("get-networks"):
+                return [{"id": 1, "network": "MTN"}]
+            return []
+        return {"status": "success", "message": "Airtime successful"}
+
+    monkeypatch.setattr(provider, "_provider_request", fake_provider_request)
+    monkeypatch.setattr(provider, "_swiftbills_request", fake_swift_request)
+
+    result = provider.process_airtime_purchase("08012345678", "MTN", 1000)
+
+    assert result["status"] == "SUCCESS"
+    assert result["provider"] == "swiftbills"
+    assert calls == ["clubkonnect", "swiftbills", "swiftbills"]
+
+
+def test_non_recharge_card_services_ignore_clubkonnect(monkeypatch):
     import provider
 
     monkeypatch.setattr(provider, "MOCK_MODE", False)
@@ -855,16 +884,25 @@ def test_non_data_services_prefer_clubkonnect_before_swiftbills(monkeypatch):
 
     def fake_swift_request(endpoint, method="GET", payload=None):
         calls.append("swiftbills")
-        return {"status": "SUCCESS", "message": "OK"}
+        if method == "GET":
+            if endpoint.startswith("get-networks"):
+                return [{"id": 1, "network": "MTN"}]
+            return [{"plan_id": 101, "day": "30", "type": "SME", "network": "MTN", "datasize": "1GB", "price": 450}]
+        return {"status": "success", "message": "Data Purchase Successful."}
 
     monkeypatch.setattr(provider, "_provider_request", fake_provider_request)
     monkeypatch.setattr(provider, "_swiftbills_request", fake_swift_request)
 
-    result = provider.process_airtime_purchase("08012345678", "MTN", 1000)
+    plans = provider.fetch_data_variations("MTN")
+    assert len(plans) == 1
+    assert plans[0]["variation_code"] == "swiftbills:1:101"
+
+    result = provider.process_data_purchase("08012345678", "MTN", plans[0]["variation_code"], 450)
 
     assert result["status"] == "SUCCESS"
-    assert result["provider"] == "clubkonnect"
-    assert calls == ["clubkonnect"]
+    assert result["provider"] == "swiftbills"
+    assert "clubkonnect" not in calls
+    assert calls.count("swiftbills") == 3
 
 
 def test_data_comparison_keeps_lowest_swiftbills_plan_and_purchases_with_swiftbills(monkeypatch):

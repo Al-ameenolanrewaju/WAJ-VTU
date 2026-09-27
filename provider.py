@@ -294,14 +294,13 @@ def _fetch_swiftbills_data_variations(network: str):
 
 
 def fetch_data_variations(network: str):
-    """Fetch both providers' data plans and keep the lowest matching price."""
+    """Fetch data plans from SwiftBills only; ClubKonnect is disabled for non-recharge services."""
     if MOCK_MODE:
         return _fetch_clubkonnect_data_variations(network)
 
-    provider_plans = []
-    if CLUBKONNECT_USERID and CLUBKONNECT_APIKEY:
-        provider_plans.extend(_fetch_clubkonnect_data_variations(network))
-    provider_plans.extend(_fetch_swiftbills_data_variations(network))
+    provider_plans = _fetch_swiftbills_data_variations(network)
+    if not provider_plans:
+        return []
 
     lowest_by_key = {}
     unmatched = []
@@ -320,50 +319,34 @@ def fetch_data_variations(network: str):
 def process_data_purchase(
     phone: str, network: str, plan_code: str, amount: float
 ):
-    """Processes a data top-up request."""
+    """Processes a data top-up request using SwiftBills only; ClubKonnect is disabled for this service."""
     logger.info(f"Processing Data: {network} {plan_code} to {phone}")
-    network_code = NETWORK_CODES.get(network.upper())
     ref = generate_ref("REF_DATA")
 
     if MOCK_MODE:
         return {"status": "SUCCESS", "reference": ref, "provider": "mock", "reason": "", "data": {"status": "MOCK_SUCCESS"}}
 
-    if str(plan_code).startswith("swiftbills:"):
-        if not SWIFTBILLS_API_KEY:
-            return _failure(ref, "SwiftBills API credentials are missing", provider="swiftbills")
-        try:
-            _, swift_network, swift_plan_id = str(plan_code).split(":", 2)
-            response = _swiftbills_request(
-                "data",
-                method="POST",
-                payload={
-                    "network": int(swift_network),
-                    "phone": phone,
-                    "data_plan": int(swift_plan_id),
-                    "request-id": ref,
-                },
-            )
-            if _is_success(response):
-                return {"status": "SUCCESS", "reference": ref, "provider": "swiftbills", "provider_reference": response.get("reference", response.get("request_id", ref)), "reason": "", "data": response}
-            return _failure(ref, response.get("message", response.get("response", "SwiftBills data purchase failed")), provider="swiftbills")
-        except Exception as exc:
-            logger.error("SwiftBills data purchase failed: %s", exc)
-            return _failure(ref, str(exc), provider="swiftbills")
+    if not SWIFTBILLS_API_KEY:
+        return _failure(ref, "SwiftBills API credentials are missing", provider="swiftbills")
 
-    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY or not network_code:
-        return _failure(ref, "ClubKonnect credentials or network configuration is missing", provider="clubkonnect")
-
-    if network_code:
-        try:
-            res_data = _provider_request("APIDatabundleV1.asp", {"MobileNetwork": network_code, "DataPlan": plan_code, "MobileNumber": phone, "RequestID": ref})
-            if _is_success(res_data):
-                return {"status": "SUCCESS", "reference": ref, "provider": "clubkonnect", "provider_reference": res_data.get("reference", res_data.get("requestid", ref)), "reason": "", "data": res_data}
-            return _failure(ref, res_data.get("msg", res_data.get("message", "API transaction declined")), provider="clubkonnect")
-        except Exception as e:
-            logger.error(f"Live Data Purchase Error: {e}")
-            return _failure(ref, str(e), provider="clubkonnect")
-
-    return _failure(ref, "Invalid mobile network", provider="clubkonnect")
+    try:
+        _, swift_network, swift_plan_id = str(plan_code).split(":", 2)
+        response = _swiftbills_request(
+            "data",
+            method="POST",
+            payload={
+                "network": int(swift_network),
+                "phone": phone,
+                "data_plan": int(swift_plan_id),
+                "request-id": ref,
+            },
+        )
+        if _is_success(response):
+            return {"status": "SUCCESS", "reference": ref, "provider": "swiftbills", "provider_reference": response.get("reference", response.get("request_id", ref)), "reason": "", "data": response}
+        return _failure(ref, response.get("message", response.get("response", "SwiftBills data purchase failed")), provider="swiftbills")
+    except Exception as exc:
+        logger.error("SwiftBills data purchase failed: %s", exc)
+        return _failure(ref, str(exc), provider="swiftbills")
 
 
 # --- AIRTIME SERVICES ---
@@ -556,13 +539,12 @@ def _fetch_swiftbills_cable_plans(provider: str):
 
 
 def fetch_cable_plans(provider: str):
-    """Fetch cable plans from both providers and retain the lowest matching price."""
+    """Fetch cable plans from SwiftBills only; ClubKonnect is disabled for this service."""
     if MOCK_MODE:
         return _fetch_clubkonnect_cable_plans(provider)
-    plans = []
-    if CLUBKONNECT_USERID and CLUBKONNECT_APIKEY:
-        plans.extend(_fetch_clubkonnect_cable_plans(provider))
-    plans.extend(_fetch_swiftbills_cable_plans(provider))
+    plans = _fetch_swiftbills_cable_plans(provider)
+    if not plans:
+        return []
     lowest_by_key = {}
     unmatched = []
     for plan in plans:
@@ -577,98 +559,60 @@ def fetch_cable_plans(provider: str):
 
 
 def verify_smartcard(provider: str, iuc: str):
-    """Verifies cable TV decoder / IUC number."""
+    """Verifies cable TV decoder / IUC number using SwiftBills only."""
     if MOCK_MODE:
         return {"valid": True, "customer_name": "Test Customer", "message": "Success"}
-    if CLUBKONNECT_USERID and CLUBKONNECT_APIKEY:
-        try:
-            response = _provider_request(
-                "APIVerifyCableTVV1.asp",
-                {"CableTV": provider.upper(), "SmartCardNo": iuc},
-            )
-            if _is_success(response) or bool(response.get("customer_name")) and not response.get("customer_name", "").startswith("INVALID_"):
-                return {
-                    "valid": True,
-                    "customer_name": response.get("customer_name", response.get("name", "")),
-                    "message": response.get("msg", response.get("message", "Cable account verification failed")),
-                    "data": response,
-                }
-            if not SWIFTBILLS_API_KEY:
-                return {"valid": False, "message": response.get("msg", response.get("message", "Cable account verification failed"))}
-            logger.warning("ClubKonnect cable verification failed, falling back to SwiftBills: %s", response)
-        except Exception as e:
-            logger.warning("ClubKonnect cable verification failed, falling back to SwiftBills: %s", e)
-            if not SWIFTBILLS_API_KEY:
-                return {"valid": False, "message": str(e)}
-    if SWIFTBILLS_API_KEY:
-        try:
-            swift_plans = _fetch_swiftbills_cable_plans(provider)
-            cable_id = next(
-                (str(plan["code"]).split(":")[1] for plan in swift_plans if str(plan.get("code", "")).startswith("swiftbills:")),
-                None,
-            )
-            if cable_id is None:
-                return {"valid": False, "message": "SwiftBills cable configuration is missing"}
-            response = _swiftbills_request(f"cable/cable-validation?iuc={iuc}&cablenumber={cable_id}")
-            return {
-                "valid": _is_success(response) or bool(response.get("name")),
-                "customer_name": response.get("name", ""),
-                "message": response.get("message", "Cable account verification failed"),
-                "data": response,
-            }
-        except Exception as exc:
-            logger.error("SwiftBills cable verification failed: %s", exc)
-            return {"valid": False, "message": str(exc)}
-    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
-        return {"valid": False, "message": "ClubKonnect credentials are missing"}
-    return {"valid": False, "message": "Cable account verification failed"}
+    if not SWIFTBILLS_API_KEY:
+        return {"valid": False, "message": "SwiftBills credentials are missing"}
+    try:
+        swift_plans = _fetch_swiftbills_cable_plans(provider)
+        cable_id = next(
+            (str(plan["code"]).split(":")[1] for plan in swift_plans if str(plan.get("code", "")).startswith("swiftbills:")),
+            None,
+        )
+        if cable_id is None:
+            return {"valid": False, "message": "SwiftBills cable configuration is missing"}
+        response = _swiftbills_request(f"cable/cable-validation?iuc={iuc}&cablenumber={cable_id}")
+        return {
+            "valid": _is_success(response) or bool(response.get("name")),
+            "customer_name": response.get("name", ""),
+            "message": response.get("message", "Cable account verification failed"),
+            "data": response,
+        }
+    except Exception as exc:
+        logger.error("SwiftBills cable verification failed: %s", exc)
+        return {"valid": False, "message": str(exc)}
 
 
 def process_cable_tv(
     provider: str, iuc: str, plan_code: str, amount: float, phone: str = ""
 ):
-    """Executes TV package subscription."""
+    """Executes TV package subscription using SwiftBills only."""
     ref = generate_ref("REF_CABLE")
     if MOCK_MODE:
         return {"status": "SUCCESS", "reference": ref, "provider": "mock", "reason": "", "data": {"status": "MOCK_SUCCESS"}}
-    if CLUBKONNECT_USERID and CLUBKONNECT_APIKEY:
-        try:
-            response = _provider_request(
-                "APICableTVV1.asp",
-                {"CableTV": provider.lower(), "Package": plan_code, "SmartCardNo": iuc, "PhoneNo": phone, "RequestID": ref},
-            )
-            if _is_success(response):
-                return {"status": "SUCCESS", "reference": ref, "provider": "clubkonnect", "provider_reference": response.get("reference", response.get("requestid", ref)), "reason": "", "data": response}
-            club_error = response.get("msg", response.get("message", "Cable subscription failed"))
-            if not SWIFTBILLS_API_KEY or not str(plan_code).startswith("swiftbills:"):
-                return _failure(ref, club_error, provider="clubkonnect")
-            logger.warning("ClubKonnect cable payment failed, falling back to SwiftBills: %s", club_error)
-        except Exception as e:
-            logger.warning("ClubKonnect cable payment failed, falling back to SwiftBills: %s", e)
-            if not SWIFTBILLS_API_KEY or not str(plan_code).startswith("swiftbills:"):
-                return _failure(ref, str(e), provider="clubkonnect")
-    if str(plan_code).startswith("swiftbills:") and SWIFTBILLS_API_KEY:
-        try:
-            _, cable_id, plan_id = str(plan_code).split(":", 2)
-            response = _swiftbills_request(
-                "cable",
-                method="POST",
-                payload={
-                    "cable": int(cable_id),
-                    "iuc": iuc,
-                    "cable_plan": int(plan_id),
-                    "request-id": ref,
-                },
-            )
-            if _is_success(response):
-                return {"status": "SUCCESS", "reference": ref, "provider": "swiftbills", "provider_reference": response.get("reference", response.get("request_id", ref)), "reason": "", "data": response}
-            return _failure(ref, response.get("message", "SwiftBills cable purchase failed"), provider="swiftbills")
-        except Exception as exc:
-            logger.error("SwiftBills cable purchase failed: %s", exc)
-            return _failure(ref, str(exc), provider="swiftbills")
-    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
-        return _failure(ref, "ClubKonnect credentials are missing", provider="clubkonnect")
-    return _failure(ref, "Cable subscription failed", provider="clubkonnect")
+    if not SWIFTBILLS_API_KEY:
+        return _failure(ref, "SwiftBills credentials are missing", provider="swiftbills")
+    if not str(plan_code).startswith("swiftbills:"):
+        return _failure(ref, "Invalid SwiftBills cable plan selected", provider="swiftbills")
+    try:
+        _, cable_id, plan_id = str(plan_code).split(":", 2)
+        response = _swiftbills_request(
+            "cable",
+            method="POST",
+            payload={
+                "cable": int(cable_id),
+                "iuc": iuc,
+                "cable_plan": int(plan_id),
+                "request-id": ref,
+            },
+        )
+        if _is_success(response):
+            return {"status": "SUCCESS", "reference": ref, "provider": "swiftbills", "provider_reference": response.get("reference", response.get("request_id", ref)), "reason": "", "data": response}
+        return _failure(ref, response.get("message", "SwiftBills cable purchase failed"), provider="swiftbills")
+    except Exception as exc:
+        logger.error("SwiftBills cable purchase failed: %s", exc)
+        return _failure(ref, str(exc), provider="swiftbills")
 
 
 # --- ELECTRICITY SERVICES ---
@@ -687,152 +631,86 @@ def _swiftbills_disco_id(disco: str):
 
 
 def verify_meter(disco: str, meter_no: str, meter_type: str):
-    """Verifies electricity meter account details."""
+    """Verifies electricity meter account details using SwiftBills only."""
     if MOCK_MODE:
         return {"valid": True, "customer_name": "Test Meter User", "message": "Success"}
-    if CLUBKONNECT_USERID and CLUBKONNECT_APIKEY:
-        try:
-            response = _provider_request(
-                "APIVerifyElectricityV1.asp",
-                {"ElectricCompany": DISCO_CODES.get(disco.upper(), disco.upper()), "MeterNo": meter_no, "MeterType": METER_TYPE_CODES.get(meter_type.upper(), meter_type)},
-            )
-            if bool(response.get("customer_name")) and response.get("customer_name", "").upper() not in {"N/A", "NA", "INVALID_METERNO"}:
-                return {
-                    "valid": True,
-                    "customer_name": response.get("customer_name", response.get("name", "")),
-                    "message": response.get("msg", response.get("message", "Meter verification failed")),
-                    "data": response,
-                }
-            if not SWIFTBILLS_API_KEY:
-                return {"valid": False, "message": response.get("msg", response.get("message", "Meter verification failed"))}
-            logger.warning("ClubKonnect meter verification failed, falling back to SwiftBills: %s", response)
-        except Exception as e:
-            logger.warning("ClubKonnect meter verification failed, falling back to SwiftBills: %s", e)
-            if not SWIFTBILLS_API_KEY:
-                return {"valid": False, "message": str(e)}
-    if SWIFTBILLS_API_KEY:
-        try:
-            disco_id = _swiftbills_disco_id(disco)
-            if disco_id is None:
-                return {"valid": False, "message": "SwiftBills electricity configuration is missing"}
-            response = _swiftbills_request(
-                f"bill/bill-validation?meter_number={meter_no}&meter_type={meter_type.lower()}&disconumber={disco_id}"
-            )
-            return {
-                "valid": _is_success(response) or bool(response.get("name")),
-                "customer_name": response.get("name", ""),
-                "message": response.get("message", "Meter verification failed"),
-                "data": response,
-            }
-        except Exception as exc:
-            logger.error("SwiftBills meter verification failed: %s", exc)
-            return {"valid": False, "message": str(exc)}
-    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
-        return {"valid": False, "message": "ClubKonnect credentials are missing"}
-    return {"valid": False, "message": "Meter verification failed"}
+    if not SWIFTBILLS_API_KEY:
+        return {"valid": False, "message": "SwiftBills credentials are missing"}
+    try:
+        disco_id = _swiftbills_disco_id(disco)
+        if disco_id is None:
+            return {"valid": False, "message": "SwiftBills electricity configuration is missing"}
+        response = _swiftbills_request(
+            f"bill/bill-validation?meter_number={meter_no}&meter_type={meter_type.lower()}&disconumber={disco_id}"
+        )
+        return {
+            "valid": _is_success(response) or bool(response.get("name")),
+            "customer_name": response.get("name", ""),
+            "message": response.get("message", "Meter verification failed"),
+            "data": response,
+        }
+    except Exception as exc:
+        logger.error("SwiftBills meter verification failed: %s", exc)
+        return {"valid": False, "message": str(exc)}
 
 
 def process_electricity_payment(
     disco: str, meter_no: str, meter_type: str, amount: float, phone: str = ""
 ):
-    """Executes electricity bill payment and returns generated token."""
+    """Executes electricity bill payment and returns generated token using SwiftBills only."""
     ref = generate_ref("REF_ELEC")
     if MOCK_MODE:
         return {"status": "SUCCESS", "reference": ref, "provider": "mock", "token": "MOCK-1234-5678-9012", "reason": "", "data": {"status": "MOCK_SUCCESS"}}
-    if CLUBKONNECT_USERID and CLUBKONNECT_APIKEY:
-        try:
-            response = _provider_request(
-                "APIElectricityV1.asp",
-                {"ElectricCompany": DISCO_CODES.get(disco.upper(), disco.upper()), "MeterType": METER_TYPE_CODES.get(meter_type.upper(), meter_type), "MeterNo": meter_no, "Amount": int(amount), "PhoneNo": phone, "RequestID": ref},
-            )
-            if _is_success(response):
-                return {"status": "SUCCESS", "reference": ref, "provider": "clubkonnect", "provider_reference": response.get("reference", response.get("requestid", ref)), "token": response.get("token", response.get("metertoken", "N/A")), "reason": "", "data": response}
-            club_error = response.get("msg", response.get("message", "Electricity payment failed"))
-            if not SWIFTBILLS_API_KEY:
-                return _failure(ref, club_error, provider="clubkonnect")
-            logger.warning("ClubKonnect electricity payment failed, falling back to SwiftBills: %s", club_error)
-        except Exception as e:
-            logger.warning("ClubKonnect electricity payment failed, falling back to SwiftBills: %s", e)
-            if not SWIFTBILLS_API_KEY:
-                return _failure(ref, str(e), provider="clubkonnect")
-    if SWIFTBILLS_API_KEY:
-        try:
-            disco_id = _swiftbills_disco_id(disco)
-            if disco_id is None:
-                return _failure(ref, "SwiftBills electricity configuration is missing", provider="swiftbills")
-            response = _swiftbills_request(
-                "bill",
-                method="POST",
-                payload={
-                    "disco": int(disco_id),
-                    "meter_type": meter_type.lower(),
-                    "meter_number": meter_no,
-                    "amount": str(amount),
-                    "phone": phone,
-                    "request-id": ref,
-                },
-            )
-            if _is_success(response):
-                return {
-                    "status": "SUCCESS",
-                    "reference": ref,
-                    "provider": "swiftbills",
-                    "provider_reference": response.get("reference", response.get("request_id", ref)),
-                    "token": response.get("token", "N/A"),
-                    "reason": "",
-                    "data": response,
-                }
-            return _failure(ref, response.get("message", "SwiftBills electricity payment failed"), provider="swiftbills")
-        except Exception as exc:
-            logger.error("SwiftBills electricity payment failed: %s", exc)
-            return _failure(ref, str(exc), provider="swiftbills")
-    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
-        return _failure(ref, "ClubKonnect credentials are missing", provider="clubkonnect")
-    return _failure(ref, "Electricity payment failed", provider="clubkonnect")
+    if not SWIFTBILLS_API_KEY:
+        return _failure(ref, "SwiftBills credentials are missing", provider="swiftbills")
+    try:
+        disco_id = _swiftbills_disco_id(disco)
+        if disco_id is None:
+            return _failure(ref, "SwiftBills electricity configuration is missing", provider="swiftbills")
+        response = _swiftbills_request(
+            "bill",
+            method="POST",
+            payload={
+                "disco": int(disco_id),
+                "meter_type": meter_type.lower(),
+                "meter_number": meter_no,
+                "amount": str(amount),
+                "phone": phone,
+                "request-id": ref,
+            },
+        )
+        if _is_success(response):
+            return {
+                "status": "SUCCESS",
+                "reference": ref,
+                "provider": "swiftbills",
+                "provider_reference": response.get("reference", response.get("request_id", ref)),
+                "token": response.get("token", "N/A"),
+                "reason": "",
+                "data": response,
+            }
+        return _failure(ref, response.get("message", "SwiftBills electricity payment failed"), provider="swiftbills")
+    except Exception as exc:
+        logger.error("SwiftBills electricity payment failed: %s", exc)
+        return _failure(ref, str(exc), provider="swiftbills")
 
 
 # --- BETTING & EDUCATION SERVICES ---
 
 
 def verify_betting_account(platform: str, user_id: str):
-    """Verifies betting wallet user account ID."""
+    """Verifies betting wallet user account ID. ClubKonnect is disabled for this service."""
     if MOCK_MODE:
         return {"valid": True, "account_name": "Verified Bettor", "message": "Success"}
-    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
-        return {"valid": False, "message": "ClubKonnect credentials are missing"}
-    try:
-        response = _provider_request(
-            "APIVerifyBettingV1.asp",
-            {"BettingCompany": platform.upper(), "CustomerID": user_id},
-        )
-        return {
-            "valid": bool(response.get("customer_name")) and not response.get("customer_name", "").lower().startswith("error"),
-            "account_name": response.get("customer_name", response.get("name", "")),
-            "message": response.get("msg", response.get("message", "Betting account verification failed")),
-            "data": response,
-        }
-    except Exception as e:
-        logger.error(f"Betting verification failed: {e}")
-        return {"valid": False, "message": str(e)}
+    return {"valid": False, "message": "ClubKonnect has been disabled for betting; use supported SwiftBills services only."}
 
 
 def process_betting_topup(platform: str, user_id: str, amount: float, phone: str = ""):
-    """Top up a betting account wallet."""
+    """Top up a betting account wallet. ClubKonnect is disabled for this service."""
     ref = generate_ref("REF_BET")
     if MOCK_MODE:
         return {"status": "SUCCESS", "reference": ref, "provider": "mock", "reason": "", "data": {"status": "MOCK_SUCCESS"}}
-    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
-        return _failure(ref, "ClubKonnect credentials are missing", provider="clubkonnect")
-    try:
-        response = _provider_request(
-            "APIBettingV1.asp",
-            {"BettingCompany": platform.upper(), "CustomerID": user_id, "Amount": int(amount), "PhoneNo": phone, "RequestID": ref},
-        )
-        if _is_success(response):
-            return {"status": "SUCCESS", "reference": ref, "provider": "clubkonnect", "provider_reference": response.get("reference", response.get("requestid", ref)), "reason": "", "data": response}
-        return _failure(ref, response.get("msg", response.get("message", "Betting top up failed")), provider="clubkonnect")
-    except Exception as e:
-        return _failure(ref, str(e), provider="clubkonnect")
+    return _failure(ref, "ClubKonnect has been disabled for betting; use supported SwiftBills services only.", provider="swiftbills")
 
 
 def _fetch_clubkonnect_education_packages():
@@ -926,13 +804,12 @@ def _fetch_swiftbills_education_packages():
 
 
 def fetch_education_packages():
-    """Fetch education packages from both providers and keep the lowest price."""
+    """Fetch education packages from SwiftBills only; ClubKonnect is disabled for this service."""
     if MOCK_MODE:
         return _fetch_clubkonnect_education_packages()
-    packages = []
-    if CLUBKONNECT_USERID and CLUBKONNECT_APIKEY:
-        packages.extend(_fetch_clubkonnect_education_packages())
-    packages.extend(_fetch_swiftbills_education_packages())
+    packages = _fetch_swiftbills_education_packages()
+    if not packages:
+        return []
     lowest_by_key = {}
     unmatched = []
     for package in packages:
@@ -950,44 +827,25 @@ def fetch_education_packages():
 
 
 def process_education_pin(exam: str, quantity: int = 1, phone: str = ""):
-    """Generates educational exam result checker PINs."""
+    """Generates educational exam result checker PINs using SwiftBills only."""
     ref = generate_ref("REF_EDU")
     if MOCK_MODE:
         return {"status": "SUCCESS", "reference": ref, "provider": "mock", "pins": [f"PIN-{exam.upper()}-MOCK" for _ in range(quantity)], "reason": "", "data": {"status": "MOCK_SUCCESS"}}
-    if CLUBKONNECT_USERID and CLUBKONNECT_APIKEY:
-        try:
-            endpoint = "APIJAMBV1.asp" if str(exam).lower().startswith("jamb") else "APIWAECV1.asp"
-            response = _provider_request(
-                endpoint,
-                {"ExamType": str(exam).lower(), "PhoneNo": phone, "RequestID": ref},
-            )
-            if _is_success(response):
-                pin_values = response.get("pins", response.get("pin", response.get("serial_number", "")))
-                pins = pin_values if isinstance(pin_values, list) else [pin_values]
-                return {"status": "SUCCESS", "reference": ref, "provider": "clubkonnect", "provider_reference": response.get("reference", response.get("requestid", ref)), "pins": pins, "reason": "", "data": response}
-            club_error = response.get("msg", response.get("message", "Education PIN purchase failed"))
-            if not SWIFTBILLS_API_KEY or not str(exam).startswith("swiftbills:"):
-                return _failure(ref, club_error, provider="clubkonnect")
-            logger.warning("ClubKonnect exam PIN purchase failed, falling back to SwiftBills: %s", club_error)
-        except Exception as e:
-            logger.warning("ClubKonnect exam PIN purchase failed, falling back to SwiftBills: %s", e)
-            if not SWIFTBILLS_API_KEY or not str(exam).startswith("swiftbills:"):
-                return _failure(ref, str(e), provider="clubkonnect")
-    if str(exam).startswith("swiftbills:") and SWIFTBILLS_API_KEY:
-        try:
-            _, exam_id = str(exam).split(":", 1)
-            response = _swiftbills_request(
-                "exam",
-                method="POST",
-                payload={"exam": int(exam_id), "quantity": int(quantity), "request-id": ref},
-            )
-            if _is_success(response):
-                pin = response.get("pin", response.get("serial_number", ""))
-                return {"status": "SUCCESS", "reference": ref, "provider": "swiftbills", "provider_reference": response.get("reference", response.get("request_id", ref)), "pins": [pin] if pin else [], "reason": "", "data": response}
-            return _failure(ref, response.get("message", "SwiftBills exam PIN purchase failed"), provider="swiftbills")
-        except Exception as exc:
-            logger.error("SwiftBills exam PIN purchase failed: %s", exc)
-            return _failure(ref, str(exc), provider="swiftbills")
-    if not CLUBKONNECT_USERID or not CLUBKONNECT_APIKEY:
-        return _failure(ref, "ClubKonnect credentials are missing", provider="clubkonnect")
-    return _failure(ref, "Education PIN purchase failed", provider="clubkonnect")
+    if not SWIFTBILLS_API_KEY:
+        return _failure(ref, "SwiftBills credentials are missing", provider="swiftbills")
+    if not str(exam).startswith("swiftbills:"):
+        return _failure(ref, "Invalid SwiftBills exam package selected", provider="swiftbills")
+    try:
+        _, exam_id = str(exam).split(":", 1)
+        response = _swiftbills_request(
+            "exam",
+            method="POST",
+            payload={"exam": int(exam_id), "quantity": int(quantity), "request-id": ref},
+        )
+        if _is_success(response):
+            pin = response.get("pin", response.get("serial_number", ""))
+            return {"status": "SUCCESS", "reference": ref, "provider": "swiftbills", "provider_reference": response.get("reference", response.get("request_id", ref)), "pins": [pin] if pin else [], "reason": "", "data": response}
+        return _failure(ref, response.get("message", "SwiftBills exam PIN purchase failed"), provider="swiftbills")
+    except Exception as exc:
+        logger.error("SwiftBills exam PIN purchase failed: %s", exc)
+        return _failure(ref, str(exc), provider="swiftbills")
