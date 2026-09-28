@@ -132,6 +132,7 @@ def _swiftbills_data_payload_variants(network_id: int | str, phone: str, plan_id
         "network": int(network_id),
         "phone": phone,
         "data_plan": int(plan_id),
+        "plan": int(plan_id),
         "request-id": reference,
     }
     if amount is not None:
@@ -145,6 +146,7 @@ def _swiftbills_data_payload_variants(network_id: int | str, phone: str, plan_id
         "data_plan_id": int(plan_id),
         "data_plan": int(plan_id),
         "plan_id": int(plan_id),
+        "plan": int(plan_id),
         "request_id": reference,
         "request-id": reference,
         "requestId": reference,
@@ -157,6 +159,7 @@ def _swiftbills_data_payload_variants(network_id: int | str, phone: str, plan_id
         "network": int(network_id),
         "phone": phone,
         "plan_id": int(plan_id),
+        "plan": int(plan_id),
         "request_id": reference,
         "amount": str(amount) if amount is not None else "",
     }
@@ -386,7 +389,7 @@ def fetch_data_variations(network: str):
 
 
 def process_data_purchase(
-    phone: str, network: str, plan_code: str, amount: float
+    phone: str, network: str, plan_code: str, amount: float, bypass: str | None = None, ported_number: str | None = None
 ):
     """Processes a data top-up request using SwiftBills only; ClubKonnect is disabled for this service."""
     logger.info(f"Processing Data: {network} {plan_code} to {phone}")
@@ -401,6 +404,14 @@ def process_data_purchase(
     try:
         _, swift_network, swift_plan_id = str(plan_code).split(":", 2)
         payload_variants = _swiftbills_data_payload_variants(swift_network, phone, swift_plan_id, ref, amount)
+        
+        bypass_val = str(bypass).lower() in ["true", "1", "yes"] if bypass not in (None, "") else False
+        ported_val = str(ported_number).lower() in ["true", "1", "yes"] if ported_number not in (None, "") else False
+        
+        for payload in payload_variants:
+            payload["bypass"] = bypass_val
+            payload["ported_number"] = ported_val
+            
         last_error = "SwiftBills data purchase failed"
 
         for index, payload in enumerate(payload_variants):
