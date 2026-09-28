@@ -22,6 +22,37 @@ def normalize_plan_key(value):
     return re.sub(r"[^A-Z0-9]+", "_", text).strip("_")
 
 
+def find_phone_number(text):
+    match = re.search(r"(?:\+?234|0)\d{10}\b|\b\d{11}\b", str(text or ""))
+    if not match:
+        return None
+    digits = re.sub(r"\D", "", match.group(0))
+    if len(digits) == 13 and digits.startswith("234"):
+        return digits
+    if len(digits) == 11:
+        return "234" + digits[1:] if digits.startswith("0") else digits
+    if len(digits) == 12 and digits.startswith("234"):
+        return digits
+    return None
+
+
+def match_selected_plan(text, plans):
+    if not plans:
+        return None
+    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+    if normalized.isdigit():
+        idx = int(normalized)
+        if 1 <= idx <= len(plans):
+            return plans[idx - 1]
+    compact = re.sub(r"[^A-Z0-9]+", " ", normalized.upper()).strip()
+    for plan in plans:
+        plan_name = str(plan.get("name", ""))
+        plan_key = re.sub(r"[^A-Z0-9]+", " ", plan_name.upper()).strip()
+        if compact and (compact in plan_key or plan_key in compact):
+            return plan
+    return None
+
+
 def get_groq_client():
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -339,7 +370,13 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         variations = fetch_data_variations(network)
         if not variations:
             return {"status": "error", "message": "No plans available right now."}
-        
+
+        if hasattr(user, "state_data"):
+            state = user.state_data if isinstance(user.state_data, dict) else {}
+            state["last_data_plans"] = {"network": network, "plans": variations}
+            user.state_data = state
+            db.session.commit()
+
         plans = []
         display_plans = []
         for index, plan in enumerate(variations, start=1):
@@ -871,6 +908,29 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
         return
         
     photo_receipt_requested = requested_photo_receipt(text)
+    state_data = user.state_data if isinstance(user.state_data, dict) else {}
+    recent_data_plans = state_data.get("last_data_plans") if isinstance(state_data.get("last_data_plans"), dict) else None
+    if recent_data_plans:
+        selected_plan = match_selected_plan(text, recent_data_plans.get("plans", []))
+        phone_number = find_phone_number(text)
+        if selected_plan and phone_number:
+            tool_name = "buy_data"
+            tool_kwargs = {
+                "network": recent_data_plans.get("network"),
+                "plan_code": selected_plan.get("variation_code"),
+                "amount": str(selected_plan.get("variation_amount")),
+                "phone": phone_number,
+                "confirm": True,
+            }
+            result = execute_tool(app, db, user, provider_phone, tool_name, tool_kwargs)
+            if result.get("status") == "success":
+                from app import send_whatsapp_message
+                send_whatsapp_message(chat_id, result.get("message", "Purchase completed successfully."))
+                return
+            from app import send_whatsapp_message
+            send_whatsapp_message(chat_id, result.get("message", "I could not finish that purchase."))
+            return
+
     client = get_groq_client()
     if not client:
         from app import send_whatsapp_message
@@ -878,7 +938,6 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
         return
         
     # Keep the complete transcript in Supabase and build a safe recent context for Groq.
-    state_data = user.state_data if isinstance(user.state_data, dict) else {}
     history = state_data.get("messages", [])
     if not isinstance(history, list):
         history = []

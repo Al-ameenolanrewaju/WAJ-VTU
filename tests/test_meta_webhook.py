@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+import requests
 
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("META_VERIFY_TOKEN", "meta-token")
@@ -489,6 +490,54 @@ def test_yes_reply_confirms_pending_data_purchase(monkeypatch):
         assert user.state_data.get("pending_confirmation") is None
 
 
+def test_handle_chat_message_auto_buys_data_when_plan_and_phone_are_sent_together(monkeypatch):
+    import app as app_module
+    import chat_agent
+    import provider
+
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"234{uuid.uuid4().hex[:10]}",
+            phone=f"234{uuid.uuid4().hex[:10]}",
+            wallet_balance=Decimal("1000.00"),
+            state_data={
+                "last_data_plans": {
+                    "network": "MTN",
+                    "plans": [{
+                        "name": "MTN 1GB DATA SHARE (7 DAYS)",
+                        "variation_code": "swiftbills:1:101",
+                        "variation_amount": "450.00",
+                    }],
+                }
+            },
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+        def fake_purchase(phone, network, plan_code, amount):
+            assert phone == "2348000000001"
+            assert network == "MTN"
+            assert plan_code == "swiftbills:1:101"
+            assert amount == 450.0
+            return {"status": "SUCCESS", "reference": "AUTO-DATA"}
+
+        monkeypatch.setattr(provider, "fetch_data_variations", lambda network: [{
+            "name": "MTN 1GB DATA SHARE (7 DAYS)",
+            "variation_code": "swiftbills:1:101",
+            "variation_amount": "450.00",
+        }])
+        monkeypatch.setattr(provider, "process_data_purchase", fake_purchase)
+        monkeypatch.setattr(app_module, "get_markup", lambda service_type, base_amount: Decimal("0.00"))
+        monkeypatch.setattr(chat_agent, "get_groq_client", lambda: None)
+
+        sent = []
+        monkeypatch.setattr(app_module, "send_whatsapp_message", lambda recipient, text: sent.append((recipient, text)) or True)
+
+        chat_agent.handle_chat_message(app_module.app, app_module.db, user, "MTN 1GB DATA SHARE (7 DAYS) 08000000001", "123456", user.phone)
+
+        assert sent and "Successfully purchased data" in sent[-1][1]
+
+
 def test_whatsapp_link_token_merges_conflicting_whatsapp_account():
     import app as app_module
 
@@ -950,7 +999,32 @@ def test_data_comparison_keeps_lowest_swiftbills_plan_and_purchases_with_swiftbi
         "phone": "08012345678",
         "data_plan": 101,
         "request-id": result["reference"],
+        "amount": "450",
     }
+
+
+def test_swiftbills_data_purchase_retries_with_alternate_payload_when_first_variant_fails(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "swift-key")
+    monkeypatch.setattr(provider, "generate_ref", lambda prefix: "expected-ref")
+
+    payloads = []
+
+    def fake_swift_request(endpoint, method="GET", payload=None):
+        payloads.append(payload)
+        if payload.get("request-id") == "expected-ref":
+            raise requests.HTTPError("400 Client Error: Bad Request for url: https://swiftbills.com.ng/api/data")
+        return {"status": "success", "message": "Data Purchase Successful."}
+
+    monkeypatch.setattr(provider, "_swiftbills_request", fake_swift_request)
+
+    result = provider.process_data_purchase("08012345678", "MTN", "swiftbills:1:101", 450)
+
+    assert result["status"] == "SUCCESS"
+    assert any("request_id" in payload or "request-id" in payload for payload in payloads)
+    assert any(payload.get("request_id") == "expected-ref" for payload in payloads)
 
 
 def test_swiftbills_exam_catalog_includes_neco_and_other_exam_pins(monkeypatch):
