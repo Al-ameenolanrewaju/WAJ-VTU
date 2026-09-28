@@ -398,6 +398,8 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         plan_code = kwargs.get("plan_code")
         requested_amount = kwargs.get("amount")
         phone = kwargs.get("phone")
+        bypass = kwargs.get("bypass")
+        ported_number = kwargs.get("ported_number")
 
         def remember_pending_confirmation():
             if not hasattr(user, "state_data"):
@@ -467,7 +469,14 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         user.wallet_balance -= charge_amount
         db.session.commit()
         
-        result = process_data_purchase(phone, network, plan_code, float(base_amount))
+        result = process_data_purchase(
+            phone,
+            network,
+            plan_code,
+            float(base_amount),
+            bypass=bypass,
+            ported_number=ported_number,
+        )
         if result.get("status") == "SUCCESS":
             tx = Transaction(
                 user_id=user.id,
@@ -875,6 +884,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
         tool_kwargs["confirm"] = True
         user.state_data = {k: v for k, v in (user.state_data or {}).items() if k != "pending_confirmation"}
         db.session.commit()
+        db.session.merge(user)
         result = execute_tool(app, db, user, provider_phone, tool_name, tool_kwargs)
         if result.get("status") == "success":
             from app import send_whatsapp_message
@@ -922,6 +932,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 "phone": phone_number,
                 "confirm": True,
             }
+            db.session.merge(user)
             result = execute_tool(app, db, user, provider_phone, tool_name, tool_kwargs)
             if result.get("status") == "success":
                 from app import send_whatsapp_message
@@ -931,12 +942,6 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
             send_whatsapp_message(chat_id, result.get("message", "I could not finish that purchase."))
             return
 
-    client = get_groq_client()
-    if not client:
-        from app import send_whatsapp_message
-        send_whatsapp_message(chat_id, "AI services are currently unavailable. Please check configuration.")
-        return
-        
     # Keep the complete transcript in Supabase and build a safe recent context for Groq.
     history = state_data.get("messages", [])
     if not isinstance(history, list):
@@ -999,6 +1004,12 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
 
                 if func_name == "get_data_plans" and result.get("status") == "success":
                     final_text = result["display_plans"]
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": func_name,
+                        "content": json.dumps({"status": "success", "plans_list": result["plans_list"]})
+                    })
                     messages.append({"role": "assistant", "content": final_text})
                     send_whatsapp_message(chat_id, final_text)
                     history.extend(messages[turn_start + 1:])
