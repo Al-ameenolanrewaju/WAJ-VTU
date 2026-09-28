@@ -71,9 +71,9 @@ def _swiftbills_request(endpoint: str, method: str = "GET", payload: dict | None
     }
     url = f"{SWIFTBILLS_BASE_URL}/{endpoint.lstrip('/')}"
     if method.upper() == "POST":
-        response = requests.post(url, json=payload or {}, headers=headers, timeout=15)
+        response = requests.post(url, json=payload or {}, headers=headers, timeout=45)
     else:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=45)
     response.raise_for_status()
     return response.json()
 
