@@ -956,6 +956,12 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
     db.session.commit()
     tools = define_tools()
     
+    client = get_groq_client()
+    if not client:
+        from app import send_whatsapp_message
+        send_whatsapp_message(chat_id, "Service is currently unavailable. Please check API configuration.")
+        return
+
     try:
         response = client.chat.completions.create(
             messages=messages,
