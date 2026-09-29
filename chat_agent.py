@@ -375,7 +375,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
                 f"To resolve/resume AI, type:\n`/resolve {user.phone}`"
             )
             send_whatsapp_message(admin_phone, alert_msg)
-        return {"status": "success", "message": "The chat has been escalated. You should tell the user an agent will reply shortly."}
+        return {"status": "success", "message": "The chat has been escalated. Tell the user an agent will reply shortly, and instruct them to type 'resume ai' anytime if they want to close the human chat and talk to you again."}
         
     elif name == "schedule_task":
         frequency = kwargs.get("frequency")
