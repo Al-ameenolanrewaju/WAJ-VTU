@@ -154,15 +154,44 @@ def send_password_reset_email(user, reset_url):
     return False
 
 
-def send_receipt_email(user, tx):
+def send_receipt_email(user, transactions):
     api_key = current_app.config.get("RESEND_API_KEY", "").strip()
     from_email = current_app.config.get("RESEND_FROM_EMAIL", "").strip()
     if not api_key or not from_email:
         current_app.logger.error("Receipt email is not configured: set RESEND_API_KEY and RESEND_FROM_EMAIL")
         return False
 
-    status_color = "#28a745" if tx.status == "SUCCESS" else "#dc3545" if tx.status == "FAILED" else "#ffc107"
-    date_str = tx.created_at.strftime('%Y-%m-%d %H:%M:%S')
+    multiple = len(transactions) > 1
+    subject = "WAJ VTU Transaction History" if multiple else f"WAJ VTU Receipt: {transactions[0].reference}"
+    
+    rows_html = ""
+    for tx in transactions:
+        status_color = "#2F9E44" if tx.status == "SUCCESS" else "#E46152" if tx.status == "FAILED" else "#FFC400"
+        date_str = tx.created_at.strftime('%Y-%m-%d %H:%M')
+        
+        desc = tx.description or ""
+        import re
+        desc = re.sub(r'(?i)swiftbills|clubconnect', '', desc).strip()
+        
+        rows_html += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #E4E4E0; font-size: 13px; color: #626262;">{date_str}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #E4E4E0; font-size: 13px; color: #090909; font-weight: 600;">{tx.reference}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #E4E4E0; font-size: 13px; color: #626262;">{tx.type}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #E4E4E0; font-size: 13px; color: #626262;">{desc}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #E4E4E0; font-size: 13px; color: #090909; text-align: right; font-weight: 700;">₦{float(tx.amount):,.2f}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #E4E4E0; font-size: 13px; text-align: right;"><span style="color: {status_color}; font-weight: 700; font-size: 12px;">{tx.status}</span></td>
+        </tr>
+        """
+
+    base_url = ""
+    try:
+        from flask import request
+        base_url = request.url_root.rstrip('/')
+    except Exception:
+        pass
+        
+    logo_img = f'<img src="{base_url}/static/images/waj-vtu-logo.jpeg" alt="WAJ VTU" style="height: 40px; border-radius: 6px;">' if base_url else '<span style="color: #FFC400;">WAJ</span> VTU'
 
     html = f"""
     <!DOCTYPE html>
@@ -171,58 +200,42 @@ def send_receipt_email(user, tx):
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
     </head>
-    <body style="font-family: 'Segoe UI', Inter, Arial, sans-serif; background-color: #f4f7f6; margin: 0; padding: 0;">
-        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f7f6; padding: 40px 0;">
+    <body style="font-family: 'Inter', Arial, sans-serif; background-color: #F5F5F2; margin: 0; padding: 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #F5F5F2; padding: 40px 0;">
             <tr>
                 <td align="center">
-                    <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.05); overflow: hidden;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 800px; background-color: #ffffff; border-radius: 18px; box-shadow: 0 12px 30px rgba(0,0,0,0.06); overflow: hidden; margin: 0 20px;">
                         <tr>
-                            <td style="padding: 40px; text-align: center; background-color: #1a1a1a;">
-                                <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: 1px;">WAJ VTU</h1>
+                            <td style="padding: 30px 40px; text-align: center; background-color: #090909; font-family: 'Space Grotesk', sans-serif;">
+                                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: 0.5px;">{logo_img}</h1>
                             </td>
                         </tr>
                         <tr>
-                            <td style="padding: 40px 40px 20px;">
-                                <h2 style="color: #333333; margin-top: 0; font-size: 22px; font-weight: 600; text-align: center;">Transaction Receipt</h2>
-                                <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 24px; text-align: center;">
-                                    Thank you for using WAJ VTU. Here are the details of your transaction.
-                                </p>
+                            <td style="padding: 40px;">
+                                <h2 style="color: #090909; margin-top: 0; font-size: 20px; font-weight: 600; text-align: center; margin-bottom: 24px;">Transaction Receipt</h2>
                                 
-                                <table width="100%" cellpadding="12" cellspacing="0" style="background-color: #f9fafb; border-radius: 8px; border: 1px solid #eeeeee;">
-                                    <tr>
-                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Reference</strong></td>
-                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{tx.reference}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Date</strong></td>
-                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{date_str}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Type</strong></td>
-                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{tx.type}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Description</strong></td>
-                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{tx.description}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Recipient</strong></td>
-                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{tx.recipient}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Status</strong></td>
-                                        <td style="font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;"><span style="color: {status_color}; font-weight: 600;">{tx.status}</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #333333; font-size: 18px; font-weight: 700; padding-top: 16px;"><strong>Amount</strong></td>
-                                        <td style="color: #1a1a1a; font-size: 18px; font-weight: 800; text-align: right; padding-top: 16px;">₦{float(tx.amount):,.2f}</td>
-                                    </tr>
-                                </table>
+                                <div style="overflow-x: auto;">
+                                    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; min-width: 600px;">
+                                        <thead>
+                                            <tr>
+                                                <th style="padding: 12px; border-bottom: 2px solid #E4E4E0; font-size: 12px; color: #626262; text-align: left; text-transform: uppercase;">Date</th>
+                                                <th style="padding: 12px; border-bottom: 2px solid #E4E4E0; font-size: 12px; color: #626262; text-align: left; text-transform: uppercase;">Ref</th>
+                                                <th style="padding: 12px; border-bottom: 2px solid #E4E4E0; font-size: 12px; color: #626262; text-align: left; text-transform: uppercase;">Type</th>
+                                                <th style="padding: 12px; border-bottom: 2px solid #E4E4E0; font-size: 12px; color: #626262; text-align: left; text-transform: uppercase;">Description</th>
+                                                <th style="padding: 12px; border-bottom: 2px solid #E4E4E0; font-size: 12px; color: #626262; text-align: right; text-transform: uppercase;">Amount</th>
+                                                <th style="padding: 12px; border-bottom: 2px solid #E4E4E0; font-size: 12px; color: #626262; text-align: right; text-transform: uppercase;">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {rows_html}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </td>
                         </tr>
                         <tr>
-                            <td style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #eeeeee;">
-                                <p style="color: #aaaaaa; font-size: 12px; margin: 0;">
+                            <td style="background-color: #F5F5F2; padding: 24px; text-align: center; border-top: 1px solid #E4E4E0;">
+                                <p style="color: #969696; font-size: 12px; margin: 0;">
                                     &copy; WAJ VTU. All rights reserved.<br>
                                     Need help? Contact our support team.
                                 </p>
@@ -242,7 +255,7 @@ def send_receipt_email(user, tx):
             json={
                 "from": from_email,
                 "to": [user.email],
-                "subject": f"WAJ VTU Receipt: {tx.reference}",
+                "subject": subject,
                 "html": html,
             },
             timeout=15,

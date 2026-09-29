@@ -26,6 +26,10 @@
         <option value="{{ plan.code }}" data-amount="{{ plan.amount }}">{{ plan.name }} - ₦{{ "{:,.2f}".format(plan.amount) }}</option>
         {% endfor %}
       </select>
+      <label>Ported number (optional)</label>
+      <input name="ported_number" placeholder="If your line is ported, enter the ported number">
+      <label>Bypass code (optional)</label>
+      <input name="bypass" placeholder="Provide bypass if no ported number is available">
       <input type="hidden" name="amount" id="data-amount" required>
       <button type="submit">Buy Data</button>
     </form>

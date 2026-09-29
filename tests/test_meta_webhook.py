@@ -308,7 +308,7 @@ def test_data_purchase_applies_margin_from_selected_plan(monkeypatch, client):
         )
         captured = {}
 
-        def fake_purchase(phone, network, plan_code, amount):
+        def fake_purchase(phone, network, plan_code, amount, **kwargs):
             captured["amount"] = amount
             return {"status": "SUCCESS", "reference": "DATA-TEST"}
 
@@ -365,7 +365,7 @@ def test_data_purchase_accepts_normalized_plan_aliases(monkeypatch):
             }],
         )
 
-        def fake_purchase(phone, network, plan_code, amount):
+        def fake_purchase(phone, network, plan_code, amount, **kwargs):
             assert plan_code == "swiftbills:1:101"
             return {"status": "SUCCESS", "reference": "DATA-ALIAS-TEST"}
 
@@ -417,7 +417,7 @@ def test_data_purchase_requires_explicit_confirmation(monkeypatch):
 
         called = {"count": 0}
 
-        def fake_purchase(phone, network, plan_code, amount):
+        def fake_purchase(phone, network, plan_code, amount, **kwargs):
             called["count"] += 1
             return {"status": "SUCCESS", "reference": "DATA-PENDING-CONFIRM"}
 
@@ -474,7 +474,7 @@ def test_yes_reply_confirms_pending_data_purchase(monkeypatch):
             "variation_amount": "450.00",
         }])
 
-        def fake_purchase(phone, network, plan_code, amount):
+        def fake_purchase(phone, network, plan_code, amount, **kwargs):
             return {"status": "SUCCESS", "reference": "CONFIRMED-DATA"}
 
         monkeypatch.setattr(provider, "process_data_purchase", fake_purchase)
@@ -514,7 +514,7 @@ def test_handle_chat_message_auto_buys_data_when_plan_and_phone_are_sent_togethe
         app_module.db.session.add(user)
         app_module.db.session.commit()
 
-        def fake_purchase(phone, network, plan_code, amount):
+        def fake_purchase(phone, network, plan_code, amount, **kwargs):
             assert phone == "2348000000001"
             assert network == "MTN"
             assert plan_code == "swiftbills:1:101"

@@ -210,6 +210,8 @@ def buy_data():
 
     network = request.form.get("network", "").upper()
     plan_code = request.form.get("plan_code", "")
+    bypass = (request.form.get("bypass") or "").strip() or None
+    ported_number = (request.form.get("ported_number") or "").strip() or None
     selected_plan = next(
         (plan for plan in fetch_data_variations(network)
          if str(plan.get("variation_code")) == plan_code),
@@ -225,6 +227,8 @@ def buy_data():
         "plan_code": plan_code,
         "amount": base_amount + get_markup(f"DATA_{network}", base_amount),
         "phone": request.form.get("phone") or user.phone,
+        "bypass": bypass,
+        "ported_number": ported_number,
         "confirm": True,
     }
     result = execute_tool(app, db, user, user.phone, "buy_data", payload)
