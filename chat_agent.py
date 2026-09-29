@@ -335,20 +335,20 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
     if name == "send_receipt_email":
         reference = kwargs.get("reference")
         if reference:
-            tx = Transaction.query.filter_by(user_id=user.id, reference=reference).first()
+            txs = Transaction.query.filter_by(user_id=user.id, reference=reference).all()
         else:
-            tx = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.created_at.desc()).first()
+            txs = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.created_at.desc()).limit(100).all()
             
-        if not tx:
-            return {"status": "error", "message": "No transaction found to send a receipt for."}
+        if not txs:
+            return {"status": "error", "message": "No transactions found to send a receipt for."}
             
         if not user.email:
             return {"status": "error", "message": "You don't have an email address linked. What's your email so I can send the receipt?"}
             
         from auth import send_receipt_email
-        success = send_receipt_email(user, tx)
+        success = send_receipt_email(user, txs)
         if success:
-            return {"status": "success", "message": f"Receipt for {tx.reference} sent to {user.email} successfully!"}
+            return {"status": "success", "message": f"Receipt with your transaction history sent to {user.email} successfully!"}
         else:
             return {"status": "error", "message": "Failed to send the receipt email. Please try again later."}
 
@@ -367,7 +367,14 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         admin_phone = os.getenv("ADMIN_PHONE")
         if admin_phone:
             from app import send_whatsapp_message
-            send_whatsapp_message(admin_phone, f"⚠️ *Escalation Alert*\\nUser {user.phone} requested human support.\\nReason: {kwargs.get('reason')}")
+            alert_msg = (
+                f"⚠️ *Escalation Alert*\n"
+                f"User {user.phone} requested human support.\n"
+                f"Reason: {kwargs.get('reason')}\n\n"
+                f"To reply, type:\n`/reply {user.phone} Your message`\n\n"
+                f"To resolve/resume AI, type:\n`/resolve {user.phone}`"
+            )
+            send_whatsapp_message(admin_phone, alert_msg)
         return {"status": "success", "message": "The chat has been escalated. You should tell the user an agent will reply shortly."}
         
     elif name == "schedule_task":
@@ -891,6 +898,38 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
 
 def handle_chat_message(app, db, user, text, chat_id, provider_phone):
+    admin_phone = os.getenv("ADMIN_PHONE")
+    if admin_phone and chat_id == admin_phone:
+        if text.startswith("/reply "):
+            parts = text.split(" ", 2)
+            if len(parts) >= 3:
+                target_phone = parts[1]
+                reply_msg = parts[2]
+                from app import send_whatsapp_message
+                send_whatsapp_message(target_phone, f"👨‍💻 *Support:*\n{reply_msg}")
+                send_whatsapp_message(chat_id, f"✅ Reply sent to {target_phone}")
+            else:
+                from app import send_whatsapp_message
+                send_whatsapp_message(chat_id, "❌ Invalid format. Use: /reply <phone_number> <message>")
+            return
+            
+        if text.startswith("/resolve "):
+            parts = text.split(" ", 1)
+            if len(parts) >= 2:
+                target_phone = parts[1].strip()
+                from models import User as db_User
+                target_user = db_User.query.filter_by(phone=target_phone).first()
+                if target_user:
+                    target_user.is_escalated = False
+                    db.session.commit()
+                    from app import send_whatsapp_message
+                    send_whatsapp_message(target_phone, "✅ Your support request has been resolved. AI support has resumed. How can I help you today?")
+                    send_whatsapp_message(chat_id, f"✅ Ticket for {target_phone} resolved. AI resumed.")
+                else:
+                    from app import send_whatsapp_message
+                    send_whatsapp_message(chat_id, f"❌ Could not find user {target_phone}")
+            return
+
     if getattr(user, "is_escalated", False):
         lower_text = str(text).strip().lower()
         if lower_text in ["/resume_ai", "/resume", "resume ai", "reset ai"]:
