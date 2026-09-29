@@ -83,12 +83,56 @@ def send_password_reset_email(user, reset_url):
         return False
 
     html = f"""
-    <div style=\"font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111;\">
-      <h1 style=\"color:#090909;\">WAJ VTU</h1>
-      <p>We received a request to reset your WAJ VTU password.</p>
-      <p><a href=\"{reset_url}\" style=\"display:inline-block;background:#FFC400;color:#090909;padding:12px 18px;text-decoration:none;font-weight:700;border-radius:6px;\">Reset password</a></p>
-      <p style=\"color:#666;font-size:13px;\">This link expires in 1 hour. If you did not request this, you can ignore this email.</p>
-    </div>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="font-family: 'Segoe UI', Inter, Arial, sans-serif; background-color: #f4f7f6; margin: 0; padding: 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f7f6; padding: 40px 0;">
+            <tr>
+                <td align="center">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.05); overflow: hidden;">
+                        <tr>
+                            <td style="padding: 40px; text-align: center; background-color: #1a1a1a;">
+                                <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: 1px;">WAJ VTU</h1>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 40px 40px 20px;">
+                                <h2 style="color: #333333; margin-top: 0; font-size: 22px; font-weight: 600;">Password Reset Request</h2>
+                                <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 24px;">
+                                    Hello there,<br><br>
+                                    We received a request to reset the password for your WAJ VTU account. If you made this request, please click the button below to set a new password.
+                                </p>
+                                <table width="100%" cellpadding="0" cellspacing="0">
+                                    <tr>
+                                        <td align="center">
+                                            <a href="{reset_url}" style="display: inline-block; background: linear-gradient(135deg, #FFC400, #F39C12); color: #000000; padding: 14px 32px; text-decoration: none; font-weight: 700; font-size: 16px; border-radius: 8px; box-shadow: 0 4px 10px rgba(243, 156, 18, 0.3); transition: background 0.3s;">Reset Password</a>
+                                        </td>
+                                    </tr>
+                                </table>
+                                <p style="color: #777777; font-size: 14px; line-height: 1.6; margin: 32px 0 0;">
+                                    <em>This link will expire in 1 hour.</em><br>
+                                    If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #eeeeee;">
+                                <p style="color: #aaaaaa; font-size: 12px; margin: 0;">
+                                    &copy; WAJ VTU. All rights reserved.<br>
+                                    Need help? Contact our support team.
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
     """
     try:
         response = requests.post(
@@ -107,6 +151,107 @@ def send_password_reset_email(user, reset_url):
         current_app.logger.error("Resend rejected password reset email: status=%s response=%s", response.status_code, response.text[:300])
     except requests.RequestException:
         current_app.logger.exception("Unable to send password reset email through Resend")
+    return False
+
+
+def send_receipt_email(user, tx):
+    api_key = current_app.config.get("RESEND_API_KEY", "").strip()
+    from_email = current_app.config.get("RESEND_FROM_EMAIL", "").strip()
+    if not api_key or not from_email:
+        current_app.logger.error("Receipt email is not configured: set RESEND_API_KEY and RESEND_FROM_EMAIL")
+        return False
+
+    status_color = "#28a745" if tx.status == "SUCCESS" else "#dc3545" if tx.status == "FAILED" else "#ffc107"
+    date_str = tx.created_at.strftime('%Y-%m-%d %H:%M:%S')
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="font-family: 'Segoe UI', Inter, Arial, sans-serif; background-color: #f4f7f6; margin: 0; padding: 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f7f6; padding: 40px 0;">
+            <tr>
+                <td align="center">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.05); overflow: hidden;">
+                        <tr>
+                            <td style="padding: 40px; text-align: center; background-color: #1a1a1a;">
+                                <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: 1px;">WAJ VTU</h1>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 40px 40px 20px;">
+                                <h2 style="color: #333333; margin-top: 0; font-size: 22px; font-weight: 600; text-align: center;">Transaction Receipt</h2>
+                                <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 24px; text-align: center;">
+                                    Thank you for using WAJ VTU. Here are the details of your transaction.
+                                </p>
+                                
+                                <table width="100%" cellpadding="12" cellspacing="0" style="background-color: #f9fafb; border-radius: 8px; border: 1px solid #eeeeee;">
+                                    <tr>
+                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Reference</strong></td>
+                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{tx.reference}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Date</strong></td>
+                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{date_str}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Type</strong></td>
+                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{tx.type}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Description</strong></td>
+                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{tx.description}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Recipient</strong></td>
+                                        <td style="color: #333333; font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;">{tx.recipient}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #777777; font-size: 14px; border-bottom: 1px solid #eeeeee;"><strong>Status</strong></td>
+                                        <td style="font-size: 14px; text-align: right; border-bottom: 1px solid #eeeeee;"><span style="color: {status_color}; font-weight: 600;">{tx.status}</span></td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #333333; font-size: 18px; font-weight: 700; padding-top: 16px;"><strong>Amount</strong></td>
+                                        <td style="color: #1a1a1a; font-size: 18px; font-weight: 800; text-align: right; padding-top: 16px;">₦{float(tx.amount):,.2f}</td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #eeeeee;">
+                                <p style="color: #aaaaaa; font-size: 12px; margin: 0;">
+                                    &copy; WAJ VTU. All rights reserved.<br>
+                                    Need help? Contact our support team.
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+    try:
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "from": from_email,
+                "to": [user.email],
+                "subject": f"WAJ VTU Receipt: {tx.reference}",
+                "html": html,
+            },
+            timeout=15,
+        )
+        if response.ok:
+            return True
+        current_app.logger.error("Resend rejected receipt email: status=%s response=%s", response.status_code, response.text[:300])
+    except requests.RequestException:
+        current_app.logger.exception("Unable to send receipt email through Resend")
     return False
 
 

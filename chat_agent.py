@@ -117,7 +117,7 @@ RULES:
 4. If a purchase fails, inform the user politely.
 5. KEEP YOUR RESPONSES SHORT AND FRIENDLY.
 6. **MULTI-LANGUAGE SUPPORT**: If the user speaks to you in Hausa, Igbo, Yoruba, or Nigerian Pidgin, YOU MUST RESPOND IN THAT EXACT NATIVE LANGUAGE. Translate your responses naturally while executing the underlying tools normally in English.
-7. If the user asks for their transaction history or receipts, use `get_transaction_history`.
+7. If the user asks for their transaction history, use `get_transaction_history`. If the user asks to send a receipt to their email, use `send_receipt_email`.
 8. If the user asks for a recurring/scheduled transaction (e.g. "buy this every Friday"), use `schedule_task`.
 9. If the user is extremely angry, stuck, or explicitly asks to speak to a human/customer care, immediately use `escalate_to_human`.
 """
@@ -305,6 +305,19 @@ def define_tools():
                     "required": ["frequency", "tool_name", "tool_kwargs"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "send_receipt_email",
+                "description": "Send a transaction receipt to the user's email.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "reference": {"type": "string", "description": "The transaction reference to send a receipt for. If not provided, sends the latest transaction receipt."}
+                    }
+                }
+            }
         }
     ]
 
@@ -319,7 +332,27 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
     from models import Transaction, ScheduledTask
     
 
-    if name == "get_wallet_balance":
+    if name == "send_receipt_email":
+        reference = kwargs.get("reference")
+        if reference:
+            tx = Transaction.query.filter_by(user_id=user.id, reference=reference).first()
+        else:
+            tx = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.created_at.desc()).first()
+            
+        if not tx:
+            return {"status": "error", "message": "No transaction found to send a receipt for."}
+            
+        if not user.email:
+            return {"status": "error", "message": "You don't have an email address linked. What's your email so I can send the receipt?"}
+            
+        from auth import send_receipt_email
+        success = send_receipt_email(user, tx)
+        if success:
+            return {"status": "success", "message": f"Receipt for {tx.reference} sent to {user.email} successfully!"}
+        else:
+            return {"status": "error", "message": "Failed to send the receipt email. Please try again later."}
+
+    elif name == "get_wallet_balance":
         return {"status": "success", "balance": float(user.wallet_balance)}
         
     elif name == "get_transaction_history":
