@@ -150,7 +150,7 @@ def define_tools():
                         "plan_code": {"type": "string", "description": "The exact variation_code or plan_code"},
                         "amount": {"type": "number", "description": "The exact cost"},
                         "phone": {"type": "string", "description": "The 11-digit recipient phone number"},
-                        "confirm": {"type": "boolean", "description": "Set to true only after the user explicitly confirms the exact plan, price, and recipient."}
+                        "confirm": {"type": ["boolean", "null"], "description": "Set to true only after the user explicitly confirms the exact plan, price, and recipient."}
                     },
                     "required": ["network", "plan_code", "amount", "phone"]
                 }
@@ -166,7 +166,8 @@ def define_tools():
                     "properties": {
                         "network": {"type": "string", "enum": ["MTN", "AIRTEL", "GLO", "9MOBILE"]},
                         "amount": {"type": "number", "description": "The amount to recharge in Naira"},
-                        "phone": {"type": "string", "description": "The 11-digit recipient phone number"}
+                        "phone": {"type": "string", "description": "The 11-digit recipient phone number"},
+                        "confirm": {"type": ["boolean", "null"], "description": "Set to true only after the user explicitly confirms the exact plan, price, and recipient."}
                     },
                     "required": ["network", "amount", "phone"]
                 }
@@ -208,7 +209,8 @@ def define_tools():
                         "provider": {"type": "string", "enum": ["DSTV", "GOTV", "STARTIMES"]},
                         "smartcard": {"type": "string", "description": "The smartcard/IUC number"},
                         "plan_code": {"type": "string", "description": "The exact plan_code from get_cable_plans"},
-                        "amount": {"type": "number", "description": "The exact cost of the plan"}
+                        "amount": {"type": "number", "description": "The exact cost of the plan"},
+                        "confirm": {"type": ["boolean", "null"], "description": "Set to true only after the user explicitly confirms the exact plan, price, and recipient."}
                     },
                     "required": ["provider", "smartcard", "plan_code", "amount"]
                 }
@@ -241,7 +243,8 @@ def define_tools():
                         "disco": {"type": "string", "enum": ["IKEDC", "EKEDC", "AEDC", "IBEDC"]},
                         "meter_number": {"type": "string"},
                         "meter_type": {"type": "string", "enum": ["PREPAID", "POSTPAID"]},
-                        "amount": {"type": "number"}
+                        "amount": {"type": "number"},
+                        "confirm": {"type": ["boolean", "null"], "description": "Set to true only after the user explicitly confirms the exact plan, price, and recipient."}
                     },
                     "required": ["disco", "meter_number", "meter_type", "amount"]
                 }
@@ -255,7 +258,7 @@ def define_tools():
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "email": {"type": "string", "description": "User's email address (only provide if explicitly asked by the system)"},
+                        "email": {"type": ["string", "null"], "description": "User's email address (only provide if explicitly asked by the system)"},
                         "amount": {"type": "number", "description": "The amount to add to the wallet in Naira"}
                     },
                     "required": ["amount"]
@@ -314,7 +317,7 @@ def define_tools():
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "reference": {"type": "string", "description": "The transaction reference to send a receipt for. If not provided, sends the latest transaction receipt."}
+                        "reference": {"type": ["string", "null"], "description": "The transaction reference to send a receipt for. If not provided or null, sends the latest transaction receipt."}
                     }
                 }
             }
