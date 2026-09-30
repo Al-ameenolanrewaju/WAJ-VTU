@@ -251,11 +251,11 @@ def define_tools():
             "type": "function",
             "function": {
                 "name": "get_funding_account",
-                "description": "Create a one-time Paystack checkout link for adding a specific amount to the user's wallet. Requires the user's email and the amount to add.",
+                "description": "Create a one-time Paystack checkout link for adding a specific amount to the user's wallet. The user's registered email is automatically resolved from their phone number. If missing, ask the user for it.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "email": {"type": "string", "description": "User's email address"},
+                        "email": {"type": "string", "description": "User's email address (only provide if explicitly asked by the system)"},
                         "amount": {"type": "number", "description": "The amount to add to the wallet in Naira"}
                     },
                     "required": ["amount"]
@@ -758,12 +758,16 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
     elif name == "get_funding_account":
         email = kwargs.get("email")
-        if email and not user.email:
-            user.email = email
-            db.session.commit()
+        import re
+        if email:
+            if not re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", email):
+                return {"status": "error", "message": "The provided email address is invalid."}
+            if email != user.email:
+                user.email = email
+                db.session.commit()
 
-        if not user.email:
-            return {"status": "error", "message": "I need an email address to set up your funding account. What's your email?"}
+        if not user.email or not re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", user.email):
+            return {"status": "error", "message": "I need a valid email address to set up your funding account. What's your email?"}
 
         try:
             amount = Decimal(str(kwargs.get("amount", "0"))).quantize(Decimal("0.01"))
