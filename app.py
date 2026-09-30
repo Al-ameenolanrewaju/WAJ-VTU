@@ -538,9 +538,13 @@ def get_or_create_user(phone_number):
 
 
 def get_markup(service_type, base_amount=Decimal("0.00")):
+    from decimal import ROUND_HALF_UP
     markup = ServiceMarkup.query.filter_by(service_type=service_type.upper()).first()
     percentage = Decimal(str(markup.markup_amount)) if markup else Decimal("0.00")
-    return (base_amount * percentage / Decimal("100")).quantize(Decimal("0.01"))
+    raw_markup = base_amount * percentage / Decimal("100")
+    total_amount = base_amount + raw_markup
+    rounded_total = total_amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return (rounded_total - base_amount).quantize(Decimal("0.01"))
 
 
 def set_user_session(user, state, data):
