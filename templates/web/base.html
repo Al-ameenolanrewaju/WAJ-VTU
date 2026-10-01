@@ -580,5 +580,47 @@
     {% block content %}{% endblock %}
   </div>
   <button class="install-button" type="button" data-install-app hidden>Install app</button>
+  <script>
+    document.addEventListener('submit', function(e) {
+      var form = e.target;
+      var submitBtn = form.querySelector('button[type="submit"]');
+      
+      if (form.hasAttribute('onsubmit')) return;
+      
+      var isPurchase = form.action.includes('/buy/') || (submitBtn && submitBtn.textContent.toLowerCase().includes('buy'));
+      
+      if (submitBtn) {
+        if (submitBtn.dataset.submitting === "true") {
+          e.preventDefault();
+          return;
+        }
+        submitBtn.dataset.submitting = "true";
+        submitBtn.disabled = true;
+        
+        var originalText = submitBtn.textContent;
+        submitBtn.textContent = "Processing...";
+        
+        if (isPurchase) {
+          var backdrop = document.createElement('div');
+          backdrop.className = 'receipt-backdrop';
+          backdrop.id = 'processing-receipt';
+          backdrop.innerHTML = `
+            <div class="receipt-modal">
+              <div class="receipt-top">
+                <div>
+                  <div class="receipt-success" style="color: var(--amber-dark);">Processing</div>
+                  <h2 id="receipt-title">Please wait</h2>
+                </div>
+              </div>
+              <div style="text-align: center; margin: 40px 0;">
+                 <p style="color: var(--slate);">Your transaction is being processed. Do not refresh or close this page.</p>
+              </div>
+            </div>
+          `;
+          document.body.appendChild(backdrop);
+        }
+      }
+    });
+  </script>
 </body>
 </html>
