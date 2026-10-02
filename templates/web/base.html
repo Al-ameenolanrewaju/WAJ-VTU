@@ -11,6 +11,7 @@
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/waj-vtu-logo.jpeg') }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script defer src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script defer src="{{ url_for('static', filename='install.js') }}"></script>
 <style>
   :root {
@@ -132,6 +133,7 @@
   .dashboard-panel .tx-item { border-color:transparent; background:var(--bg); }
   .dashboard-panel .tx-item + .tx-item { margin-top:8px; }
   .dashboard-panel .tx-header { margin-bottom:18px; }
+  .dashboard-panel .tx-header .section-kicker { margin-top:4px; line-height:1.4; }
   .dashboard-section-label { display:flex; justify-content:space-between; align-items:end; margin-bottom:16px; }
   .dashboard-section-label p { color:var(--slate); font-size:12px; margin-top:4px; }
   .dashboard-page .service-tile { min-height:116px; padding:18px 10px; }
@@ -581,6 +583,36 @@
   </div>
   <button class="install-button" type="button" data-install-app hidden>Install app</button>
   <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var flashes = Array.from(document.querySelectorAll('.flash'));
+      if (!flashes.length || !window.Swal) return;
+
+      var alerts = flashes.map(function(flash) {
+        var icon = flash.classList.contains('success') ? 'success' :
+          (flash.classList.contains('error') ? 'error' : 'info');
+        return { icon: icon, text: flash.textContent.trim() };
+      });
+
+      flashes.forEach(function(flash) { flash.remove(); });
+      document.querySelectorAll('.flash-wrap').forEach(function(wrap) {
+        if (!wrap.querySelector('.flash')) wrap.remove();
+      });
+
+      (async function() {
+        for (var alert of alerts) {
+          await Swal.fire({
+            icon: alert.icon,
+            title: alert.icon === 'success' ? 'Success' :
+              (alert.icon === 'error' ? 'Something went wrong' : 'Notice'),
+            text: alert.text,
+            confirmButtonText: 'Continue',
+            confirmButtonColor: '#FFC400',
+            color: '#090909'
+          });
+        }
+      })();
+    });
+
     document.addEventListener('submit', function(e) {
       var form = e.target;
       var submitBtn = form.querySelector('button[type="submit"]');
