@@ -4,41 +4,74 @@
 {% block content %}
 <main class="landing-page">
   <nav class="landing-nav">
-    <a class="brand-mark" href="{{ url_for('web.home') }}">WAJ VTU</a>
+    <a class="brand-mark" href="{{ url_for('web.home') }}">WAJ <span>VTU</span></a>
     <div class="landing-nav-actions">
       <a href="{{ url_for('auth.login') }}">Log in</a>
-      <a href="{{ url_for('auth.signup') }}" class="nav-cta">Create account</a>
+      <a href="{{ url_for('auth.signup') }}" class="nav-cta">Create account <span aria-hidden="true">↗</span></a>
     </div>
   </nav>
 
-  <section class="hero">
-    <div class="hero-copy">
-      <div class="eyebrow">Fast, simple, always within reach</div>
-      <h1>Your everyday services, <em>sorted.</em></h1>
-      <p>Buy data, airtime, TV subscriptions, electricity and more from one calm, reliable wallet built for Nigeria.</p>
-      <div class="hero-actions">
-        <a class="primary" href="{{ url_for('auth.signup') }}">Get started</a>
-        <a class="ghost" href="{{ url_for('auth.login') }}">Sign in</a>
+  <section class="home-hero">
+    <div class="home-hero-copy">
+      <div class="home-eyebrow"><span></span> WAJ VTU <i></i> EVERYDAY PAYMENTS</div>
+      <h1>Your essentials,<br><em>all in one place.</em></h1>
+      <p>Buy airtime and data, pay bills, and manage your balance from one reliable wallet.</p>
+      <div class="home-hero-actions">
+        <a class="home-primary" href="{{ url_for('auth.signup') }}">Create your account <span aria-hidden="true">↗</span></a>
+        <a class="home-secondary" href="{{ url_for('auth.login') }}">I already have an account</a>
       </div>
+      <div class="home-hero-note"><span aria-hidden="true">✓</span> Quick to start <i></i> Secure wallet <i></i> Works on WhatsApp</div>
     </div>
-    <div class="hero-panel" aria-label="WAJ VTU service promotion">
-      <img class="promo-image" src="{{ url_for('static', filename='images/waj-vtu-promo.jpeg') }}" alt="WAJ VTU data, airtime, bills and TV services">
+    <figure class="home-hero-art">
+      <img src="{{ url_for('static', filename='images/waj-vtu-promo.jpeg') }}" alt="WAJ VTU WhatsApp service for airtime, data, electricity, TV and bill payments">
+      <figcaption><span class="home-art-dot"></span> One wallet. Everyday services.</figcaption>
+    </figure>
+  </section>
+
+  <section class="home-proof" aria-label="WAJ VTU benefits">
+    <div><span class="home-proof-index">01</span><p><strong>One wallet</strong><small>Pay for what you need</small></p></div>
+    <div><span class="home-proof-index">02</span><p><strong>Clear pricing</strong><small>Know the cost upfront</small></p></div>
+    <div><span class="home-proof-index">03</span><p><strong>Made for you</strong><small>Website and WhatsApp</small></p></div>
+  </section>
+
+  <section class="home-services">
+    <div class="home-section-heading">
+      <div><div class="home-section-kicker">SERVICES &amp; WALLET TOOLS</div><h2>More done. Less hassle.</h2></div>
+      <p>Make payments, manage your wallet, and keep everyday services close.</p>
+    </div>
+    <div class="home-service-grid">
+      <div class="home-service"><span class="home-service-icon home-icon-airtime">📱</span><strong>Airtime</strong><small>Recharge any number</small></div>
+      <div class="home-service"><span class="home-service-icon home-icon-data">▥</span><strong>Mobile data</strong><small>Stay online for less</small></div>
+      <div class="home-service"><span class="home-service-icon home-icon-power">ϟ</span><strong>Electricity</strong><small>Pay your power bill</small></div>
+      <div class="home-service"><span class="home-service-icon home-icon-tv">▣</span><strong>TV subscriptions</strong><small>Renew in a few taps</small></div>
+      <div class="home-service"><span class="home-service-icon home-icon-exam">▤</span><strong>Exam PINs</strong><small>Get ready for exam day</small></div>
+      <div class="home-service"><span class="home-service-icon home-icon-wallet">₦</span><strong>Wallet funding</strong><small>One balance for your services</small></div>
+      <div class="home-service"><span class="home-service-icon home-icon-saved">★</span><strong>Saved services</strong><small>Repeat common payments faster</small></div>
+      <div class="home-service"><span class="home-service-icon home-icon-history">◷</span><strong>Wallet history</strong><small>Find transactions and receipts</small></div>
+      <div class="home-service"><span class="home-service-icon home-icon-chat">↗</span><strong>WhatsApp access</strong><small>Use WAJ VTU in a familiar chat</small></div>
     </div>
   </section>
 
-  <section class="bot-ad home-bot-ad">
-    <div class="bot-ad-copy">
-      <div class="bot-ad-label">WhatsApp bot</div>
-      <h2>Need it on WhatsApp?</h2>
-      <p>Chat with WAJ VTU on WhatsApp for airtime, data, bills and more.</p>
+  <section class="home-whatsapp">
+    <div class="home-whatsapp-mark" aria-hidden="true">↗</div>
+    <div class="home-whatsapp-copy">
+      <div class="home-section-kicker">ALSO AVAILABLE ON WHATSAPP</div>
+      <h2>Your wallet goes where you go.</h2>
+      <p>Start a chat for quick access to airtime, data, and everyday bill payments.</p>
     </div>
-    <a class="bot-ad-cta" href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU" target="_blank" rel="noopener">Chat with WAJ VTU</a>
+    <a href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU" target="_blank" rel="noopener">Chat with WAJ VTU <span aria-hidden="true">↗</span></a>
   </section>
 
-  <section class="feature-strip">
-    <div class="feature"><b>One wallet</b><span>Fund once, then handle your essential services without starting over.</span></div>
-    <div class="feature"><b>Clear pricing</b><span>Choose the exact plan or service you need before you confirm.</span></div>
-    <div class="feature"><b>Made for mobile</b><span>A quick, focused experience that works wherever your day takes you.</span></div>
-  </section>
+  <footer class="home-footer">
+    <a class="brand-mark" href="{{ url_for('web.home') }}">WAJ <span>VTU</span></a>
+    <span>© <time id="copyright-year"></time> WAJ VTU. All rights reserved.</span>
+    <a href="{{ url_for('auth.signup') }}">Get started <span aria-hidden="true">↗</span></a>
+  </footer>
+  <script>
+    const copyrightYear = document.getElementById("copyright-year");
+    const currentYear = new Date().getFullYear();
+    copyrightYear.dateTime = String(currentYear);
+    copyrightYear.textContent = currentYear;
+  </script>
 </main>
 {% endblock %}
