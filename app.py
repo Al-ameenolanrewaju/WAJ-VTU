@@ -1062,6 +1062,7 @@ def whatsapp_webhook():
 
     has_message = False
     sender = None
+    message_type = None
     has_status_event = False
 
     for entry in req_data.get("entry", []):
@@ -1076,6 +1077,7 @@ def whatsapp_webhook():
             has_message = True
             first_message = messages[0]
             sender = first_message.get("from") or first_message.get("sender")
+            message_type = first_message.get("type")
             if sender:
                 break
         if sender:
@@ -1083,6 +1085,13 @@ def whatsapp_webhook():
 
     if has_status_event or not has_message or not sender:
         return jsonify({"status": "ignored"}), 200
+
+    if message_type != "text":
+        threading.Thread(
+            target=send_whatsapp_message,
+            args=(sender, "I can only process text messages. Please type your request."),
+        ).start()
+        return jsonify({"status": "ignored", "reason": "text_only"}), 200
 
     if not ALLOW_DB_MUTATIONS and get_or_create_user(sender) is None:
         return jsonify({"status": "ignored"}), 200
@@ -1105,11 +1114,12 @@ def process_webhook_payload(req_data):
                         continue
 
                     first_message = messages[0]
+                    if first_message.get("type") != "text":
+                        return
                     message_id = first_message.get("id") or message_id
                     sender = first_message.get("from") or first_message.get("sender")
                     text = ""
-                    if first_message.get("type") == "text":
-                        text = first_message.get("text", {}).get("body", "")
+                    text = first_message.get("text", {}).get("body", "")
                     if sender:
                         req_data = {
                             "sender": sender,

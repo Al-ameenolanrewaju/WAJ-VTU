@@ -230,6 +230,60 @@ def test_meta_message_payload_is_accepted(client):
     assert response.status_code == 200
 
 
+@pytest.mark.parametrize("message_type", ["image", "audio", "video", "document", "interactive"])
+def test_webhook_rejects_non_text_messages(client, monkeypatch, message_type):
+    import app as app_module
+
+    sent_messages = []
+
+    class ImmediateThread:
+        def __init__(self, target, args=()):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(app_module.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        app_module,
+        "send_whatsapp_message",
+        lambda recipient, text: sent_messages.append((recipient, text)),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "get_or_create_user",
+        lambda _sender: pytest.fail("non-text messages must not create or look up users"),
+    )
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "2348012345678",
+                                    "id": "wamid.non-text",
+                                    "type": message_type,
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    response = client.post("/webhook", json=payload)
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ignored", "reason": "text_only"}
+    assert sent_messages == [
+        ("2348012345678", "I can only process text messages. Please type your request.")
+    ]
+
+
 def test_webhook_ignores_new_user_when_db_mutations_disabled(client):
     import app as app_module
 
