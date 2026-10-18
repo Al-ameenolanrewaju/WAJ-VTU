@@ -1250,3 +1250,56 @@ def test_chat_message_support_form_popup_link(monkeypatch):
         assert any("/support/form" in msg[2] or "/support/form" in msg[1] for msg in sent_messages)
 
 
+def test_mobile_bottom_navigation_and_more_sheet_structure(client):
+    import app as app_module
+
+    test_key = uuid.uuid4().hex
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"nav_{test_key}",
+            phone="2349038014978",
+            name="Olanrewaju Al-ameen",
+            wallet_balance=Decimal("27.63"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+        user_id = user.id
+
+    with client.session_transaction() as session:
+        session["user_id"] = user_id
+
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    # 1. No hamburger drawer or toggle icon
+    assert "site-mobile-drawer" not in html
+    assert "hamburger-bar" not in html
+
+    # 2. Bottom nav has the 5 items: Dashboard, Services, Fund, Activity, More
+    assert "mobile-bottom-nav" in html
+    assert "Dashboard" in html
+    assert "Services" in html
+    assert "Fund" in html
+    assert "Activity" in html
+    assert "More" in html
+
+    # 3. More bottom sheet exists with user profile header & sections
+    assert "site-more-sheet" in html
+    assert "Olanrewaju Al-ameen" in html
+    assert "2349038014978" in html
+    assert "₦27.63" in html
+    assert "ACCOUNT" in html
+    assert "SERVICES" in html
+    assert "ENGAGEMENT" in html
+    assert "SUPPORT" in html
+    assert "Airtime Recharge" in html
+    assert "Data Bundles" in html
+    assert "Cable TV" in html
+    assert "Electricity" in html
+    assert "Exam PINs" in html
+    assert "Refer &amp; Earn" in html
+    assert "Support Desk" in html
+    assert "Log out" in html
+
+

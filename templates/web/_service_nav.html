@@ -33,10 +33,6 @@
     </div>
 
     <div class="site-nav-right">
-      {% if is_admin %}
-      <a class="nav-admin-badge" href="{{ url_for('admin_dashboard') }}">Admin Panel</a>
-      {% endif %}
-      
       <a class="nav-wallet-pill" href="{{ url_for('web.fund_wallet') }}" title="Fund wallet">
         <span class="pill-label">Balance</span>
         <strong class="pill-amount">₦{{ "{:,.2f}".format(user.wallet_balance if user else 0) }}</strong>
@@ -44,104 +40,347 @@
       </a>
 
       <div class="nav-user-cluster">
-        <span class="nav-avatar" title="{{ user.name or 'Account' }}">{{ (user.name or "U")[0]|upper }}</span>
+        {% if is_admin or session.get('is_admin') or (user and user.is_admin) %}
+        <a class="nav-admin-badge" href="{{ url_for('admin_dashboard') }}" title="Admin Control Panel" style="margin-right: 4px;">🛠️ Admin</a>
+        {% endif %}
+        <span class="nav-avatar" title="{{ user.name or 'Account' }}" onclick="openProfileModal();" style="cursor: pointer;">{{ (user.name or "U")[0]|upper }}</span>
         <a href="{{ url_for('auth.logout') }}" class="nav-logout-link" title="Log out">Logout</a>
       </div>
-
-      <button class="site-menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" onclick="const m = document.getElementById('site-mobile-drawer'); const isOpen = m.classList.toggle('open'); this.setAttribute('aria-expanded', isOpen); document.body.classList.toggle('nav-drawer-open', isOpen);">
-        <span class="hamburger-bar"></span>
-        <span class="hamburger-bar"></span>
-        <span class="hamburger-bar"></span>
-      </button>
     </div>
   </div>
+</nav>
 
-  <!-- Mobile Off-Canvas Drawer -->
-  <div class="site-mobile-drawer" id="site-mobile-drawer">
-    <div class="mobile-drawer-backdrop" onclick="document.getElementById('site-mobile-drawer').classList.remove('open'); document.body.classList.remove('nav-drawer-open');"></div>
-    <div class="mobile-drawer-pane">
-      <div class="mobile-drawer-header">
-        <div class="mobile-user-card">
-          <span class="mobile-user-avatar">{{ (user.name or "U")[0]|upper }}</span>
-          <div class="mobile-user-meta">
-            <strong>{{ user.name or "Customer" }}</strong>
-            <small>{{ user.phone or user.email or "WAJ VTU User" }}</small>
+<!-- Mobile Persistent Bottom Navigation Bar -->
+<nav class="mobile-bottom-nav" id="mobile-bottom-nav" aria-label="Primary mobile navigation">
+  <!-- 1. Dashboard -->
+  <a href="{{ url_for('web.dashboard') }}" class="bnav-item {{ 'active' if request.path == url_for('web.dashboard') else '' }}">
+    <span class="bnav-icon">📊</span>
+    <span class="bnav-text">Dashboard</span>
+  </a>
+
+  <!-- 2. Services -->
+  <a href="{{ url_for('web.buy_data') }}" class="bnav-item {{ 'active' if '/buy' in request.path else '' }}">
+    <span class="bnav-icon">⚡</span>
+    <span class="bnav-text">Services</span>
+  </a>
+
+  <!-- 3. Fund (Center Emphasized Action Button) -->
+  <a href="{{ url_for('web.fund_wallet') }}" class="bnav-item bnav-fund {{ 'active' if request.path == url_for('web.fund_wallet') else '' }}" aria-label="Fund Wallet">
+    <span class="bnav-fund-circle">＋</span>
+    <span class="bnav-text">Fund</span>
+  </a>
+
+  <!-- 4. Activity -->
+  <a href="{{ url_for('web.transactions_page') }}" class="bnav-item {{ 'active' if request.path == url_for('web.transactions_page') else '' }}">
+    <span class="bnav-icon">💳</span>
+    <span class="bnav-text">Activity</span>
+  </a>
+
+  <!-- 5. More -->
+  <button type="button" class="bnav-item bnav-more" id="bnav-more-btn" onclick="toggleMoreSheet();" aria-haspopup="dialog" aria-expanded="false" aria-label="Open More Menu">
+    <span class="bnav-icon">⋯</span>
+    <span class="bnav-text">More</span>
+  </button>
+</nav>
+
+<!-- Mobile Bottom Sheet ("More" Modal Menu) -->
+<div class="mobile-more-sheet-wrapper" id="site-more-sheet" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="more-sheet-backdrop" onclick="closeMoreSheet()"></div>
+  <div class="more-sheet-panel">
+    <!-- Top Drag Handle -->
+    <div class="more-sheet-handle-wrap" onclick="closeMoreSheet()">
+      <div class="more-sheet-handle"></div>
+    </div>
+
+    <!-- User Profile Header with Close Button -->
+    <div class="more-sheet-header">
+      <div class="more-user-info">
+        <span class="more-user-avatar">{{ (user.name or "U")[0]|upper }}</span>
+        <div class="more-user-text">
+          <strong class="more-user-name">{{ user.name or "Customer" }}</strong>
+          <span class="more-user-phone">{{ user.phone or user.whatsapp_id or user.email or "WAJ VTU Customer" }}</span>
+        </div>
+      </div>
+      <button type="button" class="more-sheet-close" aria-label="Close menu" onclick="closeMoreSheet()">&times;</button>
+    </div>
+
+    <!-- Wallet Balance Strip with Fund Shortcut -->
+    <div class="more-wallet-card">
+      <div class="more-wallet-left">
+        <span class="more-wallet-label">Wallet Balance</span>
+        <div class="more-wallet-balance">₦{{ "{:,.2f}".format(user.wallet_balance if user else 0) }}</div>
+      </div>
+      <a href="{{ url_for('web.fund_wallet') }}" class="more-fund-btn">＋ Fund</a>
+    </div>
+
+    <!-- Scrollable Organized Sections -->
+    <div class="more-sheet-scrollable">
+      
+      <!-- ACCOUNT -->
+      <div class="more-nav-section">
+        <div class="more-section-title">ACCOUNT</div>
+        <a href="#profile" class="more-nav-item" onclick="openProfileModal(); return false;">
+          <span class="more-item-icon">👤</span>
+          <div class="more-item-flex">
+            <span class="more-item-label">Profile</span>
+            <span class="more-item-sub">View phone, email &amp; referral code</span>
           </div>
-        </div>
-        <button type="button" class="mobile-drawer-close" aria-label="Close menu" onclick="document.getElementById('site-mobile-drawer').classList.remove('open'); document.body.classList.remove('nav-drawer-open');">&times;</button>
-      </div>
-
-      <div class="mobile-wallet-strip">
-        <div>
-          <span class="mws-label">Wallet Balance</span>
-          <div class="mws-amount">₦{{ "{:,.2f}".format(user.wallet_balance if user else 0) }}</div>
-        </div>
-        <a href="{{ url_for('web.fund_wallet') }}" class="mws-btn">＋ Fund</a>
-      </div>
-
-      <div class="mobile-nav-group">
-        <div class="mobile-nav-title">MAIN</div>
-        <a href="{{ url_for('web.dashboard') }}" class="mobile-link {{ 'active' if request.path == url_for('web.dashboard') else '' }}">
-          <span>📊</span> Dashboard
+          <span class="more-item-chevron">›</span>
         </a>
-        <a href="{{ url_for('web.transactions_page') }}" class="mobile-link {{ 'active' if request.path == url_for('web.transactions_page') else '' }}">
-          <span>💳</span> Transactions
-        </a>
-        <a href="{{ url_for('web.referrals_page') }}" class="mobile-link {{ 'active' if request.path == url_for('web.referrals_page') else '' }}">
-          <span>🎁</span> Refer &amp; Earn
-        </a>
-        <a href="{{ url_for('web.support_page') }}" class="mobile-link {{ 'active' if request.path == url_for('web.support_page') else '' }}">
-          <span>🎧</span> Support Desk
+        <a href="#settings" class="more-nav-item" onclick="openSettingsModal(); return false;">
+          <span class="more-item-icon">⚙️</span>
+          <div class="more-item-flex">
+            <span class="more-item-label">Settings</span>
+            <span class="more-item-sub">Alerts, password &amp; security</span>
+          </div>
+          <span class="more-item-chevron">›</span>
         </a>
       </div>
 
-      <div class="mobile-nav-group">
-        <div class="mobile-nav-title">SERVICES</div>
-        <a href="{{ url_for('web.airtime_page') }}" class="mobile-link"><span>📱</span> Airtime Recharge</a>
-        <a href="{{ url_for('web.buy_data') }}" class="mobile-link"><span>📶</span> Data Bundles</a>
-        <a href="{{ url_for('web.cable_page') }}" class="mobile-link"><span>📺</span> Cable TV</a>
-        <a href="{{ url_for('web.electricity_page') }}" class="mobile-link"><span>⚡</span> Electricity</a>
-        <a href="{{ url_for('web.education_page') }}" class="mobile-link"><span>🎓</span> Exam PINs</a>
+      <!-- SERVICES -->
+      <div class="more-nav-section">
+        <div class="more-section-title">SERVICES</div>
+        <a href="{{ url_for('web.airtime_page') }}" class="more-nav-item">
+          <span class="more-item-icon">📱</span>
+          <span class="more-item-label">Airtime Recharge</span>
+          <span class="more-item-badge">Instant</span>
+        </a>
+        <a href="{{ url_for('web.buy_data') }}" class="more-nav-item">
+          <span class="more-item-icon">📊</span>
+          <span class="more-item-label">Data Bundles</span>
+          <span class="more-item-badge best">Discounted</span>
+        </a>
+        <a href="{{ url_for('web.cable_page') }}" class="more-nav-item">
+          <span class="more-item-icon">📺</span>
+          <span class="more-item-label">Cable TV</span>
+          <span class="more-item-chevron">›</span>
+        </a>
+        <a href="{{ url_for('web.electricity_page') }}" class="more-nav-item">
+          <span class="more-item-icon">⚡</span>
+          <span class="more-item-label">Electricity</span>
+          <span class="more-item-chevron">›</span>
+        </a>
+        <a href="{{ url_for('web.education_page') }}" class="more-nav-item">
+          <span class="more-item-icon">🎓</span>
+          <span class="more-item-label">Exam PINs</span>
+          <span class="more-item-chevron">›</span>
+        </a>
       </div>
 
-      {% if is_admin %}
-      <div class="mobile-nav-group">
-        <div class="mobile-nav-title">ADMINISTRATION</div>
-        <a href="{{ url_for('admin_dashboard') }}" class="mobile-link admin-highlight">
-          <span>⚙️</span> Admin Control Panel
+      <!-- ENGAGEMENT -->
+      <div class="more-nav-section">
+        <div class="more-section-title">ENGAGEMENT</div>
+        <a href="{{ url_for('web.referrals_page') }}" class="more-nav-item">
+          <span class="more-item-icon">🎁</span>
+          <div class="more-item-flex">
+            <span class="more-item-label">Refer &amp; Earn</span>
+            <span class="more-item-sub">Earn passive cash on invites</span>
+          </div>
+          <span class="more-item-chevron">›</span>
+        </a>
+      </div>
+
+      <!-- SUPPORT -->
+      <div class="more-nav-section">
+        <div class="more-section-title">SUPPORT</div>
+        <a href="{{ url_for('web.support_page') }}" class="more-nav-item">
+          <span class="more-item-icon">🎧</span>
+          <div class="more-item-flex">
+            <span class="more-item-label">Support Desk</span>
+            <span class="more-item-sub">WhatsApp chatbot &amp; dispute form</span>
+          </div>
+          <span class="more-item-chevron">›</span>
+        </a>
+      </div>
+
+      <!-- ADMINISTRATION (Only for Authorized Admins) -->
+      {% if is_admin or session.get('is_admin') or (user and user.is_admin) %}
+      <div class="more-nav-section more-admin-section">
+        <div class="more-section-title">ADMINISTRATION</div>
+        <a href="{{ url_for('admin_dashboard') }}" class="more-nav-item">
+          <span class="more-item-icon">🛠️</span>
+          <div class="more-item-flex">
+            <span class="more-item-label">Admin Control Panel</span>
+            <span class="more-item-sub">Manage users, transactions &amp; margins</span>
+          </div>
+          <span class="more-item-chevron">›</span>
         </a>
       </div>
       {% endif %}
 
-      <div class="mobile-drawer-footer">
-        <a href="{{ url_for('auth.logout') }}" class="mobile-logout-btn">
+      <!-- ACCOUNT ACTION -->
+      <div class="more-nav-section more-logout-section">
+        <a href="{{ url_for('auth.logout') }}" class="more-logout-btn">
           <span>🚪</span> Log out
         </a>
       </div>
     </div>
   </div>
-</nav>
+</div>
 
-<!-- Mobile Bottom Navigation Bar -->
-<nav class="mobile-bottom-nav">
-  <a href="{{ url_for('web.dashboard') }}" class="bnav-item {{ 'active' if request.path == url_for('web.dashboard') else '' }}">
-    <span class="bnav-icon">📊</span>
-    <span class="bnav-text">Dashboard</span>
-  </a>
-  <a href="{{ url_for('web.buy_data') }}" class="bnav-item {{ 'active' if '/buy' in request.path else '' }}">
-    <span class="bnav-icon">⚡</span>
-    <span class="bnav-text">Services</span>
-  </a>
-  <a href="{{ url_for('web.fund_wallet') }}" class="bnav-item bnav-fund {{ 'active' if request.path == url_for('web.fund_wallet') else '' }}">
-    <span class="bnav-fund-circle">＋</span>
-    <span class="bnav-text">Fund</span>
-  </a>
-  <a href="{{ url_for('web.transactions_page') }}" class="bnav-item {{ 'active' if request.path == url_for('web.transactions_page') else '' }}">
-    <span class="bnav-icon">💳</span>
-    <span class="bnav-text">Activity</span>
-  </a>
-  <a href="{{ url_for('web.referrals_page') }}" class="bnav-item {{ 'active' if request.path == url_for('web.referrals_page') else '' }}">
-    <span class="bnav-icon">🎁</span>
-    <span class="bnav-text">Referrals</span>
-  </a>
-</nav>
+<!-- Profile Lightbox Modal -->
+<div class="user-modal-backdrop" id="user-profile-modal" style="display: none;" role="dialog" aria-modal="true">
+  <div class="user-modal-box">
+    <div class="user-modal-header">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 20px;">👤</span>
+        <h3 style="font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; color: #ffffff; margin: 0;">Account Profile</h3>
+      </div>
+      <button type="button" class="user-modal-close" onclick="closeProfileModal()">&times;</button>
+    </div>
+    <div class="user-modal-body">
+      <div class="profile-avatar-row">
+        <div class="profile-avatar-large">{{ (user.name or "U")[0]|upper }}</div>
+        <div>
+          <h4 style="font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 700; color: #ffffff; margin: 0 0 2px;">{{ user.name or "Customer" }}</h4>
+          <span style="font-size: 12px; color: #10b981; font-weight: 600;">● Verified Customer Account</span>
+        </div>
+      </div>
+      <div class="profile-info-grid">
+        <div class="profile-info-item">
+          <small>Phone Number</small>
+          <strong>{{ user.phone or "Not set" }}</strong>
+        </div>
+        <div class="profile-info-item">
+          <small>Email Address</small>
+          <strong>{{ user.email or "Not set" }}</strong>
+        </div>
+        <div class="profile-info-item">
+          <small>WhatsApp ID</small>
+          <strong>{{ user.whatsapp_id or user.phone or "Linked" }}</strong>
+        </div>
+        <div class="profile-info-item">
+          <small>Referral Code</small>
+          <strong style="color: #FFDD00;">{{ user.referral_code or ("WAJ" ~ user.id if user else "WAJ01") }}</strong>
+        </div>
+      </div>
+    </div>
+    <div class="user-modal-footer">
+      <a href="{{ url_for('web.fund_wallet') }}" class="user-modal-btn-primary">＋ Fund Wallet</a>
+      <button type="button" class="user-modal-btn-secondary" onclick="closeProfileModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Lightbox Modal -->
+<div class="user-modal-backdrop" id="user-settings-modal" style="display: none;" role="dialog" aria-modal="true">
+  <div class="user-modal-box">
+    <div class="user-modal-header">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 20px;">⚙️</span>
+        <h3 style="font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; color: #ffffff; margin: 0;">Account Settings</h3>
+      </div>
+      <button type="button" class="user-modal-close" onclick="closeSettingsModal()">&times;</button>
+    </div>
+    <div class="user-modal-body">
+      <div class="settings-list">
+        <div class="settings-item">
+          <div>
+            <strong>WhatsApp Notifications</strong>
+            <small>Receive transaction alerts and receipts on WhatsApp</small>
+          </div>
+          <span class="settings-status-badge">Enabled</span>
+        </div>
+        <div class="settings-item">
+          <div>
+            <strong>Wallet Security</strong>
+            <small>Session protection &amp; anti-fraud lock</small>
+          </div>
+          <span class="settings-status-badge">Protected</span>
+        </div>
+        <div class="settings-item">
+          <div>
+            <strong>Password &amp; Access</strong>
+            <small>Update your account access password</small>
+          </div>
+          <a href="{{ url_for('auth.forgot_password') }}" class="settings-link-action">Reset ↗</a>
+        </div>
+      </div>
+    </div>
+    <div class="user-modal-footer">
+      <button type="button" class="user-modal-btn-secondary" style="width: 100%;" onclick="closeSettingsModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function toggleMoreSheet() {
+    var sheet = document.getElementById('site-more-sheet');
+    if (!sheet) return;
+    if (sheet.classList.contains('open')) {
+      closeMoreSheet();
+    } else {
+      openMoreSheet();
+    }
+  }
+
+  function openMoreSheet() {
+    var sheet = document.getElementById('site-more-sheet');
+    var moreBtn = document.getElementById('bnav-more-btn');
+    if (sheet) {
+      sheet.classList.add('open');
+      sheet.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+    if (moreBtn) {
+      moreBtn.classList.add('active');
+      moreBtn.setAttribute('aria-expanded', 'true');
+    }
+  }
+
+  function closeMoreSheet() {
+    var sheet = document.getElementById('site-more-sheet');
+    var moreBtn = document.getElementById('bnav-more-btn');
+    if (sheet) {
+      sheet.classList.remove('open');
+      sheet.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+    if (moreBtn) {
+      moreBtn.classList.remove('active');
+      moreBtn.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  function openProfileModal() {
+    closeMoreSheet();
+    var m = document.getElementById('user-profile-modal');
+    if (m) {
+      m.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    }
+  }
+
+  function closeProfileModal() {
+    var m = document.getElementById('user-profile-modal');
+    if (m) {
+      m.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+  }
+
+  function openSettingsModal() {
+    closeMoreSheet();
+    var m = document.getElementById('user-settings-modal');
+    if (m) {
+      m.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    }
+  }
+
+  function closeSettingsModal() {
+    var m = document.getElementById('user-settings-modal');
+    if (m) {
+      m.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      closeMoreSheet();
+      closeProfileModal();
+      closeSettingsModal();
+    }
+  });
+</script>
