@@ -1,6 +1,5 @@
 {
   "version": "6.3",
-  "data_api_version": "3.0",
   "routing_model": {
     "DISPUTE_FORM": []
   },
