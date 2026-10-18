@@ -19,7 +19,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from models import (
     db, User, Transaction, InboundMessage, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog,
-    Referral, ReferralReward, MarketingContent, MarketingCampaign, MarketingMessage, MarketingSetting
+    Referral, ReferralReward, MarketingContent, MarketingCampaign, MarketingMessage, MarketingSetting,
+    SupportTicket
 )
 from wallet_service import generate_payment_link, get_payment_fee_percentage
 
@@ -2952,31 +2953,270 @@ def admin_support():
     if auth_error:
         return auth_error
 
-    failures = Transaction.query.filter(Transaction.status.in_(['FAILED', 'PENDING'])).order_by(Transaction.id.desc()).limit(15).all()
-    support_rows = ""
-    for tx in failures:
-        support_rows += f"""
-        <tr>
-            <td>{escape(tx.reference)}</td>
-            <td>{escape(tx.user.phone if tx.user else '')}</td>
-            <td>{escape(tx.status)}</td>
-            <td>{escape(tx.description or 'Awaiting review')}</td>
-        </tr>
+    csrf_token = get_csrf_token()
+    status_filter = request.args.get("status", "ALL").strip().upper()
+    search_query = request.args.get("q", "").strip()
+    flash_msg = request.args.get("msg", "").strip()
+
+    # Query metrics
+    total_count = SupportTicket.query.count()
+    open_count = SupportTicket.query.filter_by(status="OPEN").count()
+    in_progress_count = SupportTicket.query.filter_by(status="IN_PROGRESS").count()
+    resolved_count = SupportTicket.query.filter_by(status="RESOLVED").count()
+
+    query = SupportTicket.query
+    if status_filter in ["OPEN", "IN_PROGRESS", "RESOLVED"]:
+        query = query.filter_by(status=status_filter)
+    if search_query:
+        search_pattern = f"%{search_query}%"
+        query = query.filter(
+            or_(
+                SupportTicket.ticket_code.ilike(search_pattern),
+                SupportTicket.customer_phone.ilike(search_pattern),
+                SupportTicket.reference.ilike(search_pattern),
+                SupportTicket.recipient.ilike(search_pattern),
+                SupportTicket.description.ilike(search_pattern),
+                SupportTicket.category.ilike(search_pattern),
+            )
+        )
+
+    tickets = query.order_by(SupportTicket.created_at.desc()).limit(50).all()
+
+    ticket_cards = ""
+    for tkt in tickets:
+        status_bg = "#fef3c7"
+        status_color = "#b45309"
+        status_border = "#fde68a"
+        if tkt.status == "IN_PROGRESS":
+            status_bg = "#e0f2fe"
+            status_color = "#0369a1"
+            status_border = "#bae6fd"
+        elif tkt.status == "RESOLVED":
+            status_bg = "#dcfce7"
+            status_color = "#15803d"
+            status_border = "#bbf7d0"
+
+        # Customer account info
+        user_info = "Guest / Unlinked"
+        if tkt.user:
+            user_info = f"{escape(tkt.user.name or 'User')} (Bal: ₦{tkt.user.wallet_balance:,.2f})"
+
+        # Clean history notes rendering
+        notes_html = ""
+        if tkt.admin_notes:
+            notes_lines = tkt.admin_notes.strip().split("\n\n")
+            rendered_notes = "".join(
+                f'<div style="background:#f8fafc; border-left:3px solid #0284c7; padding:6px 10px; margin-top:6px; border-radius:4px; font-size:12px; color:#334155;">{escape(note)}</div>'
+                for note in notes_lines if note.strip()
+            )
+            notes_html = f"""
+            <div style="margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:10px;">
+                <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Communication & Resolution History:</div>
+                {rendered_notes}
+            </div>
+            """
+
+        action_forms = ""
+        if tkt.status != "RESOLVED":
+            action_forms = f"""
+            <div style="margin-top:14px; background:#fafafa; border:1px solid #e5e7eb; border-radius:8px; padding:12px;">
+                <form method="POST" action="/admin/support/reply/{escape(tkt.ticket_code)}" style="display:flex; flex-direction:column; gap:8px;">
+                    <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+                    <label style="font-size:12px; font-weight:700; color:#1f2937;">Send Official WhatsApp Response:</label>
+                    <textarea name="reply_text" rows="2" placeholder="Type reply here... It lands directly in customer's WhatsApp chat" required style="width:100%; border:1px solid #d1d5db; border-radius:6px; padding:8px 10px; font-size:13px; font-family:inherit; resize:vertical;"></textarea>
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                        <button type="submit" style="background:#16a34a; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer;">
+                            💬 Send to WhatsApp ↗
+                        </button>
+                    </div>
+                </form>
+                <div style="margin-top:10px; padding-top:8px; border-top:1px solid #f3f4f6; display:flex; justify-content:flex-end;">
+                    <form method="POST" action="/admin/support/resolve/{escape(tkt.ticket_code)}">
+                        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+                        <button type="submit" onclick="return confirm('Resolve ticket and resume automated AI for this user?');" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; padding:6px 12px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer;">
+                            ✓ Mark Resolved & Resume AI
+                        </button>
+                    </form>
+                </div>
+            </div>
+            """
+        else:
+            action_forms = f"""
+            <div style="margin-top:12px; display:flex; align-items:center; justify-content:space-between; background:#f0fdf4; border:1px solid #bbf7d0; padding:8px 12px; border-radius:6px; font-size:12px; color:#166534;">
+                <span><b>✓ Case Closed:</b> Resolved on {escape(format_admin_datetime(tkt.resolved_at))}</span>
+                <span style="font-weight:700;">AI Bot Active</span>
+            </div>
+            """
+
+        ticket_cards += f"""
+        <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+                <div>
+                    <span style="font-family:'Space Grotesk',monospace; font-weight:700; font-size:15px; color:#0f172a;">{escape(tkt.ticket_code)}</span>
+                    <span style="display:inline-block; margin-left:8px; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700; background:{status_bg}; color:{status_color}; border:1px solid {status_border};">{escape(tkt.status)}</span>
+                    <div style="font-size:12px; color:#64748b; margin-top:2px;">Submitted: {escape(format_admin_datetime(tkt.created_at))}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:13px; font-weight:700; color:#0f172a;">📱 {escape(tkt.customer_phone)}</div>
+                    <div style="font-size:11px; color:#64748b;">{user_info}</div>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; font-size:12px; margin-bottom:12px;">
+                <div><b>Service:</b> <span style="text-transform:uppercase;">{escape(tkt.service_type or 'VTU')}</span></div>
+                <div><b>Category:</b> {escape(tkt.category or 'Dispute')}</div>
+                <div><b>Reference:</b> <code>{escape(tkt.reference or 'None')}</code></div>
+                <div><b>Target / Recipient:</b> <code>{escape(tkt.recipient or 'None')}</code></div>
+            </div>
+
+            <div style="font-size:13px; color:#1e293b; line-height:1.5; background:#fff; border:1px solid #e5e7eb; border-radius:6px; padding:10px 12px;">
+                <b>Customer Complaint:</b><br>
+                {escape(tkt.description)}
+            </div>
+
+            {notes_html}
+            {action_forms}
+        </div>
+        """
+
+    flash_banner = ""
+    if flash_msg:
+        flash_banner = f"""
+        <div style="background:#dcfce7; border:1px solid #86efac; color:#15803d; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px;">
+            <span>✓</span> {escape(flash_msg)}
+        </div>
         """
 
     content = f"""
-    <div class="section-grid">
-        <div class="card"><h3>Failed Tickets</h3><p>{Transaction.query.filter_by(status='FAILED').count()}</p></div>
-        <div class="card"><h3>Pending Review</h3><p>{Transaction.query.filter_by(status='PENDING').count()}</p></div>
-        <div class="card"><h3>Resolved</h3><p>{Transaction.query.filter_by(status='SUCCESS').count()}</p></div>
+    {flash_banner}
+    <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 18px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 26px;">🛡️</span>
+            <div>
+                <div style="font-weight: 700; color: #f8fafc; font-size: 14px;">Official WhatsApp Support Desk Relay</div>
+                <div style="color: #94a3b8; font-size: 12px;">Replies sent here are delivered straight to the user's WhatsApp from the official business line. Your personal phone number is never exposed.</div>
+            </div>
+        </div>
+        <div>
+            <span style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;">● Cloud API Active</span>
+        </div>
     </div>
-    <h2 style="margin-bottom:15px;">🎟️ Support Queue</h2>
-    <table>
-        <thead><tr><th>Reference</th><th>Customer</th><th>Status</th><th>Issue</th></tr></thead>
-        <tbody>{support_rows if support_rows else '<tr><td colspan="4" style="text-align:center;">No support issues logged</td></tr>'}</tbody>
-    </table>
+
+    <div class="section-grid" style="margin-bottom:20px;">
+        <div class="card"><h3>Total Tickets</h3><p>{total_count}</p></div>
+        <div class="card" style="border-top:3px solid #f59e0b;"><h3>Open / Action Required</h3><p style="color:#d97706;">{open_count}</p></div>
+        <div class="card" style="border-top:3px solid #0284c7;"><h3>In Progress</h3><p style="color:#0284c7;">{in_progress_count}</p></div>
+        <div class="card" style="border-top:3px solid #10b981;"><h3>Resolved</h3><p style="color:#10b981;">{resolved_count}</p></div>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <a href="/admin/support?status=ALL" style="padding:6px 12px; border-radius:6px; font-size:12px; font-weight:700; text-decoration:none; background:{'#0f172a' if status_filter == 'ALL' else '#f1f5f9'}; color:{'#fff' if status_filter == 'ALL' else '#475569'};">All ({total_count})</a>
+            <a href="/admin/support?status=OPEN" style="padding:6px 12px; border-radius:6px; font-size:12px; font-weight:700; text-decoration:none; background:{'#0f172a' if status_filter == 'OPEN' else '#fef3c7'}; color:{'#fff' if status_filter == 'OPEN' else '#b45309'};">Open ({open_count})</a>
+            <a href="/admin/support?status=IN_PROGRESS" style="padding:6px 12px; border-radius:6px; font-size:12px; font-weight:700; text-decoration:none; background:{'#0f172a' if status_filter == 'IN_PROGRESS' else '#e0f2fe'}; color:{'#fff' if status_filter == 'IN_PROGRESS' else '#0369a1'};">In Progress ({in_progress_count})</a>
+            <a href="/admin/support?status=RESOLVED" style="padding:6px 12px; border-radius:6px; font-size:12px; font-weight:700; text-decoration:none; background:{'#0f172a' if status_filter == 'RESOLVED' else '#dcfce7'}; color:{'#fff' if status_filter == 'RESOLVED' else '#15803d'};">Resolved ({resolved_count})</a>
+        </div>
+        <form method="GET" action="/admin/support" style="display:flex; gap:8px;">
+            <input type="hidden" name="status" value="{escape(status_filter)}">
+            <input type="text" name="q" placeholder="Search phone, ticket, ref..." value="{escape(search_query)}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px; width:200px;">
+            <button type="submit" style="padding:6px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">Search</button>
+        </form>
+    </div>
+
+    <div>
+        {ticket_cards if ticket_cards else '<div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:32px; text-align:center; color:#64748b;">No support tickets found for this filter.</div>'}
+    </div>
     """
+
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="support")
+
+
+@app.route("/admin/support/reply/<ticket_code>", methods=["POST"])
+def admin_support_reply(ticket_code):
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    validate_csrf_token()
+
+    ticket = SupportTicket.query.filter_by(ticket_code=ticket_code).first()
+    if not ticket:
+        abort(404)
+
+    reply_text = request.form.get("reply_text", "").strip()
+    if not reply_text:
+        return redirect(url_for("admin_support", msg="Reply text cannot be empty"))
+
+    # Deliver directly to customer's WhatsApp chat
+    wa_message = (
+        f"🎫 *WAJ VTU Support Desk*\n"
+        f"Ticket: *{ticket.ticket_code}*\n"
+        f"Ref: {ticket.reference or 'N/A'}\n\n"
+        f"{reply_text}\n\n"
+        f"🛡️ *Security Reminder:* WAJ VTU staff will NEVER ask for your Transaction PIN, password, or bank OTP."
+    )
+    send_whatsapp_message(ticket.customer_phone, wa_message)
+
+    # Record in ticket notes & set status to IN_PROGRESS
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    admin_name = session.get("username", "Admin")
+    reply_entry = f"[{now_str} {admin_name}]: {reply_text}"
+    ticket.admin_notes = (ticket.admin_notes + "\n\n" + reply_entry) if ticket.admin_notes else reply_entry
+    ticket.status = "IN_PROGRESS"
+    ticket.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    record_admin_audit(admin_name, "support_reply", True, f"Sent WhatsApp reply to {ticket.customer_phone} for {ticket.ticket_code}")
+
+    return redirect(url_for("admin_support", msg=f"Reply sent to {ticket.customer_phone} via WhatsApp successfully"))
+
+
+@app.route("/admin/support/resolve/<ticket_code>", methods=["POST"])
+def admin_support_resolve(ticket_code):
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    validate_csrf_token()
+
+    ticket = SupportTicket.query.filter_by(ticket_code=ticket_code).first()
+    if not ticket:
+        abort(404)
+
+    ticket.status = "RESOLVED"
+    ticket.resolved_at = datetime.now(timezone.utc)
+    ticket.updated_at = datetime.now(timezone.utc)
+
+    # Un-escalate customer user record so AI assistant resumes
+    clean_phone = ticket.customer_phone.replace("+", "").strip()
+    user = ticket.user
+    if not user:
+        user = User.query.filter((User.phone == clean_phone) | (User.whatsapp_id == clean_phone)).first()
+        if not user and len(clean_phone) == 11 and clean_phone.startswith("0"):
+            intl = "234" + clean_phone[1:]
+            user = User.query.filter((User.phone == intl) | (User.whatsapp_id == intl)).first()
+    if user:
+        user.is_escalated = False
+
+    # Notify customer on WhatsApp
+    wa_message = (
+        f"✅ *WAJ VTU Support — Issue Resolved*\n"
+        f"Ticket: *{ticket.ticket_code}*\n\n"
+        f"Your dispute has been marked as resolved by our administration team.\n"
+        f"Your automated WhatsApp assistant is now fully active! If you need any further assistance, simply send us a message here.\n\n"
+        f"Thank you for choosing WAJ VTU!"
+    )
+    send_whatsapp_message(ticket.customer_phone, wa_message)
+
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    admin_name = session.get("username", "Admin")
+    resolve_entry = f"[{now_str} {admin_name}]: Ticket marked as RESOLVED and AI un-escalated."
+    ticket.admin_notes = (ticket.admin_notes + "\n\n" + resolve_entry) if ticket.admin_notes else resolve_entry
+    db.session.commit()
+
+    record_admin_audit(admin_name, "support_resolve", True, f"Resolved ticket {ticket.ticket_code} for {ticket.customer_phone}")
+
+    return redirect(url_for("admin_support", msg=f"Ticket {ticket.ticket_code} marked as resolved and customer notified on WhatsApp"))
 
 
 @app.route("/admin/security")

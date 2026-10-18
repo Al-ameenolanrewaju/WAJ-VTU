@@ -414,12 +414,12 @@
           <div style="color: var(--text-muted);">Contact WhatsApp: <strong style="color: var(--yellow);">{{ contact_phone }}</strong></div>
         </div>
 
-        <a href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU%2C%20I%20have%20submitted%20ticket%20{{ ticket_code }}%20for%20ref%20{{ reference }}" class="return-whatsapp-btn" onclick="tryCloseWindow();">
-          💬 Return to WhatsApp Chat
-        </a>
-        <a href="{{ url_for('web.support_page', ref=reference) }}" class="track-btn">
-          Track Live Status on Resolution Hub ↗
-        </a>
+        <button type="button" class="return-whatsapp-btn" onclick="closeInAppSheet();">
+          ✓ Done / Return to WhatsApp Chat
+        </button>
+        <p style="color: var(--text-muted); font-size: 11px; margin-top: 10px; line-height: 1.4;">
+          Your dispute has been logged. You can close this form and continue directly in your WhatsApp conversation.
+        </p>
       </div>
     {% else %}
       <!-- INTERACTIVE SUPPORT FORM VIEW -->
@@ -548,7 +548,7 @@
         </form>
 
         <p class="security-note">
-          🔒 Encrypted WhatsApp In-App Form. Once submitted, an instant supervisor alert is dispatched to our resolution team.
+          🔒 <b>100% Encrypted &amp; Official:</b> WAJ VTU staff will <u>never</u> ask for your Transaction PIN, password, or bank OTP. Never disclose secret credentials.
         </p>
       </div>
 
@@ -571,20 +571,29 @@
           <div style="color: var(--text-muted);">Status: <strong style="color: #10b981;">Escalated to Human Supervisor</strong></div>
         </div>
 
-        <a href="https://wa.me/2348102314725" id="ajax-whatsapp-return" class="return-whatsapp-btn" onclick="tryCloseWindow();">
-          💬 Return to WhatsApp Chat
-        </a>
+        <button type="button" id="ajax-whatsapp-return" class="return-whatsapp-btn" onclick="closeInAppSheet();">
+          ✓ Done / Return to WhatsApp Chat
+        </button>
+        <p style="color: var(--text-muted); font-size: 11px; margin-top: 10px; line-height: 1.4;">
+          Your dispute has been logged. You can close this form and continue directly in your WhatsApp conversation.
+        </p>
       </div>
     {% endif %}
   </div>
 
   <script>
-    function tryCloseWindow() {
+    function closeInAppSheet() {
       try {
         if (window.opener) {
           window.close();
         }
       } catch (e) {}
+      try {
+        window.close();
+      } catch (e) {}
+      if (window.history && window.history.length > 1) {
+        window.history.back();
+      }
     }
 
     // Handle AJAX form submission for silky-smooth in-app experience
@@ -615,7 +624,6 @@
             document.getElementById('form-container').style.display = 'none';
             document.getElementById('ajax-ticket-code').textContent = data.ticket_code;
             document.getElementById('ajax-ref-text').textContent = data.reference || 'N/A';
-            document.getElementById('ajax-whatsapp-return').href = `https://wa.me/2348102314725?text=Hello%20WAJ%20VTU%2C%20I%20have%20submitted%20ticket%20${encodeURIComponent(data.ticket_code)}%20for%20ref%20${encodeURIComponent(data.reference || '')}`;
             document.getElementById('ajax-success').style.display = 'block';
             window.scrollTo({ top: 0, behavior: 'smooth' });
           } else {

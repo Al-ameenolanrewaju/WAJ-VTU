@@ -1211,16 +1211,16 @@ def test_support_form_popup_page_renders_and_submits(monkeypatch):
     assert any("08012345678" in alert[0] for alert in sent_alerts)
 
 
-def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch):
+def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch, client):
     import app as app_module
     import chat_agent
 
     sent_messages = []
-    sent_urls = []
+    sent_interactive_urls = []
     monkeypatch.setattr(
         app_module,
         "send_whatsapp_interactive_url",
-        lambda recipient, body_text, button_title, url, header_text: sent_urls.append((recipient, body_text, url)),
+        lambda recipient, body_text, button_title, url, header_text: sent_interactive_urls.append((recipient, body_text, button_title, url, header_text)),
     )
     monkeypatch.setattr(
         app_module,
@@ -1238,7 +1238,7 @@ def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch):
         app_module.db.session.add(user)
         app_module.db.session.commit()
 
-        # Step 1: User asks to fill support form
+        # Step 1: User asks to fill support form in WhatsApp
         chat_agent.handle_chat_message(
             app_module.app,
             app_module.db,
@@ -1248,38 +1248,44 @@ def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch):
             user.phone,
         )
 
-        # Form questionnaire should open directly inside WhatsApp chat
-        assert len(sent_messages) >= 1
-        assert any("Official Support & Dispute Form" in msg[1] for msg in sent_messages)
-        # MUST NOT redirect to website URL
-        assert len(sent_urls) == 0
-        assert not any("/support/form" in msg[1] for msg in sent_messages)
-        assert (user.state_data or {}).get("awaiting_support_form") is True
+        # Interactive CTA button to open form inside WhatsApp must be sent
+        assert len(sent_interactive_urls) == 1
+        recipient, body_text, button_title, url, header_text = sent_interactive_urls[0]
+        assert "Open Support Form" in button_title or "Fill Support Form" in button_title
+        assert "/support/form" in url
+        assert user.phone in url
 
-        # Step 2: User fills and submits form directly inside WhatsApp
+        # Step 2: The In-App Form loads cleanly inside WhatsApp (no website redirects or links to resolution hub)
+        res_form = client.get(url)
+        assert res_form.status_code == 200
+        html_form = res_form.get_data(as_text=True)
+        assert "Official Support &amp; Dispute Form" in html_form or "Official Support & Dispute Form" in html_form
+        assert 'id="support-form"' in html_form
+        assert "Track Live Status on Resolution Hub" not in html_form
+
+        # Step 3: User fills and submits the in-app form directly inside WhatsApp
         sent_messages.clear()
-        chat_agent.handle_chat_message(
-            app_module.app,
-            app_module.db,
-            user,
-            "Reference: REF_DATA_888\nService: DATA\nRecipient: 08012345678\nIssue: Debited but data not received",
-            user.phone,
-            user.phone,
-        )
+        payload = {
+            "phone": user.phone,
+            "ref": "REF_DATA_888",
+            "service_type": "DATA",
+            "recipient": "08012345678",
+            "category": "Debited but value not delivered",
+            "description": "Paid for data bundle, debited but not credited",
+        }
+        res_submit = client.post("/support/form", json=payload)
+        assert res_submit.status_code == 200
+        data = res_submit.get_json()
+        assert data["status"] == "success"
+        assert "ticket_code" in data
 
-        # Confirmation sent directly in WhatsApp to customer
-        assert any("Support Ticket Submitted Successfully" in msg[1] for msg in sent_messages)
-        assert any("REF_DATA_888" in msg[1] for msg in sent_messages)
-        assert any("Ticket ID" in msg[1] for msg in sent_messages)
-
-        # Admin alerted on WhatsApp
+        # Confirmation sent in WhatsApp to customer and admin alerted
+        assert any(user.phone in msg[0] and "Support Form Received" in msg[1] for msg in sent_messages)
         assert any("2348100000099" in msg[0] and "REF_DATA_888" in msg[1] for msg in sent_messages)
 
-        # State updated
+        # User is escalated to human support
+        app_module.db.session.refresh(user)
         assert user.is_escalated is True
-        assert not (user.state_data or {}).get("awaiting_support_form")
-        # No website redirect during submission either
-        assert len(sent_urls) == 0
 
 
 def test_mobile_bottom_navigation_and_more_sheet_structure(client):
@@ -1333,5 +1339,210 @@ def test_mobile_bottom_navigation_and_more_sheet_structure(client):
     assert "Refer &amp; Earn" in html
     assert "Support Desk" in html
     assert "Log out" in html
+
+
+def test_admin_support_desk_ticket_management_reply_and_resolve(monkeypatch, client):
+    import app as app_module
+    from models import SupportTicket
+
+    sent_messages = []
+    monkeypatch.setattr(
+        app_module,
+        "send_whatsapp_message",
+        lambda phone, message: sent_messages.append((phone, message)),
+    )
+
+    test_uid = uuid.uuid4().hex[:8]
+    cust_phone = f"23481{test_uid}"
+
+    with app_module.app.app_context():
+        # Create admin user
+        admin_email = app_module.ADMIN_EMAIL or "admin@wajvtu.com"
+        app_module.ADMIN_EMAIL = admin_email
+        admin_user = app_module.User.query.filter_by(email=admin_email).first()
+        if not admin_user:
+            admin_user = app_module.User(
+                whatsapp_id=f"adm_{test_uid}",
+                phone=f"234800000{test_uid[:4]}",
+                email=admin_email,
+                name="Head Admin",
+                wallet_balance=Decimal("5000.00"),
+            )
+            app_module.db.session.add(admin_user)
+            app_module.db.session.commit()
+
+        # Create customer user
+        customer_user = app_module.User(
+            whatsapp_id=f"cust_{test_uid}",
+            phone=cust_phone,
+            name="Test Customer",
+            wallet_balance=Decimal("250.00"),
+            is_escalated=True,
+        )
+        app_module.db.session.add(customer_user)
+        app_module.db.session.commit()
+
+        # Create SupportTicket
+        tkt = SupportTicket(
+            ticket_code=f"TKT-DATA-{test_uid[:4]}",
+            user_id=customer_user.id,
+            customer_phone=cust_phone,
+            reference=f"REF_AIRTIME_{test_uid}",
+            service_type="DATA",
+            recipient=cust_phone,
+            category="Debited but value not delivered",
+            description="Paid for 1GB SME data, money deducted but value not received.",
+            status="OPEN",
+        )
+        app_module.db.session.add(tkt)
+        app_module.db.session.commit()
+        ticket_code = tkt.ticket_code
+        admin_id = admin_user.id
+        cust_id = customer_user.id
+
+    csrf_token = "valid_test_admin_csrf_token"
+    with client.session_transaction() as sess:
+        sess["user_id"] = admin_id
+        sess["admin_csrf_token"] = csrf_token
+        sess["username"] = "Admin"
+
+    # Step 1: Admin visits /admin/support
+    res = client.get("/admin/support")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert ticket_code in html
+    assert cust_phone in html
+    assert "Official WhatsApp Support Desk Relay" in html
+    assert "Paid for 1GB SME data" in html
+    assert f"/admin/support/reply/{ticket_code}" in html
+    assert f"/admin/support/resolve/{ticket_code}" in html
+
+    # Step 2: Admin replies via POST /admin/support/reply/<ticket_code>
+    sent_messages.clear()
+    reply_payload = {
+        "csrf_token": csrf_token,
+        "reply_text": "We have checked with MTN and your bundle was re-delivered. Please confirm receipt.",
+    }
+    res_reply = client.post(f"/admin/support/reply/{ticket_code}", data=reply_payload, follow_redirects=True)
+    assert res_reply.status_code == 200
+
+    # WhatsApp message sent to customer
+    assert len(sent_messages) == 1
+    recip, msg_body = sent_messages[0]
+    assert cust_phone in recip
+    assert "We have checked with MTN" in msg_body
+    assert "WAJ VTU staff will NEVER ask for your Transaction PIN" in msg_body
+
+    # SupportTicket updated in DB
+    with app_module.app.app_context():
+        tkt_updated = SupportTicket.query.filter_by(ticket_code=ticket_code).first()
+        assert tkt_updated.status == "IN_PROGRESS"
+        assert "We have checked with MTN" in tkt_updated.admin_notes
+
+    # Step 3: Admin resolves ticket via POST /admin/support/resolve/<ticket_code>
+    sent_messages.clear()
+    resolve_payload = {
+        "csrf_token": csrf_token,
+    }
+    res_resolve = client.post(f"/admin/support/resolve/{ticket_code}", data=resolve_payload, follow_redirects=True)
+    assert res_resolve.status_code == 200
+
+    # WhatsApp message sent confirming resolution
+    assert len(sent_messages) == 1
+    recip, msg_body = sent_messages[0]
+    assert cust_phone in recip
+    assert "Issue Resolved" in msg_body
+    assert "automated WhatsApp assistant is now fully active" in msg_body
+
+    # Database records updated: ticket is RESOLVED, customer un-escalated
+    with app_module.app.app_context():
+        tkt_resolved = SupportTicket.query.filter_by(ticket_code=ticket_code).first()
+        assert tkt_resolved.status == "RESOLVED"
+        assert tkt_resolved.resolved_at is not None
+
+        cust_updated = app_module.User.query.get(cust_id)
+        assert cust_updated.is_escalated is False
+
+
+def test_chat_agent_admin_whatsapp_reply_and_resolve_commands(monkeypatch):
+    import app as app_module
+    import chat_agent
+    from models import SupportTicket
+
+    sent_messages = []
+    monkeypatch.setattr(
+        app_module,
+        "send_whatsapp_message",
+        lambda phone, message: sent_messages.append((phone, message)),
+    )
+    admin_phone = "2348009998877"
+    monkeypatch.setenv("ADMIN_PHONE", admin_phone)
+
+    test_uid = uuid.uuid4().hex[:8]
+    cust_phone = f"2348123{test_uid[:5]}"
+
+    with app_module.app.app_context():
+        customer_user = app_module.User(
+            whatsapp_id=f"cust_wa_{test_uid}",
+            phone=cust_phone,
+            name="Dispute Customer",
+            wallet_balance=Decimal("500.00"),
+            is_escalated=True,
+        )
+        app_module.db.session.add(customer_user)
+        app_module.db.session.commit()
+
+        tkt = SupportTicket(
+            ticket_code=f"TKT-SYNC-{test_uid[:4]}",
+            user_id=customer_user.id,
+            customer_phone=cust_phone,
+            reference=f"REF_SYNC_{test_uid}",
+            service_type="AIRTIME",
+            recipient=cust_phone,
+            category="Failed recharge",
+            description="Airtime did not deliver.",
+            status="OPEN",
+        )
+        app_module.db.session.add(tkt)
+        app_module.db.session.commit()
+
+        # Admin sends /reply <phone> <message> from admin WhatsApp
+        sent_messages.clear()
+        chat_agent.handle_chat_message(
+            app_module.app,
+            app_module.db,
+            customer_user,
+            f"/reply {cust_phone} Your airtime has been re-credited to your phone.",
+            admin_phone,
+            admin_phone,
+        )
+
+        assert any(cust_phone in m[0] and "Your airtime has been re-credited" in m[1] for m in sent_messages)
+        assert any("WAJ VTU staff will NEVER ask for your Transaction PIN" in m[1] for m in sent_messages)
+
+        # Check DB ticket updated to IN_PROGRESS
+        tkt_check = SupportTicket.query.filter_by(ticket_code=tkt.ticket_code).first()
+        assert tkt_check.status == "IN_PROGRESS"
+        assert "Your airtime has been re-credited" in tkt_check.admin_notes
+
+        # Admin sends /resolve <phone> from admin WhatsApp
+        sent_messages.clear()
+        chat_agent.handle_chat_message(
+            app_module.app,
+            app_module.db,
+            customer_user,
+            f"/resolve {cust_phone}",
+            admin_phone,
+            admin_phone,
+        )
+
+        assert any(cust_phone in m[0] and "has been resolved. AI support has resumed" in m[1] for m in sent_messages)
+        app_module.db.session.refresh(customer_user)
+        assert customer_user.is_escalated is False
+
+        tkt_check_resolved = SupportTicket.query.filter_by(ticket_code=tkt.ticket_code).first()
+        assert tkt_check_resolved.status == "RESOLVED"
+        assert tkt_check_resolved.resolved_at is not None
+
 
 

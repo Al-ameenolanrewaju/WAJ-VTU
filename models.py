@@ -295,3 +295,27 @@ class MarketingSetting(db.Model):
 
     def __repr__(self):
         return f"<MarketingSetting {self.key}={self.value}>"
+
+
+class SupportTicket(db.Model):
+    __tablename__ = 'support_tickets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    ticket_code = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    customer_phone = db.Column(db.String(30), nullable=False, index=True)
+    reference = db.Column(db.String(100), nullable=True, index=True)
+    service_type = db.Column(db.String(50), nullable=False, default="VTU")
+    recipient = db.Column(db.String(50), nullable=True)
+    category = db.Column(db.String(100), nullable=True)
+    description = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="OPEN", index=True)  # OPEN, IN_PROGRESS, RESOLVED
+    admin_notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+    resolved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    user = db.relationship('User', backref=db.backref('support_tickets', lazy=True))
+
+    def __repr__(self):
+        return f"<SupportTicket {self.ticket_code} ({self.customer_phone}) - {self.status}>"

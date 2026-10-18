@@ -6,11 +6,13 @@ chat_agent.execute_tool(), the same function the WhatsApp bot uses, so
 pricing, wallet debits, provider calls and refunds behave identically on
 both surfaces and can't drift apart.
 """
+import secrets
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, send_file, jsonify
 
-from models import db, Transaction, SavedService, User
+from models import db, Transaction, SavedService, User, SupportTicket
 from auth import login_required, current_user
 from chat_agent import execute_tool
 from flask import current_app as app  # Use current_app to avoid circular imports
@@ -265,11 +267,24 @@ def support_form_popup():
             intl = "234" + clean_contact[1:]
             user_record = User.query.filter((User.phone == intl) | (User.whatsapp_id == intl)).first()
 
-        ticket_code = f"TKT-{service_type[:4]}-{int(datetime.utcnow().timestamp()) % 10000:04d}"
+        ticket_code = f"TKT-{service_type[:4].upper()}-{int(datetime.now(timezone.utc).timestamp()) % 10000:04d}-{secrets.token_hex(2).upper()}"
+
+        new_ticket = SupportTicket(
+            ticket_code=ticket_code,
+            user_id=user_record.id if user_record else None,
+            customer_phone=contact_phone,
+            reference=ref,
+            service_type=service_type,
+            recipient=recipient_target,
+            category=category,
+            description=description,
+            status="OPEN"
+        )
+        db.session.add(new_ticket)
 
         if user_record:
             user_record.is_escalated = True
-            db.session.commit()
+        db.session.commit()
 
         # Alert Admin on WhatsApp
         admin_phone = os.getenv("ADMIN_PHONE")
@@ -293,7 +308,8 @@ def support_form_popup():
             f"🎫 *WAJ VTU Support Form Received!*\n"
             f"Ticket: *{ticket_code}*\n"
             f"Ref: *{ref}* ({service_type})\n\n"
-            f"We have received your dispute details. Our human support supervisor has been alerted and will reply to you directly in this chat shortly."
+            f"We have received your dispute details. Our human support supervisor has been alerted and will reply to you directly in this chat shortly.\n\n"
+            f"🛡️ *Security Reminder:* WAJ VTU staff will NEVER ask for your Transaction PIN, password, or bank OTP."
         )
         send_whatsapp_message(contact_phone, user_msg)
 

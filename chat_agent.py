@@ -2,8 +2,10 @@ import os
 import json
 import re
 import threading
+import time
+import secrets
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timezone
 from groq import Groq
 
 
@@ -171,12 +173,26 @@ def submit_in_chat_support_ticket(db, user, chat_id, text, reference=None, servi
         else:
             issue = text.strip()
 
-    ticket_id = f"TKT-{service[:4].upper()}-{int(time.time()) % 1000000:06d}"
+    ticket_id = f"TKT-{service[:4].upper()}-{int(time.time()) % 1000000:06d}-{secrets.token_hex(2).upper()}"
     user.is_escalated = True
     state = dict(user.state_data or {})
     state.pop("awaiting_support_form", None)
     user.state_data = state
     flag_modified(user, "state_data")
+
+    from models import SupportTicket
+    new_ticket = SupportTicket(
+        ticket_code=ticket_id,
+        user_id=getattr(user, "id", None),
+        customer_phone=getattr(user, "phone", "") or chat_id,
+        reference=reference,
+        service_type=service,
+        recipient=recipient,
+        category="Chat Support Dispute",
+        description=issue,
+        status="OPEN"
+    )
+    db.session.add(new_ticket)
     db.session.commit()
 
     # Alert Admin on WhatsApp
@@ -255,12 +271,11 @@ RULES:
 8. If the user asks for a recurring/scheduled transaction (e.g. "buy this every Friday"), use `schedule_task`.
 9. If the user is extremely angry, stuck, or explicitly asks to speak to a human/customer care, immediately use `escalate_to_human`.
 10. **OFFICIAL IN-WHATSAPP SUPPORT & DISPUTE FORM**:
-Official support and dispute forms are filled and submitted DIRECTLY inside WhatsApp chat.
-NEVER send links or URL buttons redirecting the user back to the website.
-When a user asks to fill a support form, lodge a complaint, dispute an order, or reports a failed transaction:
-- Present the in-chat Support Form questionnaire right in the conversation.
-- When the user provides the dispute details, immediately execute `submit_support_ticket` with reference, service, recipient, and issue description.
-- The ticket will be logged, the user escalated to human care, the admin alerted on WhatsApp, and the confirmation ticket code returned directly inside this WhatsApp chat.
+Official support and dispute forms open, fill, and submit directly inside WhatsApp.
+When a user asks to fill a support form, lodge a complaint, dispute an order, or reports an issue:
+- Direct them to open the in-app Support Form popup button "Open Support Form 📝" to fill their dispute directly inside WhatsApp.
+- If the user provides their dispute details in the message, execute `submit_support_ticket` with reference, service, recipient, and issue description.
+- Once submitted, the ticket is logged, the user escalated to human care, the admin alerted on WhatsApp, and the confirmation ticket code returned.
 """
 
 def define_tools():
@@ -545,13 +560,27 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         issue = str(kwargs.get("issue") or kwargs.get("reason") or "Support dispute").strip()
         
         import time
-        ticket_id = f"TKT-{service[:4].upper()}-{int(time.time()) % 1000000:06d}"
+        ticket_id = f"TKT-{service[:4].upper()}-{int(time.time()) % 1000000:06d}-{secrets.token_hex(2).upper()}"
         user.is_escalated = True
         from sqlalchemy.orm.attributes import flag_modified
         state = dict(user.state_data or {})
         state.pop("awaiting_support_form", None)
         user.state_data = state
         flag_modified(user, "state_data")
+
+        from models import SupportTicket
+        new_ticket = SupportTicket(
+            ticket_code=ticket_id,
+            user_id=getattr(user, "id", None),
+            customer_phone=getattr(user, "phone", "") or str(recipient),
+            reference=reference,
+            service_type=service,
+            recipient=recipient,
+            category="AI Tool Support Dispute",
+            description=issue,
+            status="OPEN"
+        )
+        db.session.add(new_ticket)
         db.session.commit()
         admin_phone = os.getenv("ADMIN_PHONE")
         if admin_phone:
@@ -1110,8 +1139,26 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 target_phone = parts[1]
                 reply_msg = parts[2]
                 from app import send_whatsapp_message
-                send_whatsapp_message(target_phone, f"👨‍💻 *Support:*\n{reply_msg}")
+                send_whatsapp_message(
+                    target_phone,
+                    f"👨‍💻 *WAJ VTU Support:*\n{reply_msg}\n\n🛡️ *Security Reminder:* WAJ VTU staff will NEVER ask for your Transaction PIN, password, or bank OTP."
+                )
                 send_whatsapp_message(chat_id, f"✅ Reply sent to {target_phone}")
+                try:
+                    from models import SupportTicket as db_SupportTicket
+                    clean_target = target_phone.replace("+", "").strip()
+                    tkt = db_SupportTicket.query.filter(
+                        (db_SupportTicket.customer_phone == target_phone) | (db_SupportTicket.customer_phone == clean_target),
+                        db_SupportTicket.status.in_(["OPEN", "IN_PROGRESS"])
+                    ).order_by(db_SupportTicket.id.desc()).first()
+                    if tkt:
+                        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                        note = f"[{now_str} Admin WhatsApp]: {reply_msg}"
+                        tkt.admin_notes = (tkt.admin_notes + "\n\n" + note) if tkt.admin_notes else note
+                        tkt.status = "IN_PROGRESS"
+                        db.session.commit()
+                except Exception as e:
+                    print("Error updating SupportTicket from admin /reply:", e)
             else:
                 from app import send_whatsapp_message
                 send_whatsapp_message(chat_id, "❌ Invalid format. Use: /reply <phone_number> <message>")
@@ -1123,12 +1170,31 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 target_phone = parts[1].strip()
                 from models import User as db_User
                 target_user = db_User.query.filter_by(phone=target_phone).first()
+                if not target_user and len(target_phone) == 11 and target_phone.startswith("0"):
+                    intl = "234" + target_phone[1:]
+                    target_user = db_User.query.filter_by(phone=intl).first()
                 if target_user:
                     target_user.is_escalated = False
                     db.session.commit()
                     from app import send_whatsapp_message
                     send_whatsapp_message(target_phone, "✅ Your support request has been resolved. AI support has resumed. How can I help you today?")
                     send_whatsapp_message(chat_id, f"✅ Ticket for {target_phone} resolved. AI resumed.")
+                    try:
+                        from models import SupportTicket as db_SupportTicket
+                        clean_target = target_phone.replace("+", "").strip()
+                        tkt = db_SupportTicket.query.filter(
+                            (db_SupportTicket.customer_phone == target_phone) | (db_SupportTicket.customer_phone == clean_target),
+                            db_SupportTicket.status.in_(["OPEN", "IN_PROGRESS"])
+                        ).order_by(db_SupportTicket.id.desc()).first()
+                        if tkt:
+                            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                            note = f"[{now_str} Admin WhatsApp]: Ticket resolved and AI un-escalated."
+                            tkt.admin_notes = (tkt.admin_notes + "\n\n" + note) if tkt.admin_notes else note
+                            tkt.status = "RESOLVED"
+                            tkt.resolved_at = datetime.now(timezone.utc)
+                            db.session.commit()
+                    except Exception as e:
+                        print("Error updating SupportTicket from admin /resolve:", e)
                 else:
                     from app import send_whatsapp_message
                     send_whatsapp_message(chat_id, f"❌ Could not find user {target_phone}")
@@ -1178,13 +1244,20 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
         "support ticket",
     ]
     if any(kw in raw_lower for kw in support_form_triggers) or raw_lower.startswith("support form:"):
-        has_ref = bool(re.search(r"\b(REF_[A-Za-z0-9_]+|DEP_[A-Za-z0-9_]+)\b", text, re.IGNORECASE) or re.search(r"(?i)\b(?:ref|reference)\s*[:=-]", text))
-        has_issue_keyword = bool(re.search(r"(?i)\b(?:issue|problem|reason)\s*[:=-]", text))
-        is_detailed = len(text.strip().split()) >= 6 and (has_ref or has_issue_keyword or any(w in raw_lower for w in ["failed", "debited", "delayed", "not receive"]))
-        if is_detailed:
-            submit_in_chat_support_ticket(db, user, chat_id, text)
-            return
-        send_in_chat_support_form(db, user, chat_id)
+        form_url = get_in_app_support_form_url(getattr(user, "phone", "") or chat_id, text)
+        from app import send_whatsapp_interactive_url
+        send_whatsapp_interactive_url(
+            chat_id,
+            body_text=(
+                "Please tap below to open and fill our official Support & Dispute Form directly inside WhatsApp.\n\n"
+                "• Fill out your transaction details and dispute issue\n"
+                "• Your ticket is logged instantly with our 24/7 supervisor desk\n"
+                "• All processed securely inside WhatsApp with zero external redirects"
+            ),
+            button_title="Open Support Form 📝",
+            url=form_url,
+            header_text="WAJ VTU Support Desk"
+        )
         return
 
     pending_confirmation = (user.state_data or {}).get("pending_confirmation") if isinstance(user.state_data, dict) else None
@@ -1268,10 +1341,17 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
     
     client = get_groq_client()
     if not client:
-        from app import send_whatsapp_message
+        from app import send_whatsapp_interactive_url, send_whatsapp_message
         lower_raw = str(text or "").strip().lower()
         if any(w in lower_raw for w in ["support form", "fill support", "fill the support form", "lodge complaint", "ticket", "dispute"]) or lower_raw.startswith("support form:"):
-            send_in_chat_support_form(db, user, chat_id)
+            form_url = get_in_app_support_form_url(getattr(user, "phone", "") or chat_id, text)
+            send_whatsapp_interactive_url(
+                chat_id,
+                body_text="Please tap below to open and fill our official Support & Dispute Form directly inside WhatsApp:",
+                button_title="Open Support Form 📝",
+                url=form_url,
+                header_text="WAJ VTU Support Desk"
+            )
             return
         send_whatsapp_message(chat_id, "Service is currently unavailable. Please check API configuration.")
         return
