@@ -1,37 +1,31 @@
 {
-  "version": "3.1",
+  "version": "6.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "DISPUTE_FORM": []
+  },
   "screens": [
     {
       "id": "DISPUTE_FORM",
-      "title": "WAJ VTU Support Form",
+      "title": "WAJ VTU Dispute Form",
       "terminal": true,
-      "data": {
-        "service_type": {
-          "type": "string",
-          "__example__": "DATA"
-        },
-        "reference": {
-          "type": "string",
-          "__example__": "REF_12345"
-        }
-      },
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
           {
             "type": "TextHeading",
-            "text": "Official Support & Dispute Form"
+            "text": "Official Dispute & Support Form"
           },
           {
             "type": "TextSubheading",
-            "text": "Submitted details are sent directly to our 24/7 supervisor desk."
+            "text": "Submitted details are delivered directly to our 24/7 supervisor desk."
           },
           {
             "type": "Dropdown",
             "name": "service_type",
             "label": "Service Category",
             "required": true,
-            "data_source": [
+            "data-source": [
               { "id": "DATA", "title": "Data Bundle" },
               { "id": "AIRTIME", "title": "Airtime Recharge" },
               { "id": "ELECTRICITY", "title": "Electricity Token" },
@@ -43,25 +37,25 @@
           {
             "type": "TextInput",
             "name": "recipient",
-            "label": "Recipient Phone / Meter / Smartcard",
+            "label": "Recipient Number",
             "required": true,
-            "input_type": "text",
-            "helper_text": "Enter the target phone number, meter number or IUC"
+            "input-type": "text",
+            "helper-text": "Phone, meter or smartcard number"
           },
           {
             "type": "TextInput",
             "name": "reference",
-            "label": "Transaction Reference (Optional)",
+            "label": "Transaction Ref",
             "required": false,
-            "input_type": "text",
-            "helper_text": "e.g. REF_DATA_..."
+            "input-type": "text",
+            "helper-text": "e.g. REF_DATA_..."
           },
           {
             "type": "Dropdown",
             "name": "category",
             "label": "Dispute Issue",
             "required": true,
-            "data_source": [
+            "data-source": [
               { "id": "Debited but value not delivered", "title": "Debited but value not delivered" },
               { "id": "Recharge or payment failed", "title": "Recharge or payment failed" },
               { "id": "Token or Exam PIN recovery", "title": "Token or Exam PIN not retrieved" },
@@ -74,16 +68,16 @@
             "name": "description",
             "label": "Complaint Details",
             "required": true,
-            "helper_text": "Describe what occurred so our supervisor can resolve it"
+            "helper-text": "Describe what occurred so our supervisor can resolve it"
           },
           {
             "type": "TextCaption",
-            "text": "🛡️ 100% Encrypted: WAJ VTU staff will NEVER ask for your Transaction PIN or password."
+            "text": "100% Encrypted: WAJ VTU staff will NEVER ask for your Transaction PIN or password."
           },
           {
             "type": "Footer",
             "label": "Submit Dispute Ticket",
-            "on_click_action": {
+            "on-click-action": {
               "name": "complete",
               "payload": {
                 "service_type": "${form.service_type}",
