@@ -1211,21 +1211,23 @@ def test_support_form_popup_page_renders_and_submits(monkeypatch):
     assert any("08012345678" in alert[0] for alert in sent_alerts)
 
 
-def test_chat_message_support_form_popup_link(monkeypatch):
+def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch):
     import app as app_module
     import chat_agent
 
     sent_messages = []
+    sent_urls = []
     monkeypatch.setattr(
         app_module,
         "send_whatsapp_interactive_url",
-        lambda recipient, body_text, button_title, url, header_text: sent_messages.append((recipient, body_text, url)),
+        lambda recipient, body_text, button_title, url, header_text: sent_urls.append((recipient, body_text, url)),
     )
     monkeypatch.setattr(
         app_module,
         "send_whatsapp_message",
-        lambda phone, message: sent_messages.append((phone, message, "")),
+        lambda phone, message: sent_messages.append((phone, message)),
     )
+    monkeypatch.setenv("ADMIN_PHONE", "2348100000099")
 
     with app_module.app.app_context():
         user = app_module.User(
@@ -1236,18 +1238,48 @@ def test_chat_message_support_form_popup_link(monkeypatch):
         app_module.db.session.add(user)
         app_module.db.session.commit()
 
+        # Step 1: User asks to fill support form
         chat_agent.handle_chat_message(
             app_module.app,
             app_module.db,
             user,
             "I want to fill the support form",
-            "msg-1234",
+            user.phone,
             user.phone,
         )
 
+        # Form questionnaire should open directly inside WhatsApp chat
         assert len(sent_messages) >= 1
-        # The URL sent contains /support/form
-        assert any("/support/form" in msg[2] or "/support/form" in msg[1] for msg in sent_messages)
+        assert any("Official Support & Dispute Form" in msg[1] for msg in sent_messages)
+        # MUST NOT redirect to website URL
+        assert len(sent_urls) == 0
+        assert not any("/support/form" in msg[1] for msg in sent_messages)
+        assert (user.state_data or {}).get("awaiting_support_form") is True
+
+        # Step 2: User fills and submits form directly inside WhatsApp
+        sent_messages.clear()
+        chat_agent.handle_chat_message(
+            app_module.app,
+            app_module.db,
+            user,
+            "Reference: REF_DATA_888\nService: DATA\nRecipient: 08012345678\nIssue: Debited but data not received",
+            user.phone,
+            user.phone,
+        )
+
+        # Confirmation sent directly in WhatsApp to customer
+        assert any("Support Ticket Submitted Successfully" in msg[1] for msg in sent_messages)
+        assert any("REF_DATA_888" in msg[1] for msg in sent_messages)
+        assert any("Ticket ID" in msg[1] for msg in sent_messages)
+
+        # Admin alerted on WhatsApp
+        assert any("2348100000099" in msg[0] and "REF_DATA_888" in msg[1] for msg in sent_messages)
+
+        # State updated
+        assert user.is_escalated is True
+        assert not (user.state_data or {}).get("awaiting_support_form")
+        # No website redirect during submission either
+        assert len(sent_urls) == 0
 
 
 def test_mobile_bottom_navigation_and_more_sheet_structure(client):

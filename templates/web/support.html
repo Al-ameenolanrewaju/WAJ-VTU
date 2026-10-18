@@ -66,15 +66,12 @@
       </div>
       <div>
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #090909; margin-bottom: 12px;">
-          Interactive WhatsApp Popup
+          Direct WhatsApp In-Chat Intake
         </div>
         <div style="display: flex; flex-direction: column; gap: 8px;">
           <a href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU%2C%20I%20want%20to%20fill%20the%20support%20form" target="_blank" rel="noopener" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; background: #090909; color: #FFDD00; font-weight: 800; font-size: 14px; padding: 12px; border-radius: 10px; text-decoration: none; transition: background 0.15s ease;">
             Fill Support Form in WhatsApp ↗
           </a>
-          <button type="button" onclick="openSupportFormModal();" style="display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; background: #f8fafc; color: #090909; font-weight: 700; font-size: 12px; padding: 9px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: background 0.15s ease;">
-            ⚡ Preview In-App HTML Form Popup
-          </button>
         </div>
       </div>
     </div>
@@ -85,21 +82,18 @@
     <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 24px;">
       <div>
         <span style="display: inline-block; background: #FFDD00; color: #090909; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 9999px; text-transform: uppercase; margin-bottom: 10px;">
-          WhatsApp In-App HTML Form
+          Direct WhatsApp In-Chat Intake
         </span>
         <h2 style="font-family: 'Space Grotesk', sans-serif; font-size: clamp(22px, 3vw, 28px); font-weight: 700; color: #ffffff; margin: 0 0 6px 0;">
-          An HTML Form Pops Up Inside WhatsApp For Support
+          Support Form Opens &amp; Submits Inside WhatsApp
         </h2>
         <p style="color: #cbd5e1; font-size: 14px; max-width: 620px; line-height: 1.6; margin: 0;">
-          When you request support or dispute a delayed transaction on WhatsApp, an interactive HTML form pops up directly over your chat as a native modal sheet. Fill in your details with instant auto-validation and immediate carrier log correlation.
+          When you request support or dispute a delayed transaction on WhatsApp, our official support form opens and submits directly inside your WhatsApp conversation — with zero redirects back to external websites. Fill your details right in chat for immediate logging and carrier correlation.
         </p>
       </div>
       <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-        <button type="button" onclick="openSupportFormModal();" style="display: inline-flex; align-items: center; gap: 8px; background: #262626; border: 1.5px solid #FFDD00; color: #FFDD00; font-weight: 800; font-size: 13px; padding: 12px 18px; border-radius: 12px; cursor: pointer; transition: transform 0.15s ease;">
-          ⚡ Preview Popup Form
-        </button>
         <a href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU%2C%20I%20want%20to%20fill%20the%20support%20form" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 8px; background: #FFDD00; color: #000000; font-weight: 800; font-size: 14px; padding: 12px 20px; border-radius: 12px; text-decoration: none; transition: transform 0.15s ease;">
-          Launch Inside WhatsApp ↗
+          Launch Support in WhatsApp ↗
         </a>
       </div>
     </div>
@@ -318,39 +312,5 @@
       </details>
     </div>
   </div>
-
-  <!-- In-App Support Form Preview Modal -->
-  <div id="support-form-modal" style="display: none; position: fixed; inset: 0; z-index: 99999; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); align-items: center; justify-content: center; padding: 16px;">
-    <div style="background: #090909; border: 2px solid #FFDD00; border-radius: 20px; width: 100%; max-width: 520px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8);">
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #262626; background: #141414;">
-        <div style="display: flex; align-items: center; gap: 8px; font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #ffffff;">
-          <span style="background: #FFDD00; color: #090909; width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800;">📱</span>
-          WhatsApp In-App Support Form (Live Preview)
-        </div>
-        <button type="button" onclick="closeSupportFormModal();" style="background: #262626; border: none; color: #ffffff; width: 28px; height: 28px; border-radius: 50%; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
-      </div>
-      <iframe src="{{ url_for('web.support_form_popup', ref=searched_ref) }}" style="width: 100%; height: 580px; max-height: calc(90vh - 58px); border: none; background: #090909;"></iframe>
-    </div>
-  </div>
-
-  <script>
-    function openSupportFormModal() {
-      var modal = document.getElementById('support-form-modal');
-      if (modal) {
-        modal.style.display = 'flex';
-        document.body.style.overflow = 'hidden';
-      }
-    }
-    function closeSupportFormModal() {
-      var modal = document.getElementById('support-form-modal');
-      if (modal) {
-        modal.style.display = 'none';
-        document.body.style.overflow = '';
-      }
-    }
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') closeSupportFormModal();
-    });
-  </script>
 </main>
 {% endblock %}
