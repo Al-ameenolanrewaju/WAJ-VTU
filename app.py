@@ -103,6 +103,7 @@ META_API_TOKEN = os.getenv("META_API_TOKEN", "").strip()
 META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "").strip()
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0").strip()
 META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "").strip()
+META_SUPPORT_FLOW_ID = os.getenv("META_SUPPORT_FLOW_ID", "").strip()
 WHATSAPP_BOT_PHONE = os.getenv("WHATSAPP_BOT_PHONE", "2348102314725").strip()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
@@ -1017,6 +1018,76 @@ def send_whatsapp_interactive_url(recipient, body_text, button_title, url, heade
         return send_whatsapp_message(recipient, fallback_text)
 
 
+def send_whatsapp_support_flow(recipient, reference="", service="VTU Service", header_text="WAJ VTU Dispute Desk"):
+    """
+    Sends a native WhatsApp Flow message to open a native form sheet directly
+    inside the WhatsApp application (zero browser, zero website URL).
+    If META_SUPPORT_FLOW_ID is not configured, sends an in-chat interactive
+    dispute template right in WhatsApp.
+    """
+    flow_id = os.getenv("META_SUPPORT_FLOW_ID", META_SUPPORT_FLOW_ID).strip()
+    meta_api_token = os.getenv("META_API_TOKEN", META_API_TOKEN).strip()
+    meta_phone_number_id = os.getenv("META_PHONE_NUMBER_ID", META_PHONE_NUMBER_ID).strip()
+    meta_api_version = os.getenv("META_API_VERSION", META_API_VERSION).strip()
+
+    if flow_id and meta_api_token and meta_phone_number_id:
+        try:
+            meta_url = f"https://graph.facebook.com/{meta_api_version}/{meta_phone_number_id}/messages"
+            meta_recipient = str(recipient).split("@", 1)[0].replace("+", "")
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": meta_recipient,
+                "type": "interactive",
+                "interactive": {
+                    "type": "flow",
+                    "header": {"type": "text", "text": header_text},
+                    "body": {"text": "Please tap the button below to complete your support dispute directly inside WhatsApp."},
+                    "footer": {"text": "🛡️ 100% Encrypted & Secure"},
+                    "action": {
+                        "name": "flow",
+                        "parameters": {
+                            "flow_message_version": "3",
+                            "flow_token": str(uuid.uuid4()),
+                            "flow_id": flow_id,
+                            "flow_cta": "Fill Support Form",
+                            "flow_action": "navigate",
+                            "flow_action_payload": {
+                                "screen": "DISPUTE_FORM",
+                                "data": {
+                                    "reference": reference or "N/A",
+                                    "service_type": service or "DATA"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            headers = {
+                "Authorization": f"Bearer {meta_api_token}",
+                "Content-Type": "application/json",
+            }
+            response = requests.post(meta_url, json=payload, headers=headers, timeout=20)
+            if response.ok:
+                return True
+            print(f"Meta Flow API HTTP Error ({response.status_code}): {response.text}")
+        except Exception as e:
+            print(f"Error sending WhatsApp Flow: {e}")
+
+    # Seamless in-chat native dispute template (100% inside WhatsApp without external browser)
+    native_text = (
+        f"🎫 *{header_text}*\n\n"
+        f"To submit your dispute right here inside WhatsApp, please reply with the following details:\n\n"
+        f"• *Service:* (e.g. Data, Airtime, Cable, Electricity)\n"
+        f"• *Reference ID:* {reference or '(If available)'}\n"
+        f"• *Recipient Number:* (Phone / Meter / IUC)\n"
+        f"• *Complaint:* (Brief explanation of what happened)\n\n"
+        f"🛡️ *Security Reminder:* WAJ VTU staff will NEVER ask for your Transaction PIN or password."
+    )
+    return send_whatsapp_message(recipient, native_text)
+
+
+
 
 def generate_receipt_png(transaction):
     """Render a successful transaction as a PNG image."""
@@ -1186,10 +1257,11 @@ def whatsapp_webhook():
         if sender:
             break
 
-    if has_status_event or not has_message or not sender:
-        return jsonify({"status": "ignored"}), 200
+    is_flow_response = False
+    if message_type == "interactive" and first_message.get("interactive", {}).get("type") == "nfm_reply":
+        is_flow_response = True
 
-    if message_type != "text":
+    if message_type != "text" and not is_flow_response:
         threading.Thread(
             target=send_whatsapp_message,
             args=(sender, "I can only process text messages. Please type your request."),
@@ -1217,14 +1289,27 @@ def process_webhook_payload(req_data):
                         continue
 
                     first_message = messages[0]
-                    if first_message.get("type") != "text":
+                    m_type = first_message.get("type")
+                    is_flow = m_type == "interactive" and first_message.get("interactive", {}).get("type") == "nfm_reply"
+                    if m_type != "text" and not is_flow:
                         return
                     message_id = first_message.get("id") or message_id
                     sender = first_message.get("from") or first_message.get("sender")
                     text = ""
-                    text = first_message.get("text", {}).get("body", "")
+                    if m_type == "text":
+                        text = first_message.get("text", {}).get("body", "")
+                    elif is_flow:
+                        nfm = first_message.get("interactive", {}).get("nfm_reply", {})
+                        raw_resp = nfm.get("response_json") or "{}"
+                        try:
+                            flow_payload = json.loads(raw_resp) if isinstance(raw_resp, str) else raw_resp
+                        except Exception:
+                            flow_payload = {}
+                        req_data["flow_response"] = flow_payload
+                        text = f"SUPPORT_FLOW_RESPONSE: {json.dumps(flow_payload)}"
                     if sender:
                         req_data = {
+                            **req_data,
                             "sender": sender,
                             "message": text,
                             "body": text,
@@ -1273,6 +1358,62 @@ def process_webhook_payload(req_data):
 
         user = get_or_create_user(chat_id)
         if user is None:
+            return
+
+        # Check if this inbound message is a Native WhatsApp Flow submission
+        if "flow_response" in req_data:
+            flow_data = req_data["flow_response"]
+            ref = str(flow_data.get("reference") or flow_data.get("ref") or "N/A").strip()
+            service_type = str(flow_data.get("service_type") or flow_data.get("service") or "VTU Service").strip().upper()
+            recipient_target = str(flow_data.get("recipient") or flow_data.get("target") or "N/A").strip()
+            category = str(flow_data.get("category") or flow_data.get("reason") or "Dispute").strip()
+            description = str(flow_data.get("description") or flow_data.get("issue") or "WhatsApp Flow Dispute").strip()
+            contact_phone = str(provider_phone or chat_id).strip()
+
+            ticket_code = f"TKT-{service_type[:4].upper()}-{int(datetime.now(timezone.utc).timestamp()) % 10000:04d}-{secrets.token_hex(2).upper()}"
+
+            new_ticket = SupportTicket(
+                ticket_code=ticket_code,
+                user_id=user.id if user else None,
+                customer_phone=contact_phone,
+                reference=ref,
+                service_type=service_type,
+                recipient=recipient_target,
+                category=category,
+                description=description,
+                status="OPEN"
+            )
+            db.session.add(new_ticket)
+            if user:
+                user.is_escalated = True
+            db.session.commit()
+
+            # Alert Admin on WhatsApp
+            admin_phone = os.getenv("ADMIN_PHONE")
+            if admin_phone:
+                admin_msg = (
+                    f"🎫 *New WhatsApp Flow Dispute Ticket*\n"
+                    f"• Ticket: {ticket_code}\n"
+                    f"• Customer: {contact_phone}\n"
+                    f"• Ref: {ref}\n"
+                    f"• Service: {service_type}\n"
+                    f"• Recipient: {recipient_target}\n"
+                    f"• Category: {category}\n"
+                    f"• Description: {description}\n\n"
+                    f"To reply, type:\n`/reply {contact_phone} Your message`\n\n"
+                    f"To resolve/resume AI, type:\n`/resolve {contact_phone}`"
+                )
+                send_whatsapp_message(admin_phone, admin_msg)
+
+            # Confirm to customer directly in WhatsApp
+            cust_msg = (
+                f"🎫 *Support Form Received!*\n"
+                f"Ticket ID: *{ticket_code}*\n"
+                f"Reference: *{ref}* ({service_type})\n\n"
+                f"Thank you for completing the dispute form inside WhatsApp. Our support supervisor has been alerted and will respond directly to you in this chat shortly.\n\n"
+                f"🛡️ *Security Reminder:* WAJ VTU staff will NEVER ask for your Transaction PIN, password, or bank OTP."
+            )
+            send_whatsapp_message(contact_phone, cust_msg)
             return
 
         # Let the AI Chat Agent handle everything in a background thread!

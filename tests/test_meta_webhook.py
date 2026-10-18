@@ -1212,15 +1212,26 @@ def test_support_form_popup_page_renders_and_submits(monkeypatch):
 
 
 def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch, client):
+    import json
     import app as app_module
     import chat_agent
+    from models import SupportTicket
 
     sent_messages = []
-    sent_interactive_urls = []
+    sent_flows = []
+    class ImmediateThread:
+        def __init__(self, target, args=()):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(app_module.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(
         app_module,
-        "send_whatsapp_interactive_url",
-        lambda recipient, body_text, button_title, url, header_text: sent_interactive_urls.append((recipient, body_text, button_title, url, header_text)),
+        "send_whatsapp_support_flow",
+        lambda recipient, reference="", service="VTU Service", header_text="WAJ VTU Dispute Desk": sent_flows.append((recipient, reference, service, header_text)),
     )
     monkeypatch.setattr(
         app_module,
@@ -1238,7 +1249,7 @@ def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch, client):
         app_module.db.session.add(user)
         app_module.db.session.commit()
 
-        # Step 1: User asks to fill support form in WhatsApp
+        # Step 1: User asks to fill support form in WhatsApp -> Native WhatsApp Flow dispatched
         chat_agent.handle_chat_message(
             app_module.app,
             app_module.db,
@@ -1248,44 +1259,65 @@ def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch, client):
             user.phone,
         )
 
-        # Interactive CTA button to open form inside WhatsApp must be sent
-        assert len(sent_interactive_urls) == 1
-        recipient, body_text, button_title, url, header_text = sent_interactive_urls[0]
-        assert "Open Support Form" in button_title or "Fill Support Form" in button_title
-        assert "/support/form" in url
-        assert user.phone in url
+        assert len(sent_flows) == 1
+        recipient, reference, service, header_text = sent_flows[0]
+        assert user.phone in recipient
+        assert "Support" in header_text or "Dispute" in header_text
 
-        # Step 2: The In-App Form loads cleanly inside WhatsApp (no website redirects or links to resolution hub)
-        res_form = client.get(url)
-        assert res_form.status_code == 200
-        html_form = res_form.get_data(as_text=True)
-        assert "Official Support &amp; Dispute Form" in html_form or "Official Support & Dispute Form" in html_form
-        assert 'id="support-form"' in html_form
-        assert "Track Live Status on Resolution Hub" not in html_form
-
-        # Step 3: User fills and submits the in-app form directly inside WhatsApp
-        sent_messages.clear()
-        payload = {
-            "phone": user.phone,
-            "ref": "REF_DATA_888",
+        # Step 2: User completes and submits the Native WhatsApp Flow form (nfm_reply)
+        flow_payload = {
             "service_type": "DATA",
             "recipient": "08012345678",
+            "reference": "REF_FLOW_888",
             "category": "Debited but value not delivered",
-            "description": "Paid for data bundle, debited but not credited",
+            "description": "Paid for data bundle inside WhatsApp Flow, debited but not credited",
         }
-        res_submit = client.post("/support/form", json=payload)
+        webhook_payload = {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "from": user.phone,
+                                        "id": f"wamid.flow_{uuid.uuid4().hex[:8]}",
+                                        "type": "interactive",
+                                        "interactive": {
+                                            "type": "nfm_reply",
+                                            "nfm_reply": {
+                                                "name": "flow",
+                                                "response_json": json.dumps(flow_payload),
+                                            },
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+
+        sent_messages.clear()
+        res_submit = client.post("/webhook", json=webhook_payload)
         assert res_submit.status_code == 200
-        data = res_submit.get_json()
-        assert data["status"] == "success"
-        assert "ticket_code" in data
 
         # Confirmation sent in WhatsApp to customer and admin alerted
         assert any(user.phone in msg[0] and "Support Form Received" in msg[1] for msg in sent_messages)
-        assert any("2348100000099" in msg[0] and "REF_DATA_888" in msg[1] for msg in sent_messages)
+        assert any("2348100000099" in msg[0] and "REF_FLOW_888" in msg[1] for msg in sent_messages)
 
         # User is escalated to human support
         app_module.db.session.refresh(user)
         assert user.is_escalated is True
+
+        # Support ticket exists in DB
+        tkt = SupportTicket.query.filter_by(reference="REF_FLOW_888").first()
+        assert tkt is not None
+        assert tkt.customer_phone == user.phone
+        assert tkt.status == "OPEN"
+        assert tkt.service_type == "DATA"
+        assert tkt.recipient == "08012345678"
 
 
 def test_mobile_bottom_navigation_and_more_sheet_structure(client):

@@ -1244,18 +1244,11 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
         "support ticket",
     ]
     if any(kw in raw_lower for kw in support_form_triggers) or raw_lower.startswith("support form:"):
-        form_url = get_in_app_support_form_url(getattr(user, "phone", "") or chat_id, text)
-        from app import send_whatsapp_interactive_url
-        send_whatsapp_interactive_url(
+        from app import send_whatsapp_support_flow
+        send_whatsapp_support_flow(
             chat_id,
-            body_text=(
-                "Please tap below to open and fill our official Support & Dispute Form directly inside WhatsApp.\n\n"
-                "• Fill out your transaction details and dispute issue\n"
-                "• Your ticket is logged instantly with our 24/7 supervisor desk\n"
-                "• All processed securely inside WhatsApp with zero external redirects"
-            ),
-            button_title="Open Support Form 📝",
-            url=form_url,
+            reference="",
+            service="VTU Service",
             header_text="WAJ VTU Support Desk"
         )
         return
@@ -1341,15 +1334,13 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
     
     client = get_groq_client()
     if not client:
-        from app import send_whatsapp_interactive_url, send_whatsapp_message
+        from app import send_whatsapp_support_flow, send_whatsapp_message
         lower_raw = str(text or "").strip().lower()
         if any(w in lower_raw for w in ["support form", "fill support", "fill the support form", "lodge complaint", "ticket", "dispute"]) or lower_raw.startswith("support form:"):
-            form_url = get_in_app_support_form_url(getattr(user, "phone", "") or chat_id, text)
-            send_whatsapp_interactive_url(
+            send_whatsapp_support_flow(
                 chat_id,
-                body_text="Please tap below to open and fill our official Support & Dispute Form directly inside WhatsApp:",
-                button_title="Open Support Form 📝",
-                url=form_url,
+                reference="",
+                service="VTU Service",
                 header_text="WAJ VTU Support Desk"
             )
             return
