@@ -2,26 +2,77 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{% block title %}Admin Control Center{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Admin Control Center{% endblock %} - WAJ VTU</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
-        body { background-color: #f8fafc; color: #0f172a; }
-        .navbar { background-color: #0f172a; padding: 0 30px; height: 60px; display: flex; align-items: center; justify-content: space-between; }
-        .navbar .brand { color: #fff; font-size: 18px; font-weight: bold; text-decoration: none; }
-        .navbar .nav-links { display: flex; gap: 10px; list-style: none; }
-        .navbar .nav-links a { color: #94a3b8; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; }
-        .navbar .nav-links a:hover, .navbar .nav-links a.active { background-color: #2563eb; color: #ffffff; }
-        .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+        body { background-color: #f8fafc; color: #09090b; min-height: 100vh; }
+        .navbar {
+            background-color: #09090b;
+            padding: 0 24px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #222226;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        .navbar .brand {
+            font-family: 'Space Grotesk', sans-serif;
+            color: #fff;
+            font-size: 17px;
+            font-weight: 700;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+        .navbar .brand span { color: #ffc400; }
+        .navbar .nav-links {
+            display: flex;
+            gap: 6px;
+            list-style: none;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        .navbar .nav-links::-webkit-scrollbar { display: none; }
+        .navbar .nav-links a {
+            color: #a1a1aa;
+            text-decoration: none;
+            padding: 7px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: all 0.15s ease;
+        }
+        .navbar .nav-links a:hover { color: #ffffff; background: rgba(255,255,255,0.08); }
+        .navbar .nav-links a.active { background-color: #ffc400; color: #09090b; font-weight: 700; }
+        .container { max-width: 1200px; margin: 24px auto; padding: 0 20px; }
+        @media (max-width: 640px) {
+            .navbar { padding: 0 12px; height: 56px; }
+            .navbar .brand { font-size: 15px; }
+            .navbar .nav-links a { padding: 6px 9px; font-size: 12px; }
+            .container { padding: 0 12px; margin: 16px auto; }
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
     <nav class="navbar">
-        <a href="/admin/dashboard" class="brand">WAJ VTU Admin</a>
+        <a href="/admin/dashboard" class="brand">⚡ WAJ <span>VTU</span> Admin</a>
         <ul class="nav-links">
             <li><a href="/admin/dashboard" class="{% if request.path == '/admin/dashboard' %}active{% endif %}">📊 Dashboard</a></li>
-            <li><a href="/admin/users" class="{% if request.path == '/admin/users' %}active{% endif %}">👥 Track Users</a></li>
             <li><a href="/admin/transactions" class="{% if request.path == '/admin/transactions' %}active{% endif %}">💳 Transactions</a></li>
+            <li><a href="/admin/users" class="{% if request.path == '/admin/users' %}active{% endif %}">👥 Customers</a></li>
+            <li><a href="/admin/marketing" class="{% if '/admin/marketing' in request.path %}active{% endif %}">🚀 Marketing</a></li>
         </ul>
     </nav>
     <div class="container">

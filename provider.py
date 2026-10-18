@@ -132,7 +132,6 @@ def _swiftbills_data_payload_variants(network_id: int | str, phone: str, plan_id
         "network": int(network_id),
         "phone": phone,
         "data_plan": int(plan_id),
-        "plan": int(plan_id),
         "request-id": reference,
     }
     if amount is not None:
@@ -405,12 +404,14 @@ def process_data_purchase(
         _, swift_network, swift_plan_id = str(plan_code).split(":", 2)
         payload_variants = _swiftbills_data_payload_variants(swift_network, phone, swift_plan_id, ref, amount)
         
-        bypass_val = str(bypass).lower() in ["true", "1", "yes"] if bypass not in (None, "") else False
-        ported_val = str(ported_number).lower() in ["true", "1", "yes"] if ported_number not in (None, "") else False
-        
-        for payload in payload_variants:
-            payload["bypass"] = bypass_val
-            payload["ported_number"] = ported_val
+        if bypass not in (None, ""):
+            bypass_val = str(bypass).lower() in ["true", "1", "yes"]
+            for payload in payload_variants:
+                payload["bypass"] = bypass_val
+        if ported_number not in (None, ""):
+            ported_val = str(ported_number).lower() in ["true", "1", "yes"]
+            for payload in payload_variants:
+                payload["ported_number"] = ported_val
             
         last_error = "SwiftBills data purchase failed"
 

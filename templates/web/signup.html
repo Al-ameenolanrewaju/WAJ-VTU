@@ -8,6 +8,12 @@
       {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
     {% endwith %}
     <form method="POST">
+      <input type="hidden" name="ref" value="{{ ref_code or request.args.get('ref', '') }}">
+      {% if ref_code or request.args.get('ref') %}
+      <div style="font-size: 13px; color: #16a34a; font-weight: 600; margin-bottom: 12px; padding: 6px 12px; background: #dcfce7; border-radius: 8px; text-align: center;">
+        🎁 Referral code applied: <strong>{{ ref_code or request.args.get('ref') }}</strong>
+      </div>
+      {% endif %}
       <input name="name" placeholder="Full name">
       <input name="email" type="email" placeholder="Email" required>
       <input name="phone" placeholder="Phone number (e.g. 08012345678)" required>

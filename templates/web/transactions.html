@@ -1,32 +1,88 @@
 {% extends "web/base.html" %}
+{% block title %}Transactions | WAJ VTU{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
 {% block content %}
 {% include "web/_service_nav.html" %}
 {% include "web/_header.html" %}
+
 <main class="page-shell">
-  <div class="page-heading"><div><h1>Transactions</h1><p>A clear record of your wallet activity and purchases.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
-  <div class="tx-list">
-    {% for tx in transactions %}
-    <div class="tx-item">
-      <div class="tx-details">
-        <div class="tx-title">{{ tx.type|title }}{% if tx.recipient %} — {{ tx.recipient }}{% endif %}</div>
-        <div class="tx-meta">{{ tx.reference }} · {{ tx.created_at.strftime("%b %d, %Y %I:%M %p") }}</div>
-      </div>
-      <div class="tx-right">
-        <div class="tx-amount">{{ "+" if tx.type == "DEPOSIT" else "-" }}₦{{ "{:,.2f}".format(tx.amount) }}</div>
-        <div class="tx-status status-{{ 'success' if tx.status == 'SUCCESS' else ('pending' if tx.status == 'PENDING' else 'failed') }}">
-          {{ tx.status|title }}
-        </div>
-      </div>
+  <div class="page-heading">
+    <div>
+      <h1>Transactions History</h1>
+      <p>A full, verifiable record of all your wallet funding and service purchases.</p>
     </div>
-    {% if tx.status == "SUCCESS" %}
-    <details class="transaction-receipt">
-      <summary>View photo receipt</summary>
-      <img src="{{ url_for('web.receipt_image', reference=tx.reference) }}" alt="Photo receipt for {{ tx.reference }}">
-    </details>
-    {% endif %}
+    <a class="page-back" href="{{ url_for('web.dashboard') }}">← Back to Dashboard</a>
+  </div>
+
+  <div class="transactions-container">
+    {% if transactions %}
+    <div class="table-responsive">
+      <table class="modern-table">
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Reference / Details</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Date &amp; Time</th>
+            <th style="text-align:right;">Receipt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tx in transactions %}
+          <tr>
+            <td>
+              <div class="tx-cell-service">
+                <span class="tx-type-icon icon-{{ tx.type|lower if tx.type|lower in ['data','airtime','electric','tv'] else 'more' }}">
+                  {% if tx.type == 'DATA' %}📶{% elif tx.type == 'AIRTIME' %}📱{% elif tx.type == 'ELECTRICITY' %}⚡{% elif tx.type == 'CABLE' %}📺{% elif tx.type == 'BETTING' %}🎯{% elif tx.type == 'EDU' %}🎓{% elif tx.type == 'DEPOSIT' %}＋{% else %}•••{% endif %}
+                </span>
+                <div>
+                  <strong>{{ tx.type|title }}</strong>
+                  {% if tx.recipient %}<small class="tx-recipient-text">{{ tx.recipient }}</small>{% endif %}
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="tx-cell-ref">
+                <code>{{ tx.reference }}</code>
+                {% if tx.description %}<small class="tx-recipient-text">{{ tx.description }}</small>{% endif %}
+              </div>
+            </td>
+            <td>
+              <span class="tx-cell-amount {{ 'positive' if tx.type == 'DEPOSIT' else 'negative' }}">
+                {{ "+" if tx.type == "DEPOSIT" else "-" }}₦{{ "{:,.2f}".format(tx.amount) }}
+              </span>
+            </td>
+            <td>
+              <span class="status-badge status-{{ 'success' if tx.status == 'SUCCESS' else ('pending' if tx.status == 'PENDING' else 'failed') }}">
+                {{ tx.status|title }}
+              </span>
+            </td>
+            <td>
+              <span class="tx-cell-date">{{ tx.created_at.strftime("%b %d, %Y %I:%M %p") }}</span>
+            </td>
+            <td style="text-align:right;">
+              {% if tx.status == "SUCCESS" %}
+              <a class="btn-receipt-view" href="{{ url_for('web.receipt_image', reference=tx.reference) }}" target="_blank" rel="noopener">
+                View Receipt
+              </a>
+              {% else %}
+              <span class="tx-no-receipt">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% else %}
-    <div class="tx-item"><div class="tx-details"><div class="tx-title">No transactions yet</div></div></div>
-    {% endfor %}
+    <div class="empty-state-card">
+      <span class="empty-icon">💳</span>
+      <h3>No transactions logged yet</h3>
+      <p>All your mobile recharges, bill payments and wallet deposits will be tracked here.</p>
+      <a href="{{ url_for('web.dashboard') }}" class="btn-empty-action">Go to Services</a>
+    </div>
+    {% endif %}
   </div>
 </main>
 {% endblock %}

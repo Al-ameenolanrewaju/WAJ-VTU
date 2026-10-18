@@ -1,12 +1,147 @@
 <nav class="site-nav">
-  <a class="site-brand" href="{{ url_for('web.dashboard') }}">WAJ <span>VTU</span></a>
-  <button class="site-menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" onclick="const menu = this.nextElementSibling; const open = menu.classList.toggle('open'); this.setAttribute('aria-expanded', open);">☰</button>
-  <div class="site-nav-links">
-    <a href="{{ url_for('web.dashboard') }}" class="{{ 'active' if request.path == url_for('web.dashboard') else '' }}">Dashboard</a>
-    <a href="{{ url_for('web.buy_data') }}" class="{{ 'active' if request.path == url_for('web.buy_data') else '' }}">Data</a>
-    <a href="{{ url_for('web.airtime_page') }}" class="{{ 'active' if request.path == url_for('web.airtime_page') else '' }}">Airtime</a>
-    <a href="{{ url_for('web.transactions_page') }}" class="{{ 'active' if request.path == url_for('web.transactions_page') else '' }}">Transactions</a>
-    <a class="site-nav-balance" href="{{ url_for('web.fund_wallet') }}">Fund wallet</a>
-    <a href="{{ url_for('auth.logout') }}">Log out</a>
+  <div class="site-nav-container">
+    <div class="site-nav-left">
+      <a class="site-brand" href="{{ url_for('web.dashboard') }}">
+        <span class="site-brand-icon">⚡</span>WAJ <span>VTU</span>
+      </a>
+      <div class="site-nav-links" id="site-desktop-links">
+        <a href="{{ url_for('web.dashboard') }}" class="nav-item {{ 'active' if request.path == url_for('web.dashboard') else '' }}">
+          <span class="nav-icon">📊</span>Dashboard
+        </a>
+        <a href="{{ url_for('web.transactions_page') }}" class="nav-item {{ 'active' if request.path == url_for('web.transactions_page') else '' }}">
+          <span class="nav-icon">💳</span>Transactions
+        </a>
+        <div class="nav-dropdown">
+          <button type="button" class="nav-dropdown-toggle {{ 'active' if '/buy' in request.path else '' }}" aria-haspopup="true" aria-expanded="false" onclick="this.parentElement.classList.toggle('open');">
+            <span class="nav-icon">⚡</span>Services <span class="arrow-down">▾</span>
+          </button>
+          <div class="nav-dropdown-menu">
+            <a href="{{ url_for('web.airtime_page') }}">📱 Airtime Recharge</a>
+            <a href="{{ url_for('web.buy_data') }}">📶 Data Bundles</a>
+            <a href="{{ url_for('web.cable_page') }}">📺 Cable TV</a>
+            <a href="{{ url_for('web.electricity_page') }}">⚡ Electricity Bills</a>
+            <a href="{{ url_for('web.education_page') }}">🎓 Exam PINs</a>
+          </div>
+        </div>
+        <a href="{{ url_for('web.referrals_page') }}" class="nav-item {{ 'active' if request.path == url_for('web.referrals_page') else '' }}">
+          <span class="nav-icon">🎁</span>Referrals
+        </a>
+        <a href="{{ url_for('web.support_page') }}" class="nav-item {{ 'active' if request.path == url_for('web.support_page') else '' }}">
+          <span class="nav-icon">🎧</span>Support
+        </a>
+      </div>
+    </div>
+
+    <div class="site-nav-right">
+      {% if is_admin %}
+      <a class="nav-admin-badge" href="{{ url_for('admin_dashboard') }}">Admin Panel</a>
+      {% endif %}
+      
+      <a class="nav-wallet-pill" href="{{ url_for('web.fund_wallet') }}" title="Fund wallet">
+        <span class="pill-label">Balance</span>
+        <strong class="pill-amount">₦{{ "{:,.2f}".format(user.wallet_balance if user else 0) }}</strong>
+        <span class="pill-add">＋</span>
+      </a>
+
+      <div class="nav-user-cluster">
+        <span class="nav-avatar" title="{{ user.name or 'Account' }}">{{ (user.name or "U")[0]|upper }}</span>
+        <a href="{{ url_for('auth.logout') }}" class="nav-logout-link" title="Log out">Logout</a>
+      </div>
+
+      <button class="site-menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" onclick="const m = document.getElementById('site-mobile-drawer'); const isOpen = m.classList.toggle('open'); this.setAttribute('aria-expanded', isOpen); document.body.classList.toggle('nav-drawer-open', isOpen);">
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+      </button>
+    </div>
   </div>
+
+  <!-- Mobile Off-Canvas Drawer -->
+  <div class="site-mobile-drawer" id="site-mobile-drawer">
+    <div class="mobile-drawer-backdrop" onclick="document.getElementById('site-mobile-drawer').classList.remove('open'); document.body.classList.remove('nav-drawer-open');"></div>
+    <div class="mobile-drawer-pane">
+      <div class="mobile-drawer-header">
+        <div class="mobile-user-card">
+          <span class="mobile-user-avatar">{{ (user.name or "U")[0]|upper }}</span>
+          <div class="mobile-user-meta">
+            <strong>{{ user.name or "Customer" }}</strong>
+            <small>{{ user.phone or user.email or "WAJ VTU User" }}</small>
+          </div>
+        </div>
+        <button type="button" class="mobile-drawer-close" aria-label="Close menu" onclick="document.getElementById('site-mobile-drawer').classList.remove('open'); document.body.classList.remove('nav-drawer-open');">&times;</button>
+      </div>
+
+      <div class="mobile-wallet-strip">
+        <div>
+          <span class="mws-label">Wallet Balance</span>
+          <div class="mws-amount">₦{{ "{:,.2f}".format(user.wallet_balance if user else 0) }}</div>
+        </div>
+        <a href="{{ url_for('web.fund_wallet') }}" class="mws-btn">＋ Fund</a>
+      </div>
+
+      <div class="mobile-nav-group">
+        <div class="mobile-nav-title">MAIN</div>
+        <a href="{{ url_for('web.dashboard') }}" class="mobile-link {{ 'active' if request.path == url_for('web.dashboard') else '' }}">
+          <span>📊</span> Dashboard
+        </a>
+        <a href="{{ url_for('web.transactions_page') }}" class="mobile-link {{ 'active' if request.path == url_for('web.transactions_page') else '' }}">
+          <span>💳</span> Transactions
+        </a>
+        <a href="{{ url_for('web.referrals_page') }}" class="mobile-link {{ 'active' if request.path == url_for('web.referrals_page') else '' }}">
+          <span>🎁</span> Refer &amp; Earn
+        </a>
+        <a href="{{ url_for('web.support_page') }}" class="mobile-link {{ 'active' if request.path == url_for('web.support_page') else '' }}">
+          <span>🎧</span> Support Desk
+        </a>
+      </div>
+
+      <div class="mobile-nav-group">
+        <div class="mobile-nav-title">SERVICES</div>
+        <a href="{{ url_for('web.airtime_page') }}" class="mobile-link"><span>📱</span> Airtime Recharge</a>
+        <a href="{{ url_for('web.buy_data') }}" class="mobile-link"><span>📶</span> Data Bundles</a>
+        <a href="{{ url_for('web.cable_page') }}" class="mobile-link"><span>📺</span> Cable TV</a>
+        <a href="{{ url_for('web.electricity_page') }}" class="mobile-link"><span>⚡</span> Electricity</a>
+        <a href="{{ url_for('web.education_page') }}" class="mobile-link"><span>🎓</span> Exam PINs</a>
+      </div>
+
+      {% if is_admin %}
+      <div class="mobile-nav-group">
+        <div class="mobile-nav-title">ADMINISTRATION</div>
+        <a href="{{ url_for('admin_dashboard') }}" class="mobile-link admin-highlight">
+          <span>⚙️</span> Admin Control Panel
+        </a>
+      </div>
+      {% endif %}
+
+      <div class="mobile-drawer-footer">
+        <a href="{{ url_for('auth.logout') }}" class="mobile-logout-btn">
+          <span>🚪</span> Log out
+        </a>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- Mobile Bottom Navigation Bar -->
+<nav class="mobile-bottom-nav">
+  <a href="{{ url_for('web.dashboard') }}" class="bnav-item {{ 'active' if request.path == url_for('web.dashboard') else '' }}">
+    <span class="bnav-icon">📊</span>
+    <span class="bnav-text">Dashboard</span>
+  </a>
+  <a href="{{ url_for('web.buy_data') }}" class="bnav-item {{ 'active' if '/buy' in request.path else '' }}">
+    <span class="bnav-icon">⚡</span>
+    <span class="bnav-text">Services</span>
+  </a>
+  <a href="{{ url_for('web.fund_wallet') }}" class="bnav-item bnav-fund {{ 'active' if request.path == url_for('web.fund_wallet') else '' }}">
+    <span class="bnav-fund-circle">＋</span>
+    <span class="bnav-text">Fund</span>
+  </a>
+  <a href="{{ url_for('web.transactions_page') }}" class="bnav-item {{ 'active' if request.path == url_for('web.transactions_page') else '' }}">
+    <span class="bnav-icon">💳</span>
+    <span class="bnav-text">Activity</span>
+  </a>
+  <a href="{{ url_for('web.referrals_page') }}" class="bnav-item {{ 'active' if request.path == url_for('web.referrals_page') else '' }}">
+    <span class="bnav-icon">🎁</span>
+    <span class="bnav-text">Referrals</span>
+  </a>
 </nav>

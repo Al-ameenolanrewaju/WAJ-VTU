@@ -1101,3 +1101,152 @@ def test_swiftbills_exam_catalog_includes_neco_and_other_exam_pins(monkeypatch):
     packages = provider.fetch_education_packages()
 
     assert [package["name"] for package in packages] == ["WAEC", "NECO", "NABTEB"]
+
+
+def test_submit_support_ticket_tool_escalates_and_alerts_admin(monkeypatch):
+    import app as app_module
+    import chat_agent
+
+    sent_alerts = []
+    monkeypatch.setattr(
+        app_module,
+        "send_whatsapp_message",
+        lambda phone, message: sent_alerts.append((phone, message)),
+    )
+    monkeypatch.setenv("ADMIN_PHONE", "2348100000099")
+
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"234{uuid.uuid4().hex[:10]}",
+            phone=f"234{uuid.uuid4().hex[:10]}",
+            name="Test Customer",
+            wallet_balance=Decimal("500.00"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+        result = chat_agent.execute_tool(
+            app_module.app,
+            app_module.db,
+            user,
+            user.phone,
+            "submit_support_ticket",
+            {
+                "reference": "REF_DATA_12345",
+                "service": "MTN 1GB",
+                "recipient": "08012345678",
+                "issue": "Debited but data bundle was not credited after 15 minutes",
+            },
+        )
+
+        assert result["status"] == "success"
+        assert "submitted successfully" in result["message"]
+        assert user.is_escalated is True
+        assert len(sent_alerts) == 1
+        assert sent_alerts[0][0] == "2348100000099"
+        assert "REF_DATA_12345" in sent_alerts[0][1]
+        assert "MTN 1GB" in sent_alerts[0][1]
+
+
+def test_support_page_contains_no_direct_call_and_shows_whatsapp_support_form():
+    import app as app_module
+
+    client = app_module.app.test_client()
+    response = client.get("/support")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    # Ensure no direct call option anywhere
+    assert "tel:" not in html
+    assert "Call Customer Care" not in html
+    assert "Telephone Desk" not in html
+
+    # Ensure Email Support card is removed
+    assert "Email Support" not in html
+    assert "Official Inbox" not in html
+    assert "mailto:" not in html
+
+    # Ensure official support form is inside WhatsApp
+    assert "Fill Support Form in WhatsApp" in html
+    assert "SUPPORT%20FORM" in html or "Support Form" in html
+
+
+def test_support_form_popup_page_renders_and_submits(monkeypatch):
+    import app as app_module
+
+    sent_alerts = []
+    monkeypatch.setattr(
+        app_module,
+        "send_whatsapp_message",
+        lambda phone, message: sent_alerts.append((phone, message)),
+    )
+    monkeypatch.setenv("ADMIN_PHONE", "2348100000099")
+
+    client = app_module.app.test_client()
+
+    # GET /support/form
+    res_get = client.get("/support/form?phone=08012345678&ref=REF_DATA_777")
+    assert res_get.status_code == 200
+    html_get = res_get.get_data(as_text=True)
+    assert "Official Support &amp; Dispute Form" in html_get or "Official Support & Dispute Form" in html_get
+    assert "08012345678" in html_get
+    assert "REF_DATA_777" in html_get
+
+    # POST /support/form (AJAX JSON)
+    payload = {
+        "phone": "08012345678",
+        "ref": "REF_DATA_777",
+        "service_type": "DATA",
+        "recipient": "08012345678",
+        "category": "Debited but value not delivered",
+        "description": "Paid ₦410 for 1GB, bank debited but data not received",
+    }
+    res_post = client.post("/support/form", json=payload)
+    assert res_post.status_code == 200
+    data = res_post.get_json()
+    assert data["status"] == "success"
+    assert "ticket_code" in data
+    assert len(sent_alerts) == 2  # Admin alert + User confirmation
+    assert any("2348100000099" in alert[0] for alert in sent_alerts)
+    assert any("08012345678" in alert[0] for alert in sent_alerts)
+
+
+def test_chat_message_support_form_popup_link(monkeypatch):
+    import app as app_module
+    import chat_agent
+
+    sent_messages = []
+    monkeypatch.setattr(
+        app_module,
+        "send_whatsapp_interactive_url",
+        lambda recipient, body_text, button_title, url, header_text: sent_messages.append((recipient, body_text, url)),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "send_whatsapp_message",
+        lambda phone, message: sent_messages.append((phone, message, "")),
+    )
+
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"234{uuid.uuid4().hex[:10]}",
+            phone=f"234{uuid.uuid4().hex[:10]}",
+            wallet_balance=Decimal("100.00"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+        chat_agent.handle_chat_message(
+            app_module.app,
+            app_module.db,
+            user,
+            "I want to fill the support form",
+            "msg-1234",
+            user.phone,
+        )
+
+        assert len(sent_messages) >= 1
+        # The URL sent contains /support/form
+        assert any("/support/form" in msg[2] or "/support/form" in msg[1] for msg in sent_messages)
+
+

@@ -1,0 +1,356 @@
+{% extends "web/base.html" %}
+{% block title %}WAJ VTU | Customer Support &amp; Help Desk{% endblock %}
+{% block body_class %}dashboard-body{% endblock %}
+
+{% block content %}
+{% include "web/_service_nav.html" %}
+
+<main class="page-container" style="max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px 16px;">
+  <!-- Support Header -->
+  <div style="margin-bottom: 32px;">
+    <div style="display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 9999px; background: rgba(255, 221, 0, 0.12); border: 1.5px solid var(--amber); color: #090909; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px;">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: #10b981; display: inline-block;"></span>
+      24/7 Dedicated Customer Care
+    </div>
+    <h1 style="font-family: 'Space Grotesk', sans-serif; font-size: clamp(26px, 3.5vw, 36px); font-weight: 700; color: var(--indigo); margin-bottom: 8px;">
+      Customer Support &amp; Resolution Hub
+    </h1>
+    <p style="color: var(--slate); font-size: 15px; line-height: 1.6; max-width: 680px;">
+      We're here to resolve issues quickly. Official dispute forms and support tickets are filled <strong>exclusively inside our WhatsApp chatbot</strong> for instant carrier tracking and fraud protection. You can also inspect any transaction reference below.
+    </p>
+  </div>
+
+  <!-- Priority WhatsApp Support Channels -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; margin-bottom: 40px;">
+    <!-- WhatsApp Support Chat -->
+    <div style="background: #ffffff; border: 1.5px solid #25D366; border-radius: 16px; padding: 24px; box-shadow: 0 4px 12px rgba(37, 211, 102, 0.08); display: flex; flex-direction: column; justify-content: space-between;">
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(37, 211, 102, 0.12); color: #25D366; display: flex; align-items: center; justify-content: center; font-size: 22px;">
+            💬
+          </div>
+          <span style="background: rgba(37, 211, 102, 0.12); color: #16a34a; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px;">
+            ● Active 24/7
+          </span>
+        </div>
+        <h3 style="font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; color: #090909; margin-bottom: 6px;">WhatsApp Support Chat</h3>
+        <p style="color: var(--slate); font-size: 13px; line-height: 1.5; margin-bottom: 18px;">
+          Direct live chat with our customer care team &amp; 24/7 automated assistance in English, Pidgin, Hausa, Yoruba, and Igbo.
+        </p>
+      </div>
+      <div>
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700; color: #090909; margin-bottom: 14px;">
+          {{ support_phone }}
+        </div>
+        <a href="{{ support_whatsapp_url }}" target="_blank" rel="noopener" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; background: #25D366; color: #090909; font-weight: 800; font-size: 14px; padding: 12px; border-radius: 10px; text-decoration: none; transition: background 0.15s ease;">
+          Open WhatsApp Chat ↗
+        </a>
+      </div>
+    </div>
+
+    <!-- WhatsApp Support Form Desk (WhatsApp Chatbot Exclusive) -->
+    <div style="background: #ffffff; border: 1.5px solid var(--border); border-radius: 16px; padding: 24px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; justify-content: space-between;">
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 221, 0, 0.2); color: #090909; display: flex; align-items: center; justify-content: center; font-size: 22px;">
+            📝
+          </div>
+          <span style="background: #090909; color: #FFDD00; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 9999px;">
+            WhatsApp Only Form
+          </span>
+        </div>
+        <h3 style="font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; color: #090909; margin-bottom: 6px;">WhatsApp Support Form</h3>
+        <p style="color: var(--slate); font-size: 13px; line-height: 1.5; margin-bottom: 18px;">
+          Official support and dispute forms are filed exclusively inside our WhatsApp chatbot to guarantee verified identity and instant carrier correlation.
+        </p>
+      </div>
+      <div>
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #090909; margin-bottom: 12px;">
+          Interactive WhatsApp Popup
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <a href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU%2C%20I%20want%20to%20fill%20the%20support%20form" target="_blank" rel="noopener" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; background: #090909; color: #FFDD00; font-weight: 800; font-size: 14px; padding: 12px; border-radius: 10px; text-decoration: none; transition: background 0.15s ease;">
+            Fill Support Form in WhatsApp ↗
+          </a>
+          <button type="button" onclick="openSupportFormModal();" style="display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; background: #f8fafc; color: #090909; font-weight: 700; font-size: 12px; padding: 9px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: background 0.15s ease;">
+            ⚡ Preview In-App HTML Form Popup
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dedicated Support Form Guide Section -->
+  <div style="background: #090909; color: #ffffff; border-radius: 20px; padding: 36px 30px; margin-bottom: 40px; border: 2px solid #FFDD00;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 24px;">
+      <div>
+        <span style="display: inline-block; background: #FFDD00; color: #090909; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 9999px; text-transform: uppercase; margin-bottom: 10px;">
+          WhatsApp In-App HTML Form
+        </span>
+        <h2 style="font-family: 'Space Grotesk', sans-serif; font-size: clamp(22px, 3vw, 28px); font-weight: 700; color: #ffffff; margin: 0 0 6px 0;">
+          An HTML Form Pops Up Inside WhatsApp For Support
+        </h2>
+        <p style="color: #cbd5e1; font-size: 14px; max-width: 620px; line-height: 1.6; margin: 0;">
+          When you request support or dispute a delayed transaction on WhatsApp, an interactive HTML form pops up directly over your chat as a native modal sheet. Fill in your details with instant auto-validation and immediate carrier log correlation.
+        </p>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button type="button" onclick="openSupportFormModal();" style="display: inline-flex; align-items: center; gap: 8px; background: #262626; border: 1.5px solid #FFDD00; color: #FFDD00; font-weight: 800; font-size: 13px; padding: 12px 18px; border-radius: 12px; cursor: pointer; transition: transform 0.15s ease;">
+          ⚡ Preview Popup Form
+        </button>
+        <a href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU%2C%20I%20want%20to%20fill%20the%20support%20form" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 8px; background: #FFDD00; color: #000000; font-weight: 800; font-size: 14px; padding: 12px 20px; border-radius: 12px; text-decoration: none; transition: transform 0.15s ease;">
+          Launch Inside WhatsApp ↗
+        </a>
+      </div>
+    </div>
+
+    <!-- 3 Steps -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px;">
+      <div style="background: #171717; border: 1px solid #333333; border-radius: 12px; padding: 18px;">
+        <div style="font-size: 20px; margin-bottom: 8px;">1️⃣</div>
+        <div style="font-weight: 700; font-size: 15px; color: #FFDD00; margin-bottom: 6px;">Launch Chatbot</div>
+        <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 0;">
+          Send <strong>"support form"</strong> or click any quick-template below to begin your ticket intake.
+        </p>
+      </div>
+
+      <div style="background: #171717; border: 1px solid #333333; border-radius: 12px; padding: 18px;">
+        <div style="font-size: 20px; margin-bottom: 8px;">2️⃣</div>
+        <div style="font-weight: 700; font-size: 15px; color: #FFDD00; margin-bottom: 6px;">Provide 4 Details</div>
+        <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 0;">
+          Reply with your Reference, Service type, Recipient number, and brief Issue description.
+        </p>
+      </div>
+
+      <div style="background: #171717; border: 1px solid #333333; border-radius: 12px; padding: 18px;">
+        <div style="font-size: 20px; margin-bottom: 8px;">3️⃣</div>
+        <div style="font-weight: 700; font-size: 15px; color: #FFDD00; margin-bottom: 6px;">Live Verification</div>
+        <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 0;">
+          The bot verifies your order with carrier switches; if manual review is needed, an admin takes over the chat.
+        </p>
+      </div>
+    </div>
+
+    <!-- Quick Form Deep Link Buttons -->
+    <div>
+      <span style="font-size: 12px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 12px;">
+        Quick-Click Support Form Templates (Opens Directly In WhatsApp):
+      </span>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <a href="https://wa.me/2348102314725?text=SUPPORT%20FORM%3A%20Delayed%20or%20failed%20VTU%20order" target="_blank" rel="noopener" style="background: #262626; border: 1px solid #404040; color: #ffffff; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px; text-decoration: none;">
+          ⚡ Delayed / Failed Order Form
+        </a>
+        <a href="https://wa.me/2348102314725?text=SUPPORT%20FORM%3A%20Wallet%20funding%20dispute" target="_blank" rel="noopener" style="background: #262626; border: 1px solid #404040; color: #ffffff; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px; text-decoration: none;">
+          💳 Wallet Funding Dispute Form
+        </a>
+        <a href="https://wa.me/2348102314725?text=SUPPORT%20FORM%3A%20Electricity%20token%20or%20Exam%20PIN%20resend" target="_blank" rel="noopener" style="background: #262626; border: 1px solid #404040; color: #ffffff; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px; text-decoration: none;">
+          🔑 Token / Exam PIN Recovery
+        </a>
+        <a href="https://wa.me/2348102314725?text=speak%20to%20human" target="_blank" rel="noopener" style="background: #262626; border: 1px solid #404040; color: #ffffff; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px; text-decoration: none;">
+          👤 Speak With Human Supervisor
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Real-Time Transaction Reference Status Checker -->
+  <div style="background: #ffffff; border: 1.5px solid var(--border); border-radius: 20px; padding: 32px 28px; box-shadow: var(--shadow-md); margin-bottom: 40px;">
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+      <span style="font-size: 24px;">🔍</span>
+      <h2 style="font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 700; color: var(--indigo);">
+        Real-Time Transaction Reference Checker
+      </h2>
+    </div>
+    <p style="color: var(--slate); font-size: 14px; margin-bottom: 24px;">
+      Have a question about a specific order? Paste your transaction reference code below to inspect live provider fulfillment details.
+    </p>
+
+    <form method="GET" action="{{ url_for('web.support_page') }}" style="display: flex; gap: 12px; flex-wrap: wrap;">
+      <input type="text" name="ref" value="{{ searched_ref }}" placeholder="Enter reference code (e.g. REF_DATA_..., DEP_WEBSITE_...)" required style="flex: 1; min-width: 260px; padding: 14px 18px; border: 1.5px solid var(--border); border-radius: 12px; font-size: 14px; outline: none; background: #f8fafc;">
+      <button type="submit" style="background: var(--amber); color: #000000; font-weight: 800; font-size: 14px; padding: 14px 26px; border: none; border-radius: 12px; cursor: pointer;">
+        Track Status ↗
+      </button>
+    </form>
+
+    <!-- Search Results Display -->
+    {% if searched_ref %}
+      <div style="margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border);">
+        {% if found_tx %}
+          <div style="background: #f8fafc; border: 1.5px solid var(--border); border-radius: 14px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+              <div>
+                <span style="font-size: 11px; font-weight: 700; color: var(--slate-subtle); text-transform: uppercase;">Transaction Found</span>
+                <div style="font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; color: var(--indigo);">
+                  {{ found_tx.reference }}
+                </div>
+              </div>
+              <div>
+                {% if found_tx.status == 'SUCCESS' %}
+                  <span style="display: inline-flex; align-items: center; gap: 6px; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: 800; padding: 6px 14px; border-radius: 9999px;">
+                    ✓ COMPLETED &amp; DELIVERED
+                  </span>
+                {% elif found_tx.status == 'PENDING' %}
+                  <span style="display: inline-flex; align-items: center; gap: 6px; background: #fef3c7; color: #b45309; font-size: 12px; font-weight: 800; padding: 6px 14px; border-radius: 9999px;">
+                    ⏳ PENDING GATEWAY VERIFICATION
+                  </span>
+                {% else %}
+                  <span style="display: inline-flex; align-items: center; gap: 6px; background: #fee2e2; color: #b91c1c; font-size: 12px; font-weight: 800; padding: 6px 14px; border-radius: 9999px;">
+                    ✕ FAILED / REFUNDED
+                  </span>
+                {% endif %}
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 16px;">
+              <div>
+                <span style="font-size: 11px; color: var(--slate-subtle);">Service / Type</span>
+                <div style="font-size: 14px; font-weight: 600; color: var(--indigo);">{{ found_tx.type|capitalize }}</div>
+              </div>
+              <div>
+                <span style="font-size: 11px; color: var(--slate-subtle);">Amount</span>
+                <div style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: var(--indigo);">
+                  ₦{{ "{:,.2f}".format(found_tx.amount) }}
+                </div>
+              </div>
+              <div>
+                <span style="font-size: 11px; color: var(--slate-subtle);">Date &amp; Time</span>
+                <div style="font-size: 13px; color: var(--slate);">{{ found_tx.created_at.strftime('%b %d, %Y - %I:%M %p') if found_tx.created_at else 'N/A' }}</div>
+              </div>
+              <div>
+                <span style="font-size: 11px; color: var(--slate-subtle);">Description</span>
+                <div style="font-size: 13px; color: var(--slate);">{{ found_tx.description or 'VTU Service fulfillment' }}</div>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+              <a href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU%2C%20I%20am%20submitting%20a%20support%20form%20for%20reference%20{{ found_tx.reference }}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 8px; background: #25D366; color: #090909; font-weight: 800; font-size: 13px; padding: 10px 18px; border-radius: 8px; text-decoration: none;">
+                Fill Support Form on WhatsApp With This Ref ↗
+              </a>
+              {% if found_tx.status == 'SUCCESS' %}
+                <a href="{{ url_for('web.receipt_image', reference=found_tx.reference) }}" target="_blank" style="display: inline-flex; align-items: center; gap: 8px; background: #ffffff; border: 1px solid var(--border); color: var(--indigo); font-weight: 600; font-size: 13px; padding: 10px 18px; border-radius: 8px; text-decoration: none;">
+                  Download Official Receipt ↗
+                </a>
+              {% endif %}
+            </div>
+          </div>
+        {% else %}
+          <div style="background: #fff1f2; border: 1.5px solid #fecdd3; border-radius: 12px; padding: 18px; color: #9f1239; font-size: 14px;">
+            <strong>Reference not found:</strong> We could not locate a transaction with reference <code>{{ searched_ref }}</code>. Please verify the code from your debit alert or open our WhatsApp support chatbot for manual verification.
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- How Support Works (Architecture & Guarantee) -->
+  <div style="background: #ffffff; border: 1.5px solid var(--border); border-radius: 20px; padding: 32px 28px; box-shadow: var(--shadow-sm); margin-bottom: 40px;">
+    <h2 style="font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 700; color: var(--indigo); margin-bottom: 8px;">
+      How WAJ VTU Customer Care Works
+    </h2>
+    <p style="color: var(--slate); font-size: 14px; margin-bottom: 24px;">
+      Our 4-tier support framework ensures no customer is left stranded or without clear answers.
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
+      <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 20px;">
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 800; color: #000000; margin-bottom: 8px;">TIER 01</div>
+        <h4 style="font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 700; margin-bottom: 6px;">Instant AI Self-Service</h4>
+        <p style="font-size: 13px; color: var(--slate); line-height: 1.5;">
+          Our WhatsApp AI assistant checks balances, fetches real-time plan prices, and emails receipts automatically 24/7.
+        </p>
+      </div>
+
+      <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 20px;">
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 800; color: #000000; margin-bottom: 8px;">TIER 02</div>
+        <h4 style="font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 700; margin-bottom: 6px;">In-Chat Support Form</h4>
+        <p style="font-size: 13px; color: var(--slate); line-height: 1.5;">
+          File disputes conversationally inside WhatsApp. The assistant structures your ticket and immediately correlates with provider logs.
+        </p>
+      </div>
+
+      <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 20px;">
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 800; color: #000000; margin-bottom: 8px;">TIER 03</div>
+        <h4 style="font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 700; margin-bottom: 6px;">Human Admin Escalation</h4>
+        <p style="font-size: 13px; color: var(--slate); line-height: 1.5;">
+          Unresolved issues automatically ping our administrative team with your ticket summary for immediate human resolution.
+        </p>
+      </div>
+
+      <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 20px;">
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 800; color: #000000; margin-bottom: 8px;">TIER 04</div>
+        <h4 style="font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 700; margin-bottom: 6px;">Deterministic Refunds</h4>
+        <p style="font-size: 13px; color: var(--slate); line-height: 1.5;">
+          If a telecom network rejects an order, your wallet balance is never lost and is immediately reversed or credited.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Common Resolution FAQs -->
+  <div style="background: #ffffff; border: 1.5px solid var(--border); border-radius: 20px; padding: 32px 28px; box-shadow: var(--shadow-sm);">
+    <h3 style="font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700; color: var(--indigo); margin-bottom: 16px;">
+      Frequently Resolved Inquiries
+    </h3>
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <details style="background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px;">
+        <summary style="font-weight: 700; color: var(--indigo); cursor: pointer;">Why can't I fill a support form directly on this website?</summary>
+        <p style="margin-top: 10px; font-size: 13px; color: var(--slate); line-height: 1.6;">
+          To prevent unauthorized ticket tampering, impersonation, and delayed carrier lookups, all official dispute forms are filled <strong>exclusively inside our WhatsApp chatbot</strong>. This immediately connects your WhatsApp phone identity with the telecom gateway transaction logs.
+        </p>
+      </details>
+      <details style="background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px;">
+        <summary style="font-weight: 700; color: var(--indigo); cursor: pointer;">What happens if my data bundle hasn't delivered after payment?</summary>
+        <p style="margin-top: 10px; font-size: 13px; color: var(--slate); line-height: 1.6;">
+          Telecom networks process data top-ups in 5 to 60 seconds. If an operator suffers congestion, the transaction enters PENDING. If the operator fails the delivery, your wallet is automatically returned. You can also paste your reference code above to check the latest provider response.
+        </p>
+      </details>
+      <details style="background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px;">
+        <summary style="font-weight: 700; color: var(--indigo); cursor: pointer;">How do I request an official receipt sent to my email?</summary>
+        <p style="margin-top: 10px; font-size: 13px; color: var(--slate); line-height: 1.6;">
+          You can download receipts directly from your <a href="{{ url_for('web.transactions_page') }}" style="color: #000000; font-weight: 700;">Transactions page</a> by clicking on any transaction, or message our WhatsApp bot with "send receipt for my last transaction".
+        </p>
+      </details>
+      <details style="background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px;">
+        <summary style="font-weight: 700; color: var(--indigo); cursor: pointer;">How can I speak to a live human agent?</summary>
+        <p style="margin-top: 10px; font-size: 13px; color: var(--slate); line-height: 1.6;">
+          You can request human assistance or fill an official dispute form directly inside our WhatsApp chatbot by sending "speak to agent" or "support form". Our system immediately alerts our human supervisor desk to respond directly in your chat.
+        </p>
+      </details>
+    </div>
+  </div>
+
+  <!-- In-App Support Form Preview Modal -->
+  <div id="support-form-modal" style="display: none; position: fixed; inset: 0; z-index: 99999; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); align-items: center; justify-content: center; padding: 16px;">
+    <div style="background: #090909; border: 2px solid #FFDD00; border-radius: 20px; width: 100%; max-width: 520px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8);">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #262626; background: #141414;">
+        <div style="display: flex; align-items: center; gap: 8px; font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #ffffff;">
+          <span style="background: #FFDD00; color: #090909; width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800;">📱</span>
+          WhatsApp In-App Support Form (Live Preview)
+        </div>
+        <button type="button" onclick="closeSupportFormModal();" style="background: #262626; border: none; color: #ffffff; width: 28px; height: 28px; border-radius: 50%; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
+      </div>
+      <iframe src="{{ url_for('web.support_form_popup', ref=searched_ref) }}" style="width: 100%; height: 580px; max-height: calc(90vh - 58px); border: none; background: #090909;"></iframe>
+    </div>
+  </div>
+
+  <script>
+    function openSupportFormModal() {
+      var modal = document.getElementById('support-form-modal');
+      if (modal) {
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+      }
+    }
+    function closeSupportFormModal() {
+      var modal = document.getElementById('support-form-modal');
+      if (modal) {
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+      }
+    }
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeSupportFormModal();
+    });
+  </script>
+</main>
+{% endblock %}

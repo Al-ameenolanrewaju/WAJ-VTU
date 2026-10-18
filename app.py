@@ -17,8 +17,10 @@ from sqlalchemy import inspect, text, func, or_
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-# 1. Import db, User, and Transaction directly from models.py
-from models import db, User, Transaction, InboundMessage, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog
+from models import (
+    db, User, Transaction, InboundMessage, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog,
+    Referral, ReferralReward, MarketingContent, MarketingCampaign, MarketingMessage, MarketingSetting
+)
 from wallet_service import generate_payment_link, get_payment_fee_percentage
 
 # Import provider functions from the ClubKonnect adapter.
@@ -122,6 +124,11 @@ def _register_web_blueprint():
     app.register_blueprint(web_bp)
 _register_web_blueprint()
 
+def _register_marketing_blueprint():
+    from admin_marketing import marketing_admin_bp
+    app.register_blueprint(marketing_admin_bp)
+_register_marketing_blueprint()
+
 
 @app.route("/sitemap.xml")
 def sitemap():
@@ -163,6 +170,18 @@ def ensure_database_schema():
     if "admin_audit_logs" not in existing_tables:
         AdminAuditLog.__table__.create(bind=db.engine)
 
+    marketing_table_map = {
+        "referrals": Referral,
+        "referral_rewards": ReferralReward,
+        "marketing_content": MarketingContent,
+        "marketing_campaigns": MarketingCampaign,
+        "marketing_messages": MarketingMessage,
+        "marketing_settings": MarketingSetting,
+    }
+    for tbl_name, tbl_model in marketing_table_map.items():
+        if tbl_name not in existing_tables:
+            tbl_model.__table__.create(bind=db.engine)
+
     dialect = db.engine.dialect.name
     json_type = "JSONB" if dialect == "postgresql" else "JSON"
     required_columns = {
@@ -173,6 +192,8 @@ def ensure_database_schema():
             "version_id": "INTEGER NOT NULL DEFAULT 1",
             "email": "VARCHAR(120)",
             "password_hash": "VARCHAR(255)",
+            "referral_code": "VARCHAR(30)",
+            "referred_by_id": "INTEGER",
         },
         "transactions": {
             "meta_data": json_type,
@@ -200,6 +221,13 @@ def ensure_database_schema():
         where_clause = "WHERE email IS NOT NULL" if dialect == "postgresql" else ""
         db.session.execute(
             text(f'CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email_unique ON "users" (email) {where_clause}')
+        )
+        db.session.commit()
+
+    if "users" in existing_tables and "ix_users_referral_code" not in existing_indexes:
+        where_clause = "WHERE referral_code IS NOT NULL" if dialect == "postgresql" else ""
+        db.session.execute(
+            text(f'CREATE UNIQUE INDEX IF NOT EXISTS ix_users_referral_code ON "users" (referral_code) {where_clause}')
         )
         db.session.commit()
 
@@ -258,6 +286,19 @@ if ALLOW_DB_MUTATIONS:
         ensure_database_schema()
         seed_service_markups()
         seed_payment_fee_tiers()
+        try:
+            from services.marketing_settings import seed_default_marketing_settings
+            from services.referral_service import generate_unique_referral_code
+            seed_default_marketing_settings()
+            users_without_code = User.query.filter(
+                (User.referral_code == None) | (User.referral_code == "")  # noqa: E711
+            ).all()
+            if users_without_code:
+                for u in users_without_code:
+                    u.referral_code = generate_unique_referral_code()
+                db.session.commit()
+        except Exception as seed_err:
+            print(f"[startup] Marketing seeding warning: {seed_err}")
         existing_user_count = User.query.count()
         print(f"[startup] Existing users in database after create_all(): {existing_user_count}")
 
@@ -427,11 +468,13 @@ def enforce_https_redirect():
 
 @app.after_request
 def add_security_headers(response):
-    response.headers['X-Frame-Options'] = 'DENY'
+    is_form_popup = request.path.startswith("/support/form")
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN' if is_form_popup else 'DENY'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Permissions-Policy'] = 'geolocation=(), camera=(), microphone=()'
     response.headers['X-XSS-Protection'] = '1; mode=block'
+    frame_ancestor = "'self'" if is_form_popup else "'none'"
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
@@ -440,7 +483,7 @@ def add_security_headers(response):
         "img-src 'self' data:; "
         "object-src 'none'; "
         "base-uri 'self'; "
-        "frame-ancestors 'none'; "
+        f"frame-ancestors {frame_ancestor}; "
         "form-action 'self' https://wajvtu.com.ng https://checkout.paystack.com; "
         "upgrade-insecure-requests"
     )
@@ -581,6 +624,11 @@ def settle_transaction(user, result, amount, transaction_type, recipient, descri
         )
         db.session.add(tx)
         db.session.commit()
+        try:
+            from services.referral_service import process_referral_reward_for_transaction
+            process_referral_reward_for_transaction(tx)
+        except Exception as ref_err:
+            app.logger.error(f"Error checking referral reward for tx {tx.reference}: {ref_err}")
         return True
 
     user.wallet_balance += amount
@@ -915,6 +963,60 @@ def send_whatsapp_message(recipient, text):
         return False
 
 
+def send_whatsapp_interactive_url(recipient, body_text, button_title, url, header_text="WAJ VTU Support"):
+    """
+    Sends a WhatsApp message with an interactive CTA URL button (which triggers
+    the native in-app browser popup inside WhatsApp), falling back to a formatted link.
+    """
+    try:
+        meta_api_token = os.getenv("META_API_TOKEN", META_API_TOKEN).strip()
+        meta_phone_number_id = os.getenv("META_PHONE_NUMBER_ID", META_PHONE_NUMBER_ID).strip()
+        meta_api_version = os.getenv("META_API_VERSION", META_API_VERSION).strip()
+
+        if meta_api_token and meta_phone_number_id:
+            meta_url = f"https://graph.facebook.com/{meta_api_version}/{meta_phone_number_id}/messages"
+            meta_recipient = str(recipient).split("@", 1)[0].replace("+", "")
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": meta_recipient,
+                "type": "interactive",
+                "interactive": {
+                    "type": "cta_url",
+                    "header": {"type": "text", "text": header_text},
+                    "body": {"text": body_text},
+                    "action": {
+                        "name": "cta_url",
+                        "parameters": {
+                            "display_text": button_title[:20],
+                            "url": url
+                        }
+                    }
+                }
+            }
+            headers = {
+                "Authorization": f"Bearer {meta_api_token}",
+                "Content-Type": "application/json",
+            }
+            response = requests.post(meta_url, json=payload, headers=headers, timeout=20)
+            if response.ok:
+                return True
+            print(f"Meta CTA API HTTP Error ({response.status_code}): {response.text}")
+
+        fallback_text = (
+            f"*{header_text}*\n\n"
+            f"{body_text}\n\n"
+            f"👉 {url}\n\n"
+            f"_(Tap the link to open the Support Form popup inside WhatsApp)_"
+        )
+        return send_whatsapp_message(recipient, fallback_text)
+    except Exception as e:
+        print(f"Failed to send interactive WhatsApp message: {e}")
+        fallback_text = f"*{header_text}*\n\n{body_text}\n\n👉 {url}"
+        return send_whatsapp_message(recipient, fallback_text)
+
+
+
 def generate_receipt_png(transaction):
     """Render a successful transaction as a PNG image."""
     image = Image.new("RGB", (900, 650), "#f7f4ec")
@@ -1191,167 +1293,1000 @@ ADMIN_BASE_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VTU Admin Control Panel</title>
+    <title>WAJ VTU Admin Control Center</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        :root { --admin-ink:#090909; --admin-amber:#ffc400; --admin-bg:#f5f5f2; --admin-card:#ffffff; --admin-muted:#626262; --admin-border:#e4e4e0; }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+        :root {
+            --admin-ink: #09090b;
+            --admin-dark-bg: #111113;
+            --admin-sidebar-border: #222226;
+            --admin-amber: #ffc400;
+            --admin-amber-hover: #e5b000;
+            --admin-bg: #f8fafc;
+            --admin-card: #ffffff;
+            --admin-muted: #64748b;
+            --admin-border: #e2e8f0;
+            --admin-border-subtle: #f1f5f9;
+            --admin-success: #16a34a;
+            --admin-success-bg: #dcfce7;
+            --admin-alert: #dc2626;
+            --admin-alert-bg: #fee2e2;
+            --admin-pending: #d97706;
+            --admin-pending-bg: #fef3c7;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+        html, body { width: 100%; min-width: 0; height: 100%; }
         body { background-color: var(--admin-bg); color: var(--admin-ink); -webkit-font-smoothing: antialiased; }
+
+        a { color: inherit; text-decoration: none; }
+
+        /* Admin App Shell */
+        .admin-shell {
+            display: flex;
+            min-height: 100vh;
+            width: 100%;
+        }
+
+        /* Fixed Sidebar */
+        .admin-sidebar {
+            width: 260px;
+            background-color: var(--admin-ink);
+            border-right: 1px solid var(--admin-sidebar-border);
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #27272a transparent;
+        }
+
+        .sidebar-brand-box {
+            padding: 22px 20px 18px;
+            border-bottom: 1px solid var(--admin-sidebar-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sidebar-brand {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-brand-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            background: var(--admin-amber);
+            color: var(--admin-ink);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 800;
+        }
+
+        .sidebar-brand span { color: var(--admin-amber); }
+
+        .sidebar-brand-tag {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: rgba(255, 196, 0, 0.15);
+            color: var(--admin-amber);
+            border: 1px solid rgba(255, 196, 0, 0.3);
+            text-transform: uppercase;
+        }
+
+        .sidebar-menu {
+            padding: 16px 12px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .sidebar-group {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .sidebar-group-title {
+            font-size: 10.5px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            color: #71717a;
+            padding: 4px 12px 6px;
+            text-transform: uppercase;
+        }
+
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            color: #a1a1aa;
+            transition: all 0.15s ease;
+        }
+
+        .sidebar-link:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .sidebar-link.active {
+            color: #09090b;
+            background: var(--admin-amber);
+            font-weight: 700;
+        }
+
+        .sidebar-link.active .sidebar-icon {
+            color: #09090b;
+        }
+
+        .sidebar-icon {
+            font-size: 15px;
+            width: 20px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .sidebar-footer {
+            padding: 14px 16px;
+            border-top: 1px solid var(--admin-sidebar-border);
+            background: #050506;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sidebar-user-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .sidebar-user-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #27272a;
+            color: var(--admin-amber);
+            font-size: 12px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .sidebar-user-name {
+            font-size: 12px;
+            color: #d4d4d8;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 120px;
+        }
+
+        .sidebar-logout-btn {
+            font-size: 12px;
+            font-weight: 600;
+            color: #f87171;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: rgba(239, 68, 68, 0.12);
+            transition: background 0.15s ease;
+        }
+
+        .sidebar-logout-btn:hover {
+            background: rgba(239, 68, 68, 0.25);
+        }
+
+        /* Main Workspace Pane */
+        .admin-main-wrap {
+            margin-left: 260px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            background: var(--admin-bg);
+            width: calc(100% - 260px);
+        }
+
+        /* Top Header Bar */
+        .admin-topbar {
+            height: 64px;
+            background: #ffffff;
+            border-bottom: 1px solid var(--admin-border);
+            padding: 0 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 40;
+        }
+
+        .admin-topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .admin-mobile-toggle {
+            display: none;
+            background: transparent;
+            border: 1px solid var(--admin-border);
+            border-radius: 6px;
+            width: 36px;
+            height: 36px;
+            font-size: 18px;
+            color: var(--admin-ink);
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .admin-topbar-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--admin-ink);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .admin-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: #ecfdf5;
+            color: #059669;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid #a7f3d0;
+        }
+
+        .admin-status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #10b981;
+        }
+
+        .admin-topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .topbar-portal-link {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--admin-muted);
+            background: var(--admin-border-subtle);
+            border: 1px solid var(--admin-border);
+            padding: 6px 12px;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.15s ease;
+        }
+
+        .topbar-portal-link:hover {
+            color: var(--admin-ink);
+            background: #e2e8f0;
+        }
+
+        /* Container & Content Elements */
+        .admin-container {
+            max-width: 1360px;
+            margin: 0 auto;
+            padding: 28px 32px 48px;
+            width: 100%;
+        }
+
+        /* Page Headers */
+        .admin-page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .admin-page-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--admin-ink);
+            letter-spacing: -0.4px;
+        }
+
+        .admin-page-desc {
+            font-size: 13px;
+            color: var(--admin-muted);
+            margin-top: 3px;
+        }
+
+        .admin-page-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .btn-admin-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 600;
+            background: #ffffff;
+            color: var(--admin-ink);
+            border: 1px solid var(--admin-border);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn-admin-action:hover {
+            background: #f1f5f9;
+            border-color: #cbd5e1;
+        }
+
+        .btn-admin-action.primary {
+            background: var(--admin-amber);
+            color: var(--admin-ink);
+            border-color: var(--admin-amber);
+            font-weight: 700;
+        }
+
+        .btn-admin-action.primary:hover {
+            background: var(--admin-amber-hover);
+        }
+
+        /* Metric Grid & Cards */
+        .admin-grid-4 {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .section-grid, .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .admin-stat-card, .card {
+            background: var(--admin-card);
+            border: 1px solid var(--admin-border);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .stat-card-kicker, .card h3 {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--admin-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 8px;
+        }
+
+        .stat-card-val, .card p {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--admin-ink);
+            letter-spacing: -0.4px;
+        }
+
+        .stat-card-sub, .card small {
+            display: block;
+            color: #94a3b8;
+            font-size: 12px;
+            margin-top: 8px;
+            line-height: 1.4;
+        }
+
+        /* Two-Column Section */
+        .admin-two-col {
+            display: grid;
+            grid-template-columns: 1.4fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
+            align-items: start;
+        }
+
+        .admin-panel-card {
+            background: #ffffff;
+            border: 1px solid var(--admin-border);
+            border-radius: var(--radius-md);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            overflow: hidden;
+        }
+
+        .admin-panel-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--admin-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .admin-panel-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--admin-ink);
+        }
+
+        .admin-panel-link {
+            font-size: 12px;
+            font-weight: 600;
+            color: #2563eb;
+        }
+
+        .admin-panel-link:hover { text-decoration: underline; }
+
+        .dashboard-heading {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 17px;
+            font-weight: 700;
+            color: var(--admin-ink);
+            margin: 28px 0 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Tables */
+        .table-wrap {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        table {
+            width: 100%;
+            background: var(--admin-card);
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        th {
+            background: #f8fafc;
+            color: #475569;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--admin-border);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--admin-border-subtle);
+            color: var(--admin-ink);
+            vertical-align: middle;
+            font-size: 13px;
+        }
+
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background-color: #fafafa; }
+
+        /* Status & Badges */
+        .badge-success { color: #16a34a; font-weight: 700; display: inline-block; padding: 2px 8px; background: #dcfce7; border-radius: 999px; font-size: 11px; }
+        .badge-failed { color: #dc2626; font-weight: 700; display: inline-block; padding: 2px 8px; background: #fee2e2; border-radius: 999px; font-size: 11px; }
+        .badge-pending { color: #d97706; font-weight: 700; display: inline-block; padding: 2px 8px; background: #fef3c7; border-radius: 999px; font-size: 11px; }
+
         .account-badge { display:inline-block; padding:3px 8px; border-radius:999px; font-size:11px; font-weight:700; }
         .account-badge.website { background:#fef3c7; color:#92400e; }
         .account-badge.whatsapp { background:#dcfce7; color:#166534; }
         .account-badge.linked { background:#dbeafe; color:#1e40af; }
 
-        .navbar {
-            background-color: var(--admin-ink);
-            padding: 0 30px;
-            min-height: 60px;
+        /* Form elements */
+        input, select {
+            padding: 9px 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--admin-border);
+            font-size: 13px;
+            background: #ffffff;
+            color: var(--admin-ink);
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--admin-amber);
+            box-shadow: 0 0 0 3px rgba(255, 196, 0, 0.25);
+        }
+
+        button {
+            padding: 9px 14px;
+            border-radius: var(--radius-sm);
+            border: none;
+            background-color: var(--admin-amber);
+            color: var(--admin-ink);
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        button:hover { background-color: var(--admin-amber-hover); }
+
+        /* Clickable Marketing Overview Cards */
+        .marketing-action-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .mkt-card-tile {
+            background: #ffffff;
+            border: 1px solid var(--admin-border);
+            border-radius: var(--radius-md);
+            padding: 18px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 12px;
+            transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+            position: relative;
+        }
+
+        .mkt-card-tile:hover {
+            transform: translateY(-2px);
+            border-color: var(--admin-amber);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.06);
+        }
+
+        .mkt-tile-top {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            gap: 10px;
         }
-        .navbar .brand { color: #ffffff; font-family:'Space Grotesk',sans-serif; font-size: 20px; font-weight: 700; text-decoration: none; }
-        .navbar .nav-links { display: flex; flex-wrap: wrap; gap: 10px; list-style: none; margin: 0; padding: 0; }
-        .navbar .nav-links a {
-            color: #bdbdbd;
-            text-decoration: none;
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 500;
-            display: inline-block;
+
+        .mkt-tile-icon {
+            font-size: 20px;
         }
-        .navbar .nav-links a:hover, .navbar .nav-links a.active { background-color: var(--admin-amber); color: var(--admin-ink); }
-        .nav-toggle {
+
+        .mkt-tile-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--admin-ink);
+        }
+
+        .mkt-tile-metric {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--admin-ink);
+        }
+
+        .mkt-tile-sub {
+            font-size: 12px;
+            color: var(--admin-muted);
+            line-height: 1.4;
+        }
+
+        .mkt-tile-arrow {
+            font-size: 12px;
+            font-weight: 700;
+            color: #b45309;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Universal Mobile-Smooth Sub-Navbars, Action Bars, and Filter Bars */
+        .admin-subnav-bar, .admin-action-bar, .admin-page-actions, .admin-filter-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            white-space: nowrap;
+            padding: 2px 2px 8px;
+            margin-bottom: 20px;
+            width: 100%;
+        }
+
+        .admin-subnav-bar::-webkit-scrollbar,
+        .admin-action-bar::-webkit-scrollbar,
+        .admin-page-actions::-webkit-scrollbar,
+        .admin-filter-bar::-webkit-scrollbar {
             display: none;
-            background: transparent;
-            border: 1px solid rgba(255,255,255,0.25);
-            color: white;
-            font-size: 18px;
-            padding: 8px 10px;
-            border-radius: 6px;
-            cursor: pointer;
         }
 
-        .container { max-width: 1180px; margin: 30px auto; padding: 0 28px; }
-        .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 24px; }
-        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 25px; }
-        .card { background: var(--admin-card); padding: 22px; border:1px solid var(--admin-border); border-radius: 16px; flex: 1; box-shadow: 0 12px 30px rgba(0,0,0,.06); }
-        .card h3 { font-size: 11px; color: var(--admin-muted); text-transform: uppercase; letter-spacing:.5px; margin-bottom: 8px; }
-        .card p { font-family:'Space Grotesk',sans-serif; font-size: 28px; font-weight: 700; color: var(--admin-ink); }
-        .card small { display:block; color:#969696; font-size:12px; line-height:1.4; margin-top:8px; }
-        .dashboard-heading { margin: 32px 0 14px; color:var(--admin-ink); font-family:'Space Grotesk',sans-serif; font-size:20px; }
+        .admin-subnav-item, .admin-action-pill, .btn-admin-action {
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            background: #ffffff;
+            color: var(--admin-ink);
+            border: 1px solid var(--admin-border);
+            text-decoration: none;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
 
-        table { width: 100%; background: var(--admin-card); border-collapse: collapse; border:1px solid var(--admin-border); border-radius: 14px; overflow: hidden; box-shadow: 0 12px 30px rgba(0,0,0,.05); }
-        th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--admin-border); font-size: 13px; }
-        th { background: var(--admin-ink); color: white; font-weight: 600; }
+        .admin-subnav-item:hover, .admin-action-pill:hover, .btn-admin-action:hover {
+            color: var(--admin-ink);
+            border-color: #cbd5e1;
+            background: #f8fafc;
+        }
 
-        input, select, button { padding: 9px 12px; border-radius: 9px; border: 1px solid var(--admin-border); font-size: 13px; }
-        button { background-color: var(--admin-amber); color: var(--admin-ink); border: none; font-weight: 700; cursor: pointer; }
-        button:hover { background-color: #e5b000; }
+        .admin-subnav-item.active, .admin-action-pill.highlighted, .btn-admin-action.primary {
+            background: var(--admin-amber);
+            color: #09090b;
+            border-color: var(--admin-amber);
+            font-weight: 700;
+            box-shadow: 0 2px 6px rgba(255, 196, 0, 0.25);
+        }
 
-        .badge-success { color: #16a34a; font-weight: bold; }
-        .badge-failed { color: #dc2626; font-weight: bold; }
-        .badge-pending { color: #b45309; font-weight: bold; }
+        .admin-filter-pill {
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            text-decoration: none;
+            background: #ffffff;
+            color: var(--admin-muted);
+            border: 1px solid var(--admin-border);
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .admin-filter-pill:hover {
+            background: #f8fafc;
+            color: var(--admin-ink);
+        }
+
+        .admin-filter-pill.active {
+            background: #09090b;
+            color: #ffffff;
+            border-color: #09090b;
+        }
+
+        .sidebar-close-btn {
+            display: none;
+            background: rgba(255, 255, 255, 0.12);
+            border: none;
+            color: #ffffff;
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            font-size: 15px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s ease;
+        }
+        .sidebar-close-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        /* Mobile Backdrop */
+        .admin-sidebar-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 95;
+        }
+
+        /* Responsive Breakpoints */
+        @media (max-width: 1024px) {
+            .admin-grid-4, .marketing-action-grid { grid-template-columns: repeat(2, 1fr); }
+            .admin-two-col { grid-template-columns: 1fr; }
+        }
 
         @media (max-width: 768px) {
-            .navbar {
-                padding: 12px 16px;
-                flex-wrap: wrap;
-                gap: 12px;
+            .admin-sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                width: 280px;
+                max-width: 85vw;
+                box-shadow: 4px 0 24px rgba(0,0,0,0.4);
             }
-            .navbar .brand {
-                font-size: 16px;
+            .admin-sidebar.open {
+                transform: translateX(0);
             }
-            .nav-toggle {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-            }
-            .navbar .nav-links {
-                display: none;
-                flex-direction: column;
-                width: 100%;
-                gap: 8px;
-            }
-            .navbar .nav-links.open {
-                display: flex;
-            }
-            .navbar .nav-links a {
-                width: 100%;
-                text-align: left;
-                padding: 8px 10px;
-                font-size: 12px;
-            }
-            .container {
-                margin: 20px auto;
-                padding: 0 12px;
-            }
-            .card-grid,
-            .section-grid {
-                display: grid;
-                grid-template-columns: 1fr;
-                gap: 12px;
-            }
-            .card {
-                padding: 16px;
-            }
-            .card p {
-                font-size: 20px;
-            }
-            th, td {
-                padding: 10px 8px;
-                font-size: 12px;
-                white-space: nowrap;
-            }
-            table {
+            .admin-sidebar-backdrop.open {
                 display: block;
-                width: 100%;
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
             }
-            input, select {
+            .sidebar-close-btn {
+                display: inline-flex;
+            }
+            .admin-main-wrap {
+                margin-left: 0;
                 width: 100%;
                 min-width: 0;
             }
-            form {
+            .admin-topbar {
+                height: 56px;
+                padding: 0 12px;
+                gap: 8px;
+            }
+            .admin-topbar-left {
+                gap: 8px;
+                min-width: 0;
+                flex: 1;
+            }
+            .admin-mobile-toggle {
+                display: inline-flex;
+                width: 36px;
+                height: 36px;
+                flex-shrink: 0;
+            }
+            .admin-topbar-title {
+                font-size: 14px;
+                min-width: 0;
+            }
+            .admin-brand-name {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .status-badge-text {
+                display: none;
+            }
+            .admin-status-badge {
+                padding: 4px 6px;
+                gap: 0;
+            }
+            .admin-topbar-right {
+                gap: 6px;
+                flex-shrink: 0;
+            }
+            .topbar-portal-link {
+                padding: 5px 9px;
+                font-size: 11.5px;
+                white-space: nowrap;
+                flex-shrink: 0;
+            }
+            .portal-link-text {
+                display: none;
+            }
+            .admin-container {
+                padding: 14px 12px 40px;
+            }
+            .admin-page-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+                margin-bottom: 14px;
+            }
+            /* On mobile, navigation is handled exclusively via the toggle drawer navbar; hide duplicate main-page navbars */
+            .admin-subnav-bar,
+            .admin-action-bar,
+            .admin-page-actions {
+                display: none !important;
+            }
+            .admin-grid-4, .marketing-action-grid {
+                grid-template-columns: 1fr;
+            }
+            .table-wrap, table {
+                display: block;
                 width: 100%;
+                overflow-x: auto;
+            }
+            th, td {
+                padding: 10px 12px;
+                white-space: nowrap;
             }
         }
     </style>
 </head>
 <body>
-    <nav class="navbar">
-        <a href="/admin/dashboard" class="brand">⚙️ WAJ VTU Admin</a>
-        <button class="nav-toggle" type="button" aria-label="Toggle navigation">☰</button>
-        <ul class="nav-links" id="admin-nav-links">
-            <li><a href="/admin/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}">📊 Dashboard</a></li>
-            <li><a href="/admin/transactions" class="{{ 'active' if active_page == 'transactions' else '' }}">💳 Transactions</a></li>
-            <li><a href="/admin/users" class="{{ 'active' if active_page == 'users' else '' }}">👥 Customers</a></li>
-            <li><a href="/admin/payments" class="{{ 'active' if active_page == 'payments' else '' }}">💰 Payments</a></li>
-            <li><a href="/admin/ledger" class="{{ 'active' if active_page == 'ledger' else '' }}">📒 Wallet Ledger</a></li>
-            <li><a href="/admin/whatsapp" class="{{ 'active' if active_page == 'whatsapp' else '' }}">📱 WhatsApp</a></li>
-            <li><a href="/admin/services" class="{{ 'active' if active_page == 'services' else '' }}">🛒 Services</a></li>
-            <li><a href="/admin/analytics" class="{{ 'active' if active_page == 'analytics' else '' }}">📈 Analytics</a></li>
-            <li><a href="/admin/providers" class="{{ 'active' if active_page == 'providers' else '' }}">🔌 Providers</a></li>
-            <li><a href="/admin/pricing" class="{{ 'active' if active_page == 'pricing' else '' }}">💵 Pricing</a></li>
-            <li><a href="/admin/support" class="{{ 'active' if active_page == 'support' else '' }}">🎟️ Support</a></li>
-            <li><a href="/admin/security" class="{{ 'active' if active_page == 'security' else '' }}">🔐 Security</a></li>
-            <li><a href="/admin/settings" class="{{ 'active' if active_page == 'settings' else '' }}">⚙️ Settings</a></li>
-        </ul>
-    </nav>
-    <div class="container">
-        {{ body_content | safe }}
+    <div class="admin-shell">
+        <div class="admin-sidebar-backdrop" id="admin-sidebar-backdrop" onclick="closeAdminSidebar()"></div>
+        <aside class="admin-sidebar" id="admin-sidebar">
+            <div class="sidebar-brand-box">
+                <a href="/admin/dashboard" class="sidebar-brand">
+                    <span class="sidebar-brand-icon">⚡</span>
+                    WAJ <span>VTU</span>
+                </a>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="sidebar-brand-tag">Admin</span>
+                    <button class="sidebar-close-btn" type="button" aria-label="Close sidebar" onclick="closeAdminSidebar()">✕</button>
+                </div>
+            </div>
+
+            <nav class="sidebar-menu">
+                <!-- Group 1: MAIN -->
+                <div class="sidebar-group">
+                    <div class="sidebar-group-title">MAIN</div>
+                    <a href="/admin/dashboard" class="sidebar-link {{ 'active' if active_page == 'dashboard' else '' }}">
+                        <span class="sidebar-icon">📊</span> Dashboard
+                    </a>
+                    <a href="/admin/transactions" class="sidebar-link {{ 'active' if active_page == 'transactions' else '' }}">
+                        <span class="sidebar-icon">💳</span> Transactions
+                    </a>
+                    <a href="/admin/users" class="sidebar-link {{ 'active' if active_page == 'users' else '' }}">
+                        <span class="sidebar-icon">👥</span> Customers
+                    </a>
+                </div>
+
+                <!-- Group 2: SERVICES -->
+                <div class="sidebar-group">
+                    <div class="sidebar-group-title">SERVICES</div>
+                    <a href="/admin/services" class="sidebar-link {{ 'active' if active_page == 'services' else '' }}">
+                        <span class="sidebar-icon">🛒</span> Services Overview
+                    </a>
+                    <a href="/admin/transactions?q=AIRTIME" class="sidebar-link">
+                        <span class="sidebar-icon">📱</span> Airtime
+                    </a>
+                    <a href="/admin/transactions?q=DATA" class="sidebar-link">
+                        <span class="sidebar-icon">📶</span> Data
+                    </a>
+                    <a href="/admin/transactions?q=CABLE" class="sidebar-link">
+                        <span class="sidebar-icon">📺</span> Cable TV
+                    </a>
+                    <a href="/admin/transactions?q=ELECTRICITY" class="sidebar-link">
+                        <span class="sidebar-icon">⚡</span> Electricity
+                    </a>
+                    <a href="/admin/transactions?q=EDU" class="sidebar-link">
+                        <span class="sidebar-icon">🎓</span> Education
+                    </a>
+                </div>
+
+                <!-- Group 3: MARKETING -->
+                <div class="sidebar-group">
+                    <div class="sidebar-group-title">MARKETING</div>
+                    <a href="/admin/marketing" class="sidebar-link {{ 'active' if active_page == 'marketing' else '' }}">
+                        <span class="sidebar-icon">🚀</span> Marketing Overview
+                    </a>
+                    <a href="/admin/marketing/referrals" class="sidebar-link">
+                        <span class="sidebar-icon">🤝</span> Referrals
+                    </a>
+                    <a href="/admin/marketing/daily-deals" class="sidebar-link">
+                        <span class="sidebar-icon">🏷️</span> Daily Deals
+                    </a>
+                    <a href="/admin/marketing/reengagement" class="sidebar-link">
+                        <span class="sidebar-icon">🔁</span> Re-engagement
+                    </a>
+                    <a href="/admin/marketing/campaigns" class="sidebar-link">
+                        <span class="sidebar-icon">📬</span> Campaigns
+                    </a>
+                    <a href="/admin/marketing/settings" class="sidebar-link">
+                        <span class="sidebar-icon">⚙️</span> Marketing Settings
+                    </a>
+                </div>
+
+                <!-- Group 4: FINANCE -->
+                <div class="sidebar-group">
+                    <div class="sidebar-group-title">FINANCE</div>
+                    <a href="/admin/payments" class="sidebar-link {{ 'active' if active_page == 'payments' else '' }}">
+                        <span class="sidebar-icon">💰</span> Wallet / Deposits
+                    </a>
+                    <a href="/admin/ledger" class="sidebar-link {{ 'active' if active_page == 'ledger' else '' }}">
+                        <span class="sidebar-icon">📒</span> Wallet Ledger
+                    </a>
+                    <a href="/admin/pricing" class="sidebar-link {{ 'active' if active_page == 'pricing' else '' }}">
+                        <span class="sidebar-icon">💵</span> Fees &amp; Markups
+                    </a>
+                </div>
+
+                <!-- Group 5: SYSTEM -->
+                <div class="sidebar-group">
+                    <div class="sidebar-group-title">SYSTEM</div>
+                    <a href="/admin/whatsapp" class="sidebar-link {{ 'active' if active_page == 'whatsapp' else '' }}">
+                        <span class="sidebar-icon">📱</span> WhatsApp Bot
+                    </a>
+                    <a href="/admin/settings" class="sidebar-link {{ 'active' if active_page == 'settings' else '' }}">
+                        <span class="sidebar-icon">⚙️</span> Settings &amp; Tasks
+                    </a>
+                    <a href="/admin/security" class="sidebar-link {{ 'active' if active_page == 'security' else '' }}">
+                        <span class="sidebar-icon">🔐</span> Audit Logs
+                    </a>
+                    <a href="/admin/analytics" class="sidebar-link {{ 'active' if active_page == 'analytics' else '' }}">
+                        <span class="sidebar-icon">📈</span> Analytics
+                    </a>
+                    <a href="/admin/providers" class="sidebar-link {{ 'active' if active_page == 'providers' else '' }}">
+                        <span class="sidebar-icon">🔌</span> Providers
+                    </a>
+                    <a href="/admin/support" class="sidebar-link {{ 'active' if active_page == 'support' else '' }}">
+                        <span class="sidebar-icon">🎟️</span> Support
+                    </a>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-user-pill">
+                    <span class="sidebar-user-avatar">⚙</span>
+                    <span class="sidebar-user-name">Admin Portal</span>
+                </div>
+                <a href="/logout" class="sidebar-logout-btn" title="Log out">Logout</a>
+            </div>
+        </aside>
+
+        <div class="admin-main-wrap">
+            <header class="admin-topbar">
+                <div class="admin-topbar-left">
+                    <button class="admin-mobile-toggle" type="button" aria-label="Open sidebar" onclick="toggleAdminSidebar()">☰</button>
+                    <div class="admin-topbar-title">
+                        <span class="admin-brand-name">WAJ VTU Admin</span>
+                        <span class="admin-status-badge" title="System operational"><span class="admin-status-dot"></span><span class="status-badge-text"> Operational</span></span>
+                    </div>
+                </div>
+                <div class="admin-topbar-right">
+                    <a href="/dashboard" class="topbar-portal-link" target="_blank" rel="noopener" title="Open Customer Site">
+                        <span>↗</span> <span class="portal-link-text">Customer Site</span>
+                    </a>
+                    <a href="/logout" class="topbar-portal-link" style="color:#ef4444;" title="Log out">
+                        Logout
+                    </a>
+                </div>
+            </header>
+
+            <main class="admin-container">
+                {{ body_content | safe }}
+            </main>
+        </div>
     </div>
+
     <script>
-        const navToggle = document.querySelector('.nav-toggle');
-        const navLinks = document.getElementById('admin-nav-links');
-        if (navToggle && navLinks) {
-            navToggle.addEventListener('click', () => {
-                navLinks.classList.toggle('open');
-            });
+        function toggleAdminSidebar() {
+            const s = document.getElementById('admin-sidebar');
+            const b = document.getElementById('admin-sidebar-backdrop');
+            s.classList.toggle('open');
+            b.classList.toggle('open');
+        }
+        function closeAdminSidebar() {
+            document.getElementById('admin-sidebar')?.classList.remove('open');
+            document.getElementById('admin-sidebar-backdrop')?.classList.remove('open');
         }
     </script>
 </body>
@@ -1379,6 +2314,7 @@ def admin_dashboard():
     successful_txs = Transaction.query.filter_by(status="SUCCESS").all()
     total_inflow = sum((tx.amount for tx in successful_txs if tx.type == "DEPOSIT"), Decimal("0.00"))
     total_outflow = sum((tx.amount for tx in successful_txs if tx.type != "DEPOSIT"), Decimal("0.00"))
+    
     markup_rates = {
         row.service_type: Decimal(str(row.markup_amount))
         for row in ServiceMarkup.query.all()
@@ -1416,6 +2352,7 @@ def admin_dashboard():
     provider_balance = provider_balance_result.get("balance")
     swiftbills_balance_result = fetch_swiftbills_balance()
     swiftbills_balance = swiftbills_balance_result.get("balance")
+    
     today_inflow = sum(
         (
             tx.amount
@@ -1431,6 +2368,11 @@ def admin_dashboard():
             if tx.type != "DEPOSIT" and normalize_datetime(tx.created_at) and normalize_datetime(tx.created_at) >= start_of_day
         ),
         Decimal("0.00"),
+    )
+    today_tx_count = sum(
+        1
+        for tx in successful_txs
+        if normalize_datetime(tx.created_at) and normalize_datetime(tx.created_at) >= start_of_day
     )
     total_user_balances = db.session.query(func.sum(User.wallet_balance)).scalar() or Decimal("0.00")
 
@@ -1454,7 +2396,7 @@ def admin_dashboard():
         .filter(Transaction.type != "DEPOSIT", Transaction.status == "SUCCESS")
         .group_by(Transaction.type)
         .order_by(func.sum(Transaction.amount).desc())
-        .limit(5)
+        .limit(6)
         .all()
     )
 
@@ -1482,10 +2424,10 @@ def admin_dashboard():
         <tr>
             <td><code>{escape(tx.reference)}</code></td>
             <td>{escape(tx.user.phone if tx.user else '')}</td>
-            <td>{escape(tx.type)}</td>
+            <td><strong>{escape(tx.type)}</strong></td>
             <td>₦{tx.amount:,.2f}</td>
-            <td>{escape(tx.recipient or '')}</td>
-            <td class="{escape(status_cls)}">{escape(tx.status)}</td>
+            <td>{escape(tx.recipient or '—')}</td>
+            <td><span class="{escape(status_cls)}">{escape(tx.status)}</span></td>
             <td>{escape(format_admin_datetime(tx.created_at))}</td>
         </tr>
         """
@@ -1494,8 +2436,8 @@ def admin_dashboard():
     for customer_phone, total_spent in top_customers:
         customer_rows += f"""
         <tr>
-            <td>{escape(customer_phone)}</td>
-            <td>₦{Decimal(total_spent or 0):,.2f}</td>
+            <td><strong>{escape(customer_phone or 'Anonymous')}</strong></td>
+            <td style="font-family:'Space Grotesk',sans-serif; font-weight:700;">₦{Decimal(total_spent or 0):,.2f}</td>
         </tr>
         """
 
@@ -1503,9 +2445,9 @@ def admin_dashboard():
     for service_type, count, total_amount in service_breakdown:
         service_rows += f"""
         <tr>
-            <td>{escape(service_type)}</td>
-            <td>{count}</td>
-            <td>₦{Decimal(total_amount or 0):,.2f}</td>
+            <td><strong>{escape(service_type)}</strong></td>
+            <td>{count} sales</td>
+            <td style="font-family:'Space Grotesk',sans-serif; font-weight:700;">₦{Decimal(total_amount or 0):,.2f}</td>
         </tr>
         """
 
@@ -1522,66 +2464,210 @@ def admin_dashboard():
     if not provider_cards:
         provider_cards = '<div class="card"><h3>No Provider Data</h3><p>0</p><small>No successful provider transactions yet</small></div>'
 
+    # Marketing metrics for dashboard overview cards
+    from services.referral_service import get_admin_referral_metrics
+    from services.deal_service import generate_daily_deal, get_lagos_today
+    from services.reengagement_service import scan_inactive_segments
+
+    ref_metrics = get_admin_referral_metrics()
+    today_deal, _ = generate_daily_deal(target_date=get_lagos_today())
+    deal_metric_str = f"₦{today_deal.price:,.0f}" if today_deal and getattr(today_deal, "price", None) is not None else "Active"
+    deal_sub_str = f"{getattr(today_deal, 'network', '')} {getattr(today_deal, 'data_size', '')}".strip() if today_deal else "Daily special data discounts"
+    if not deal_sub_str:
+        deal_sub_str = "Daily special data discounts"
+    seg_data = scan_inactive_segments()
+    inactive_total = (
+        seg_data.get("counts", {}).get("7_days", 0)
+        + seg_data.get("counts", {}).get("14_days", 0)
+        + seg_data.get("counts", {}).get("30_days", 0)
+    )
+    pending_marketing_actions = MarketingMessage.query.filter(
+        MarketingMessage.status.in_(["DRAFT", "QUEUED"])
+    ).count()
+
     content = f"""
-    <h2 class="dashboard-heading">Money & provider</h2>
-    <div class="card-grid">
-        <div class="card"><h3>ClubKonnect Balance</h3><p>{'₦{:,.2f}'.format(provider_balance) if provider_balance is not None else 'Unavailable'}</p><small>{escape(provider_balance_result.get('reason', 'Live provider balance'))}</small></div>
-        <div class="card"><h3>SwiftBills Balance</h3><p>{'₦{:,.2f}'.format(swiftbills_balance) if swiftbills_balance is not None else 'Unavailable'}</p><small>{escape(swiftbills_balance_result.get('reason', 'Live SwiftBills balance'))}</small></div>
-        <div class="card"><h3>Estimated Markup Earned</h3><p>₦{total_markup_earned:,.2f}</p><small>Customer charges minus estimated API cost</small></div>
-        <div class="card"><h3>API Discounts Captured</h3><p>₦{total_api_discount:,.2f}</p><small>Provider discounts saved on eligible plans</small></div>
-        <div class="card"><h3>Markup Earned Today</h3><p>₦{today_markup_earned:,.2f}</p><small>Based on successful service sales</small></div>
-    </div>
-    <h2 class="dashboard-heading">Provider summary</h2>
-    <div class="card-grid">{provider_cards}</div>
-    <h2 class="dashboard-heading">Cash flow</h2>
-    <div class="card-grid">
-        <div class="card"><h3>Total Inflow</h3><p>₦{total_inflow:,.2f}</p></div>
-        <div class="card"><h3>Total Outflow</h3><p>₦{total_outflow:,.2f}</p></div>
-        <div class="card"><h3>Today's Inflow</h3><p>₦{today_inflow:,.2f}</p></div>
-        <div class="card"><h3>Today's Outflow</h3><p>₦{today_outflow:,.2f}</p></div>
-    </div>
-    <h2 class="dashboard-heading">Customers & activity</h2>
-    <div class="card-grid">
-        <div class="card"><h3>Total User Balances</h3><p>₦{total_user_balances:,.2f}</p></div>
-        <div class="card"><h3>Total Transactions</h3><p>{total_transactions}</p></div>
-        <div class="card"><h3>Total Customers</h3><p>{total_users}</p></div>
-        <div class="card"><h3>Active Customers</h3><p>{active_customers}</p></div>
-    </div>
-    <h2 class="dashboard-heading">Transaction health</h2>
-    <div class="card-grid">
-        <div class="card"><h3>Successful</h3><p>{successful_transactions}</p></div>
-        <div class="card"><h3>Failed</h3><p>{failed_transactions}</p></div>
-        <div class="card"><h3>Pending</h3><p>{pending_transactions}</p></div>
-        <div class="card"><h3>New This Month</h3><p>{new_customers_month}</p></div>
-    </div>
-
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-        <h3>Recent Activity Stream</h3>
-        <a href="/admin/settings" style="background:#2563eb; color:#ffffff; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:14px; font-weight:600;">Edit Service Pricing</a>
-    </div>
-    <table>
-        <thead>
-            <tr><th>Reference</th><th>Customer</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th><th>Timestamp</th></tr>
-        </thead>
-        <tbody>
-            {tx_rows if tx_rows else '<tr><td colspan="7" style="text-align:center;">No transactions logged yet</td></tr>'}
-        </tbody>
-    </table>
-
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 25px;">
+    <!-- 1. TOP HEADER & ACTIONS -->
+    <div class="admin-page-header">
         <div>
-            <h3 style="margin-bottom: 12px;">Top Customers</h3>
-            <table>
-                <thead><tr><th>Phone</th><th>Total Spent</th></tr></thead>
-                <tbody>{customer_rows if customer_rows else '<tr><td colspan="2" style="text-align:center;">No customer activity yet</td></tr>'}</tbody>
-            </table>
+            <h1 class="admin-page-title">Admin Dashboard</h1>
+            <p class="admin-page-desc">Comprehensive platform health, real-time volume, and operational control.</p>
         </div>
-        <div>
-            <h3 style="margin-bottom: 12px;">Service Breakdown</h3>
-            <table>
-                <thead><tr><th>Service</th><th>Count</th><th>Total</th></tr></thead>
-                <tbody>{service_rows if service_rows else '<tr><td colspan="3" style="text-align:center;">No service activity yet</td></tr>'}</tbody>
-            </table>
+        <div class="admin-page-actions">
+            <a href="/admin/transactions" class="btn-admin-action"><span>💳</span> Transactions</a>
+            <a href="/admin/users" class="btn-admin-action"><span>👥</span> Customers</a>
+            <a href="/admin/marketing" class="btn-admin-action primary"><span>🚀</span> Marketing Hub</a>
+            <a href="/admin/settings" class="btn-admin-action"><span>⚙️</span> Settings</a>
+        </div>
+    </div>
+
+    <!-- 2. STATISTICS: 4-CARD DESKTOP GRID -->
+    <div class="admin-grid-4">
+        <div class="admin-stat-card">
+            <div class="stat-card-kicker">TOTAL CUSTOMERS</div>
+            <div class="stat-card-val">{total_users:,}</div>
+            <div class="stat-card-sub">{active_customers:,} active · {new_customers_today} joined today</div>
+        </div>
+        <div class="admin-stat-card">
+            <div class="stat-card-kicker">TODAY'S TRANSACTIONS</div>
+            <div class="stat-card-val">{today_tx_count:,}</div>
+            <div class="stat-card-sub">{successful_transactions:,} successful · {pending_transactions} pending</div>
+        </div>
+        <div class="admin-stat-card">
+            <div class="stat-card-kicker">TODAY'S REVENUE / INFLOW</div>
+            <div class="stat-card-val">₦{today_inflow:,.2f}</div>
+            <div class="stat-card-sub">Lifetime inflow: ₦{total_inflow:,.2f}</div>
+        </div>
+        <div class="admin-stat-card">
+            <div class="stat-card-kicker">WALLET LIABILITIES & BALANCE</div>
+            <div class="stat-card-val">₦{total_user_balances:,.2f}</div>
+            <div class="stat-card-sub">User balances · Provider: {'₦{:,.2f}'.format(provider_balance) if provider_balance is not None else 'Live'}</div>
+        </div>
+    </div>
+
+    <!-- 3. TWO-COLUMN LAYOUT: RECENT TRANSACTIONS + RECENT ACTIVITY -->
+    <div class="admin-two-col">
+        <!-- LEFT: Recent Transactions -->
+        <div class="admin-panel-card">
+            <div class="admin-panel-header">
+                <span class="admin-panel-title">💳 Recent Transactions Stream</span>
+                <a href="/admin/transactions" class="admin-panel-link">View all transactions →</a>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>Reference</th><th>Customer</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Status</th><th>Timestamp</th></tr>
+                    </thead>
+                    <tbody>
+                        {tx_rows if tx_rows else '<tr><td colspan="7" style="text-align:center;">No transactions logged yet</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- RIGHT: Recent Customers & Growth -->
+        <div class="admin-panel-card">
+            <div class="admin-panel-header">
+                <span class="admin-panel-title">👥 Top Customers by Spend</span>
+                <a href="/admin/users" class="admin-panel-link">Manage Users →</a>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Customer Phone</th><th>Total Spent</th></tr></thead>
+                    <tbody>{customer_rows if customer_rows else '<tr><td colspan="2" style="text-align:center;">No customer activity yet</td></tr>'}</tbody>
+                </table>
+            </div>
+            <div style="padding: 16px 20px; border-top: 1px solid var(--admin-border); background: #fafafa;">
+                <div style="font-size: 11px; font-weight: 700; color: var(--admin-muted); text-transform: uppercase; margin-bottom: 8px;">Customer Registration Growth</div>
+                <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--admin-ink);">
+                    <span>Today: <strong>{new_customers_today}</strong></span>
+                    <span>This Week: <strong>{new_customers_week}</strong></span>
+                    <span>This Month: <strong>{new_customers_month}</strong></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. MARKETING OVERVIEW: COMPACT CLICKABLE CARDS -->
+    <h2 class="dashboard-heading">🚀 Marketing Automation Overview</h2>
+    <div class="marketing-action-grid">
+        <a href="/admin/marketing/referrals" class="mkt-card-tile">
+            <div class="mkt-tile-top">
+                <span class="mkt-tile-icon">🤝</span>
+                <span class="mkt-tile-title">Referral Program</span>
+            </div>
+            <div class="mkt-tile-metric">{ref_metrics['total_referrals']}</div>
+            <div class="mkt-tile-sub">{ref_metrics['successful_referrals']} successful · ₦{ref_metrics['total_rewards_paid']:,.2f} rewards paid</div>
+            <div class="mkt-tile-arrow">Manage Referrals →</div>
+        </a>
+
+        <a href="/admin/marketing/daily-deals" class="mkt-card-tile">
+            <div class="mkt-tile-top">
+                <span class="mkt-tile-icon">🏷️</span>
+                <span class="mkt-tile-title">Today's Data Deal</span>
+            </div>
+            <div class="mkt-tile-metric">{deal_metric_str}</div>
+            <div class="mkt-tile-sub">{deal_sub_str}</div>
+            <div class="mkt-tile-arrow">View Daily Deals →</div>
+        </a>
+
+        <a href="/admin/marketing/reengagement" class="mkt-card-tile">
+            <div class="mkt-tile-top">
+                <span class="mkt-tile-icon">🔁</span>
+                <span class="mkt-tile-title">Customer Re-engagement</span>
+            </div>
+            <div class="mkt-tile-metric">{inactive_total}</div>
+            <div class="mkt-tile-sub">Inactive customers across 7d, 14d, 30d segments</div>
+            <div class="mkt-tile-arrow">Launch Campaign →</div>
+        </a>
+
+        <a href="/admin/marketing/campaigns" class="mkt-card-tile">
+            <div class="mkt-tile-top">
+                <span class="mkt-tile-icon">📬</span>
+                <span class="mkt-tile-title">Marketing Actions</span>
+            </div>
+            <div class="mkt-tile-metric">{pending_marketing_actions}</div>
+            <div class="mkt-tile-sub">Pending / Draft messages awaiting dispatch</div>
+            <div class="mkt-tile-arrow">Review Queue →</div>
+        </a>
+    </div>
+
+    <!-- 5. BUSINESS & OPERATIONAL OVERVIEW -->
+    <h2 class="dashboard-heading">💼 Business &amp; Provider Overview</h2>
+    <div class="card-grid">
+        <div class="card">
+            <h3>ClubKonnect Balance</h3>
+            <p>{'₦{:,.2f}'.format(provider_balance) if provider_balance is not None else 'Unavailable'}</p>
+            <small>{escape(provider_balance_result.get('reason', 'Live provider balance'))}</small>
+        </div>
+        <div class="card">
+            <h3>SwiftBills Balance</h3>
+            <p>{'₦{:,.2f}'.format(swiftbills_balance) if swiftbills_balance is not None else 'Unavailable'}</p>
+            <small>{escape(swiftbills_balance_result.get('reason', 'Live SwiftBills balance'))}</small>
+        </div>
+        <div class="card">
+            <h3>Estimated Markup Earned</h3>
+            <p>₦{total_markup_earned:,.2f}</p>
+            <small>Total customer charges minus provider base costs</small>
+        </div>
+        <div class="card">
+            <h3>API Discounts Saved</h3>
+            <p>₦{total_api_discount:,.2f}</p>
+            <small>Provider discounts captured on eligible plans</small>
+        </div>
+        <div class="card">
+            <h3>Today's Markup Earned</h3>
+            <p>₦{today_markup_earned:,.2f}</p>
+            <small>Based on successful sales settled today</small>
+        </div>
+        <div class="card">
+            <h3>Cash Flow Outflow</h3>
+            <p>₦{today_outflow:,.2f}</p>
+            <small>Today's service costs · Lifetime: ₦{total_outflow:,.2f}</small>
+        </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 24px;">
+        <div class="admin-panel-card">
+            <div class="admin-panel-header">
+                <span class="admin-panel-title">🛒 Service Sales Breakdown</span>
+                <a href="/admin/services" class="admin-panel-link">All Services →</a>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Service</th><th>Sales Count</th><th>Total Volume</th></tr></thead>
+                    <tbody>{service_rows if service_rows else '<tr><td colspan="3" style="text-align:center;">No service sales yet</td></tr>'}</tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="admin-panel-card">
+            <div class="admin-panel-header">
+                <span class="admin-panel-title">🔌 Provider Volume Summary</span>
+                <a href="/admin/providers" class="admin-panel-link">Manage Providers →</a>
+            </div>
+            <div class="card-grid" style="padding:16px; margin-bottom:0;">
+                {provider_cards}
+            </div>
         </div>
     </div>
     """
@@ -1637,21 +2723,23 @@ def admin_users():
         """
 
     content = f"""
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-        <h2>👥 User Directory & Wallet Control</h2>
-        <form method="GET" action="/admin/users" style="display:flex; gap:8px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px;">
+        <h2 style="margin:0;">👥 User Directory & Wallet Control</h2>
+        <form method="GET" action="/admin/users" style="display:flex; gap:8px; flex-wrap:wrap;">
             <input type="text" name="q" placeholder="Search phone number..." value="{escape(search_query)}">
             <button type="submit">Search</button>
         </form>
     </div>
-    <table>
-        <thead>
-            <tr><th>User ID</th><th>Phone Number</th><th>Account Source</th><th>Joined</th><th>Wallet Balance</th><th>Bot State</th><th>Manual Wallet Top-up</th></tr>
-        </thead>
-        <tbody>
-            {user_rows if user_rows else '<tr><td colspan="7" style="text-align:center;">No users found</td></tr>'}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>User ID</th><th>Phone Number</th><th>Account Source</th><th>Joined</th><th>Wallet Balance</th><th>Bot State</th><th>Manual Wallet Top-up</th></tr>
+            </thead>
+            <tbody>
+                {user_rows if user_rows else '<tr><td colspan="7" style="text-align:center;">No users found</td></tr>'}
+            </tbody>
+        </table>
+    </div>
     """
 
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="users")
@@ -2164,7 +3252,7 @@ def admin_transactions():
     q_param = quote(search_query)
     provider_param = quote(provider_filter)
     filter_buttons = "".join(
-        f'<a href="/admin/transactions?status={status}&provider={provider_param}&q={q_param}" style="{ "background:#2563eb; color:#fff;" if status == status_filter else "background:#e2e8f0; color:#0f172a;" } padding:6px 10px; border-radius:6px; text-decoration:none; font-size:12px; margin-right:8px;">{status}</a>'
+        f'<a href="/admin/transactions?status={status}&provider={provider_param}&q={q_param}" class="admin-filter-pill {"active" if status == status_filter else ""}">{status}</a>'
         for status in statuses
     )
 
@@ -2189,15 +3277,17 @@ def admin_transactions():
             <button type="submit">Apply</button>
         </form>
     </div>
-    <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:8px;">{filter_buttons}</div>
-    <table>
-        <thead>
-            <tr><th>Reference</th><th>Customer</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Provider</th><th>Provider Ref</th><th>Status</th><th>Timestamp</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-            {tx_rows if tx_rows else '<tr><td colspan="10" style="text-align:center;">No transactions match the selected filter</td></tr>'}
-        </tbody>
-    </table>
+    <div class="admin-filter-bar">{filter_buttons}</div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Reference</th><th>Customer</th><th>Type</th><th>Amount</th><th>Recipient</th><th>Provider</th><th>Provider Ref</th><th>Status</th><th>Timestamp</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                {tx_rows if tx_rows else '<tr><td colspan="10" style="text-align:center;">No transactions match the selected filter</td></tr>'}
+            </tbody>
+        </table>
+    </div>
     """
 
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="transactions")
@@ -2281,6 +3371,36 @@ def run_scheduled_tasks():
         
     db.session.commit()
     return jsonify({"status": "success", "executed_tasks": executed}), 200
+
+
+@app.route("/api/cron/daily-deal", methods=["GET", "POST"])
+def cron_daily_deal():
+    """Generates today's deal of the day idempotently."""
+    from services.deal_service import generate_daily_deal, get_lagos_today
+    from services.marketing_settings import get_setting_bool
+    if not get_setting_bool("DAILY_DEAL_ENABLED", True):
+        return jsonify({"status": "disabled", "message": "Daily deals generator is disabled"}), 200
+
+    deal, created = generate_daily_deal(target_date=get_lagos_today())
+    return jsonify({
+        "status": "success",
+        "action": "created" if created else "already_exists",
+        "deal_id": deal.id if deal else None,
+        "network": deal.network if deal else None,
+        "plan": deal.plan_name if deal else None,
+        "price": str(deal.price) if deal else None,
+    }), 200
+
+
+@app.route("/api/cron/reengagement-scan", methods=["GET", "POST"])
+def cron_reengagement_scan():
+    """Performs customer inactivity scan across 7, 14, and 30 day segments."""
+    from services.reengagement_service import scan_inactive_segments
+    summary = scan_inactive_segments()
+    return jsonify({
+        "status": "success",
+        "counts": summary.get("counts", {})
+    }), 200
 
 
 if __name__ == "__main__":

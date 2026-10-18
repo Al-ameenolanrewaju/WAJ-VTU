@@ -26,6 +26,10 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True, nullable=True, index=True)
     password_hash = db.Column(db.String(255), nullable=True)
 
+    # Referral system
+    referral_code = db.Column(db.String(30), unique=True, nullable=True, index=True)
+    referred_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+
     # User Flow & State Management
     current_state = db.Column(db.String(50), default="IDLE", nullable=False)
     state_data = db.Column(db.JSON, default=dict)
@@ -166,3 +170,128 @@ class PaymentFeeTier(db.Model):
     max_amount = db.Column(db.Numeric(10, 2), nullable=True)
     fee_percentage = db.Column(db.Numeric(5, 2), default=0.00, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class Referral(db.Model):
+    __tablename__ = 'referrals'
+
+    id = db.Column(db.Integer, primary_key=True)
+    referrer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    referred_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    referral_code = db.Column(db.String(30), nullable=False, index=True)
+    # PENDING: registered, waiting for first qualifying transaction
+    # QUALIFIED: completed qualifying transaction
+    # REWARDED: wallet credited
+    status = db.Column(db.String(20), default='PENDING', nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+    rewarded_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    referrer = db.relationship('User', foreign_keys=[referrer_id], backref=db.backref('referrals_made', lazy=True))
+    referred_user = db.relationship('User', foreign_keys=[referred_user_id], backref=db.backref('referral_record', uselist=False))
+    reward = db.relationship('ReferralReward', backref='referral', uselist=False, cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Referral {self.referral_code} - Referrer {self.referrer_id} -> Referred {self.referred_user_id} ({self.status})>"
+
+
+class ReferralReward(db.Model):
+    __tablename__ = 'referral_rewards'
+
+    id = db.Column(db.Integer, primary_key=True)
+    referral_id = db.Column(db.Integer, db.ForeignKey('referrals.id'), nullable=False, unique=True, index=True)
+    referrer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    referred_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=True, index=True)
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+    status = db.Column(db.String(20), default='CREDITED', nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+
+    referrer = db.relationship('User', foreign_keys=[referrer_id], backref=db.backref('rewards_received', lazy=True))
+    referred_user = db.relationship('User', foreign_keys=[referred_user_id])
+    transaction = db.relationship('Transaction', backref=db.backref('referral_reward_earned', uselist=False))
+
+    def __repr__(self):
+        return f"<ReferralReward NGN {self.amount} for Referrer {self.referrer_id} (Tx: {self.transaction_id})>"
+
+
+class MarketingContent(db.Model):
+    __tablename__ = 'marketing_content'
+
+    id = db.Column(db.Integer, primary_key=True)
+    content_type = db.Column(db.String(50), default='DAILY_DEAL', nullable=False, index=True)
+    target_date = db.Column(db.Date, nullable=False, index=True)
+    network = db.Column(db.String(30), nullable=False, index=True)
+    plan_name = db.Column(db.String(150), nullable=False)
+    plan_code = db.Column(db.String(100), nullable=False)
+    data_size = db.Column(db.String(50), nullable=True)
+    validity = db.Column(db.String(50), nullable=True)
+    price = db.Column(db.Numeric(10, 2), nullable=False)
+    headline = db.Column(db.String(255), nullable=True)
+    caption = db.Column(db.Text, nullable=True)
+    full_caption = db.Column(db.Text, nullable=False)
+    # GENERATED, USED, ARCHIVED
+    status = db.Column(db.String(20), default='GENERATED', nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("content_type", "target_date", name="uq_marketing_content_type_date"),
+    )
+
+    def __repr__(self):
+        return f"<MarketingContent {self.content_type} {self.target_date} - {self.network} {self.data_size}>"
+
+
+class MarketingCampaign(db.Model):
+    __tablename__ = 'marketing_campaigns'
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(150), nullable=False)
+    segment = db.Column(db.String(50), nullable=False, index=True)  # 7_DAYS, 14_DAYS, 30_DAYS, CUSTOM
+    channel = db.Column(db.String(20), default='BOTH', nullable=False)  # EMAIL, WHATSAPP, BOTH
+    template_body = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default='DRAFT', nullable=False, index=True)  # DRAFT, QUEUED, APPROVED, COMPLETED, CANCELLED
+    total_recipients = db.Column(db.Integer, default=0, nullable=False)
+    sent_count = db.Column(db.Integer, default=0, nullable=False)
+    failed_count = db.Column(db.Integer, default=0, nullable=False)
+    scheduled_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+
+    messages = db.relationship('MarketingMessage', backref='campaign', lazy=True, cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<MarketingCampaign {self.title} ({self.segment}) - {self.status}>"
+
+
+class MarketingMessage(db.Model):
+    __tablename__ = 'marketing_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    campaign_id = db.Column(db.Integer, db.ForeignKey('marketing_campaigns.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    channel = db.Column(db.String(20), nullable=False, index=True)  # EMAIL, WHATSAPP
+    recipient = db.Column(db.String(120), nullable=False)
+    subject = db.Column(db.String(255), nullable=True)
+    message_body = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default='DRAFT', nullable=False, index=True)  # DRAFT, QUEUED, APPROVED, SENT, FAILED, CANCELLED
+    error_message = db.Column(db.String(255), nullable=True)
+    sent_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+
+    user = db.relationship('User', backref=db.backref('marketing_messages', lazy=True))
+
+    def __repr__(self):
+        return f"<MarketingMessage {self.channel} -> {self.recipient} ({self.status})>"
+
+
+class MarketingSetting(db.Model):
+    __tablename__ = 'marketing_settings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    value = db.Column(db.Text, nullable=False)
+    description = db.Column(db.String(255), nullable=True)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    def __repr__(self):
+        return f"<MarketingSetting {self.key}={self.value}>"

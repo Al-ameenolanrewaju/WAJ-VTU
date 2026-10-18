@@ -268,29 +268,36 @@ def send_receipt_email(user, transactions):
     return False
 
 
+@auth_bp.route("/register", methods=["GET", "POST"])
 @auth_bp.route("/signup", methods=["GET", "POST"])
 def signup():
+    ref_param = (request.args.get("ref") or request.form.get("ref") or session.get("referral_code") or "").strip().upper()
     if request.method == "GET":
-        return render_template("web/signup.html")
+        if ref_param:
+            session["referral_code"] = ref_param
+        return render_template("web/signup.html", ref_code=ref_param)
 
     email = (request.form.get("email") or "").strip().lower()
     password = request.form.get("password") or ""
     phone = normalize_phone(request.form.get("phone") or "")
     name = (request.form.get("name") or "User").strip()
+    ref_code = (request.form.get("ref") or session.get("referral_code") or "").strip().upper()
 
     if not email or "@" not in email:
         flash("Enter a valid email address.", "error")
-        return redirect(url_for("auth.signup"))
+        return redirect(url_for("auth.signup", ref=ref_code) if ref_code else url_for("auth.signup"))
     if len(password) < 8:
         flash("Password must be at least 8 characters.", "error")
-        return redirect(url_for("auth.signup"))
+        return redirect(url_for("auth.signup", ref=ref_code) if ref_code else url_for("auth.signup"))
     if not PHONE_RE.match(phone):
         flash("Enter a valid phone number.", "error")
-        return redirect(url_for("auth.signup"))
+        return redirect(url_for("auth.signup", ref=ref_code) if ref_code else url_for("auth.signup"))
 
     if User.query.filter_by(email=email).first():
         flash("An account with that email already exists. Log in instead.", "error")
         return redirect(url_for("auth.login"))
+
+    from services.referral_service import generate_unique_referral_code, ensure_user_referral_code, attach_referral
 
     # Link to an existing WhatsApp-created account with the same phone number,
     # rather than creating a second wallet for the same person.
@@ -305,12 +312,18 @@ def signup():
         existing.password_hash = generate_password_hash(password)
         if name:
             existing.name = name
+        ensure_user_referral_code(existing)
         try:
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
             flash("That email or phone number is already in use. Log in instead.", "error")
             return redirect(url_for("auth.login"))
+
+        if ref_code and not existing.referred_by_id:
+            attach_referral(existing, ref_code)
+        session.pop("referral_code", None)
+
         start_user_session(existing, email)
         flash("Your existing wallet has been linked to this website login.", "success")
         return redirect(url_for("web.dashboard"))
@@ -322,6 +335,7 @@ def signup():
             name=name,
             email=email,
             password_hash=generate_password_hash(password),
+            referral_code=generate_unique_referral_code(),
         )
         db.session.add(user)
         try:
@@ -330,6 +344,11 @@ def signup():
             db.session.rollback()
             flash("That email is already in use. Log in instead.", "error")
             return redirect(url_for("auth.login"))
+
+        if ref_code:
+            attach_referral(user, ref_code)
+        session.pop("referral_code", None)
+
         start_user_session(user, email)
         return redirect(url_for("web.dashboard"))
     except Exception as e:

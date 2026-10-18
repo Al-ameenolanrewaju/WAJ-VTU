@@ -1,124 +1,322 @@
 {% extends "web/base.html" %}
+{% block title %}Dashboard | WAJ VTU{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block content %}
 {% include "web/_service_nav.html" %}
+
 {% if purchase_receipt %}
 <div class="receipt-backdrop" id="purchase-receipt" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
   <div class="receipt-modal">
     <div class="receipt-top">
-      <div><div class="receipt-success">Payment successful</div><h2 id="receipt-title">Your receipt</h2></div>
+      <div>
+        <div class="receipt-success">Payment successful</div>
+        <h2 id="receipt-title">Transaction Receipt</h2>
+      </div>
       <button class="receipt-close" type="button" onclick="closeReceipt()" aria-label="Close receipt">&times;</button>
     </div>
-    <div class="receipt-amount"><small>Amount charged</small><strong>₦{{ "{:,.2f}".format(purchase_receipt.amount|float) }}</strong></div>
+    <div class="receipt-amount">
+      <small>Amount Charged</small>
+      <strong>₦{{ "{:,.2f}".format(purchase_receipt.amount|float) }}</strong>
+    </div>
     <div class="receipt-row"><span>Service</span><strong>{{ purchase_receipt.service }}</strong></div>
-    <div class="receipt-row"><span>Reference</span><strong>{{ purchase_receipt.reference }}</strong></div>
+    <div class="receipt-row"><span>Reference</span><code>{{ purchase_receipt.reference }}</code></div>
     {% if purchase_receipt.recipient %}<div class="receipt-row"><span>Recipient</span><strong>{{ purchase_receipt.recipient }}</strong></div>{% endif %}
-    {% if purchase_receipt.token %}<div class="receipt-extra"><strong>Electricity token:</strong><br>{{ purchase_receipt.token }}</div>{% endif %}
-    {% if purchase_receipt.pins %}<div class="receipt-extra"><strong>PIN(s):</strong><br>{{ purchase_receipt.pins|join(", ") }}</div>{% endif %}
+    {% if purchase_receipt.token %}<div class="receipt-extra"><strong>Electricity Token:</strong><br>{{ purchase_receipt.token }}</div>{% endif %}
+    {% if purchase_receipt.pins %}<div class="receipt-extra"><strong>Exam PIN(s):</strong><br>{{ purchase_receipt.pins|join(", ") }}</div>{% endif %}
     <img class="receipt-image" src="{{ url_for('web.receipt_image', reference=purchase_receipt.reference) }}" alt="Photo receipt">
-    <div class="receipt-actions"><button type="button" class="secondary" onclick="closeReceipt()">Done</button><button type="button" onclick="window.print()">Print receipt</button></div>
+    <div class="receipt-actions">
+      <button type="button" class="secondary" onclick="closeReceipt()">Done</button>
+      <button type="button" onclick="window.print()">Print Receipt</button>
+    </div>
   </div>
 </div>
 <script>
   function closeReceipt() {
-    const receipt = document.getElementById("purchase-receipt");
-    if (receipt) receipt.remove();
+    const r = document.getElementById("purchase-receipt");
+    if (r) r.remove();
   }
-  document.getElementById("purchase-receipt").addEventListener("click", function (event) {
-    if (event.target === this) closeReceipt();
+  document.getElementById("purchase-receipt")?.addEventListener("click", function (e) {
+    if (e.target === this) closeReceipt();
   });
 </script>
 {% endif %}
-{% include "web/_header.html" %}
 
-<div class="dashboard-bot-ad">
-  <div class="bot-ad">
-    <div class="bot-ad-copy">
-      <div class="bot-ad-label">{% if whatsapp_linked %}WhatsApp linked{% else %}Link your WhatsApp{% endif %}</div>
-      <h2>{% if whatsapp_linked %}Your wallet is connected{% else %}Connect your WhatsApp bot{% endif %}</h2>
-      <p>{% if whatsapp_linked %}Use the same wallet on the website and WhatsApp.{% else %}Open WhatsApp with this phone number to connect the same wallet automatically.{% endif %}</p>
+<main class="customer-dashboard-container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-wrap">
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
     </div>
-    <a class="bot-ad-cta" href="{{ whatsapp_link_url or 'https://wa.me/2348102314725?text=LINK%20WAJ%20VTU' }}" target="_blank" rel="noopener">{% if whatsapp_linked %}Open WhatsApp{% else %}Link WhatsApp{% endif %}</a>
-  </div>
-</div>
+    {% endif %}
+  {% endwith %}
 
-{% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-  <div class="flash-wrap dashboard-flashes">
-    {% for category, message in messages %}
-      <div class="flash {{ category }}">{{ message }}</div>
-    {% endfor %}
-  </div>
+  <!-- SECTION 1: WELCOME -->
+  <section class="dash-section dash-welcome-section">
+    <div class="welcome-box">
+      <div class="welcome-text">
+        <h1 class="welcome-title">Welcome back, {{ user.name or "Customer" }}</h1>
+        <p class="welcome-subtitle">Manage your VTU services, wallet balance, and transactions seamlessly.</p>
+      </div>
+      <div class="welcome-badge-wrap">
+        {% if whatsapp_linked %}
+        <span class="whatsapp-status-pill connected" title="WhatsApp wallet synchronized">
+          <span class="ws-dot"></span> WhatsApp Connected
+        </span>
+        {% else %}
+        <a href="{{ whatsapp_link_url or 'https://wa.me/2348102314725?text=LINK%20WAJ%20VTU' }}" target="_blank" rel="noopener" class="whatsapp-status-pill link-cta">
+          <span>📱</span> Connect WhatsApp Bot
+        </a>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 2: WALLET -->
+  <section class="dash-section dash-wallet-section">
+    <div class="prominent-wallet-card">
+      <div class="wallet-card-main">
+        <div class="wallet-header">
+          <span class="wallet-kicker">AVAILABLE BALANCE</span>
+          <span class="wallet-instant-badge">● Instant Funding</span>
+        </div>
+        <div class="wallet-figure">
+          <span class="currency-symbol">₦</span>{{ "{:,.2f}".format(user.wallet_balance) }}
+        </div>
+        <div class="wallet-actions">
+          <a class="btn-wallet-primary" href="{{ url_for('web.fund_wallet') }}">
+            <span>＋</span> Fund Wallet
+          </a>
+          <a class="btn-wallet-secondary" href="{{ url_for('web.transactions_page') }}">
+            <span>💳</span> Transaction History
+          </a>
+        </div>
+      </div>
+      <div class="wallet-card-footer">
+        <div class="wallet-info-item">
+          <span class="wii-label">Account Phone</span>
+          <strong class="wii-val">{{ user.phone or "Not linked" }}</strong>
+        </div>
+        <div class="wallet-info-item">
+          <span class="wii-label">Payment Gateway</span>
+          <strong class="wii-val">Paystack Secured 🔒</strong>
+        </div>
+        <div class="wallet-info-item">
+          <span class="wii-label">Active Referrals</span>
+          <strong class="wii-val">{{ referral.total_referrals if referral else 0 }} Friends</strong>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 3: QUICK SERVICES -->
+  <section class="dash-section dash-services-section">
+    <div class="section-title-bar">
+      <div>
+        <h2 class="section-heading-text">Quick Services</h2>
+        <p class="section-subheading-text">Select a service to start an instant transaction</p>
+      </div>
+    </div>
+    <div class="services-action-grid">
+      <a class="service-action-tile" href="{{ url_for('web.airtime_page') }}">
+        <div class="service-tile-icon icon-airtime">📱</div>
+        <div class="service-tile-content">
+          <strong>Airtime</strong>
+          <small>Recharge any network</small>
+        </div>
+        <span class="service-tile-arrow">→</span>
+      </a>
+
+      <a class="service-action-tile" href="{{ url_for('web.buy_data') }}">
+        <div class="service-tile-icon icon-data">📶</div>
+        <div class="service-tile-content">
+          <strong>Data Bundles</strong>
+          <small>SME, Corporate &amp; Direct</small>
+        </div>
+        <span class="service-tile-arrow">→</span>
+      </a>
+
+      <a class="service-action-tile" href="{{ url_for('web.cable_page') }}">
+        <div class="service-tile-icon icon-tv">📺</div>
+        <div class="service-tile-content">
+          <strong>Cable TV</strong>
+          <small>DSTV, GOtv, Startimes</small>
+        </div>
+        <span class="service-tile-arrow">→</span>
+      </a>
+
+      <a class="service-action-tile" href="{{ url_for('web.electricity_page') }}">
+        <div class="service-tile-icon icon-electric">⚡</div>
+        <div class="service-tile-content">
+          <strong>Electricity</strong>
+          <small>Prepaid &amp; Postpaid tokens</small>
+        </div>
+        <span class="service-tile-arrow">→</span>
+      </a>
+
+      <a class="service-action-tile" href="{{ url_for('web.education_page') }}">
+        <div class="service-tile-icon icon-exam">🎓</div>
+        <div class="service-tile-content">
+          <strong>Exam PINs</strong>
+          <small>WAEC, NECO &amp; JAMB cards</small>
+        </div>
+        <span class="service-tile-arrow">→</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- SECTION 4: REFERRAL -->
+  {% if referral %}
+  <section class="dash-section dash-referral-section">
+    <div class="compact-referral-card">
+      <div class="referral-card-left">
+        <div class="ref-badge">🎁 REFER &amp; EARN</div>
+        <h3 class="ref-heading">Get ₦100 Wallet Credit Per Referral</h3>
+        <p class="ref-subtext">Invite friends using your unique link. Earn ₦100 credited straight to your wallet on their first ₦500+ order!</p>
+        <div class="ref-metrics-inline">
+          <div class="ref-metric-item">
+            <span class="rmi-label">Total Referrals</span>
+            <strong class="rmi-val">{{ referral.total_referrals }}</strong>
+          </div>
+          <div class="ref-metric-item">
+            <span class="rmi-label">Successful</span>
+            <strong class="rmi-val success">{{ referral.successful_referrals }}</strong>
+          </div>
+          <div class="ref-metric-item">
+            <span class="rmi-label">Total Earned</span>
+            <strong class="rmi-val">₦{{ "{:,.2f}".format(referral.total_rewards_earned) }}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="referral-card-right">
+        <label class="ref-link-label" for="dash-ref-link">YOUR REFERRAL LINK</label>
+        <div class="ref-copy-box">
+          <input type="text" id="dash-ref-link" readonly value="{{ referral.referral_url }}">
+          <button type="button" class="btn-copy-link" onclick="navigator.clipboard.writeText('{{ referral.referral_url }}').then(() => { const t = this.innerText; this.innerText = 'Copied!'; setTimeout(() => this.innerText = t, 2000); });">
+            Copy Link
+          </button>
+        </div>
+        <div class="ref-share-row">
+          <a class="btn-share-whatsapp" href="https://wa.me/?text={{ 'Join me on WAJ VTU for fast, affordable airtime, data and bill payments! Register here: ' | urlencode }}{{ referral.referral_url | urlencode }}" target="_blank" rel="noopener">
+            <span>💬</span> Share on WhatsApp
+          </a>
+          <a class="btn-view-stats" href="{{ url_for('web.referrals_page') }}">
+            View Details →
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
   {% endif %}
-{% endwith %}
 
-{% if saved_services %}
-<section class="section" style="padding-top:0;">
-  <div class="dashboard-panel">
-    <div class="tx-header">
-      <div><div class="section-title" style="margin-bottom:0;">Saved services</div><div class="section-kicker">Start repeat payments faster</div></div>
+  <!-- SECTION 5: RECENT TRANSACTIONS -->
+  <section class="dash-section dash-transactions-section">
+    <div class="section-title-bar">
+      <div>
+        <h2 class="section-heading-text">Recent Transactions</h2>
+        <p class="section-subheading-text">Your latest payments and wallet updates</p>
+      </div>
+      <a class="see-all-link" href="{{ url_for('web.transactions_page') }}">View all transactions →</a>
     </div>
-    <div class="tx-list">
+
+    <div class="transactions-container">
+      {% if transactions %}
+      <div class="table-responsive">
+        <table class="modern-table">
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>Reference / Recipient</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th>Date</th>
+              <th style="text-align:right;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for tx in transactions %}
+            <tr>
+              <td>
+                <div class="tx-cell-service">
+                  <span class="tx-type-icon icon-{{ tx.type|lower if tx.type|lower in ['data','airtime','electric','tv'] else 'more' }}">
+                    {% if tx.type == 'DATA' %}📶{% elif tx.type == 'AIRTIME' %}📱{% elif tx.type == 'ELECTRICITY' %}⚡{% elif tx.type == 'CABLE' %}📺{% elif tx.type == 'BETTING' %}🎯{% elif tx.type == 'EDU' %}🎓{% elif tx.type == 'DEPOSIT' %}＋{% else %}•••{% endif %}
+                  </span>
+                  <div>
+                    <strong>{{ tx.type|title }}</strong>
+                    <small class="tx-mobile-date">{{ tx.created_at.strftime("%b %d, %I:%M %p") }}</small>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="tx-cell-ref">
+                  <code>{{ tx.reference }}</code>
+                  {% if tx.recipient %}<small class="tx-recipient-text">{{ tx.recipient }}</small>{% endif %}
+                </div>
+              </td>
+              <td>
+                <span class="tx-cell-amount {{ 'positive' if tx.type == 'DEPOSIT' else 'negative' }}">
+                  {{ "+" if tx.type == "DEPOSIT" else "-" }}₦{{ "{:,.2f}".format(tx.amount) }}
+                </span>
+              </td>
+              <td>
+                <span class="status-badge status-{{ 'success' if tx.status == 'SUCCESS' else ('pending' if tx.status == 'PENDING' else 'failed') }}">
+                  {{ tx.status|title }}
+                </span>
+              </td>
+              <td>
+                <span class="tx-cell-date">{{ tx.created_at.strftime("%b %d, %Y %I:%M %p") }}</span>
+              </td>
+              <td style="text-align:right;">
+                {% if tx.status == "SUCCESS" %}
+                <a class="btn-receipt-view" href="{{ url_for('web.receipt_image', reference=tx.reference) }}" target="_blank" rel="noopener">
+                  Receipt
+                </a>
+                {% else %}
+                <span class="tx-no-receipt">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state-card">
+        <span class="empty-icon">💳</span>
+        <h3>No transactions yet</h3>
+        <p>When you recharge or fund your wallet, your records will appear here.</p>
+        <a href="{{ url_for('web.buy_data') }}" class="btn-empty-action">Buy Data Now</a>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- SECTION 6: SAVED SERVICES -->
+  {% if saved_services %}
+  <section class="dash-section dash-saved-section">
+    <div class="section-title-bar">
+      <div>
+        <h2 class="section-heading-text">Saved Services</h2>
+        <p class="section-subheading-text">Quickly repeat payments to your saved accounts and meters</p>
+      </div>
+    </div>
+    <div class="saved-services-grid">
       {% for saved in saved_services %}
-      <div class="tx-item">
-        <div class="tx-icon icon-more">★</div>
-        <div class="tx-details"><div class="tx-title">{{ saved.label }}</div><div class="tx-meta">{{ saved.service_type|title }}{% if saved.provider %} · {{ saved.provider }}{% endif %} · {{ saved.identifier }}</div></div>
-        <div class="tx-right"><form method="POST" action="{{ url_for('web.delete_saved_service', saved_service_id=saved.id) }}"><button type="submit" class="btn-secondary" style="padding:7px 10px;">Remove</button></form></div>
+      <div class="saved-service-card">
+        <div class="saved-card-icon">★</div>
+        <div class="saved-card-body">
+          <strong class="saved-card-title">{{ saved.label }}</strong>
+          <span class="saved-card-sub">{{ saved.service_type|title }}{% if saved.provider %} · {{ saved.provider }}{% endif %} · {{ saved.identifier }}</span>
+        </div>
+        <form method="POST" action="{{ url_for('web.delete_saved_service', saved_service_id=saved.id) }}">
+          <button type="submit" class="saved-card-remove" title="Remove saved service">&times;</button>
+        </form>
       </div>
       {% endfor %}
     </div>
-  </div>
-</section>
-{% endif %}
-
-<main class="section">
-  <div class="dashboard-layout">
-    <section class="dashboard-panel">
-      <div class="dashboard-section-label">
-        <div><div class="section-title" style="margin-bottom:0;">Quick services</div><p>Choose what you want to pay for</p></div>
-      </div>
-      <div class="services-grid">
-    <a class="service-tile" href="{{ url_for('web.airtime_page') }}">
-      <div class="service-icon icon-airtime">📱</div><strong>Airtime</strong><small>Recharge a number</small>
-    </a>
-    <a class="service-tile" href="{{ url_for('web.buy_data') }}">
-      <div class="service-icon icon-data">📶</div><strong>Data</strong><small>Buy a data bundle</small>
-    </a>
-    <a class="service-tile" href="{{ url_for('web.electricity_page') }}">
-      <div class="service-icon icon-electric">⚡</div><strong>Electricity</strong><small>Pay a power bill</small>
-    </a>
-    <a class="service-tile" href="{{ url_for('web.cable_page') }}">
-      <div class="service-icon icon-tv">📺</div><strong>TV</strong><small>Renew subscription</small>
-    </a>
-    <a class="service-tile" href="{{ url_for('web.education_page') }}">
-      <div class="service-icon icon-exam">📄</div><strong>Exam PIN</strong><small>Available exams</small>
-    </a>
-      </div>
-    </section>
-
-    <section class="dashboard-panel">
-      <div class="tx-header">
-        <div><div class="section-title" style="margin-bottom:0;">Recent activity</div><div class="section-kicker">Your latest payments and wallet updates</div></div>
-        <a href="{{ url_for('web.transactions_page') }}">See all</a>
-      </div>
-      <div class="tx-list">
-        {% for tx in transactions %}
-        <div class="tx-item">
-          <div class="tx-icon icon-{{ tx.type|lower if tx.type|lower in ['data','airtime','electric','tv'] else 'more' }}">
-            {% if tx.type == 'DATA' %}📶{% elif tx.type == 'AIRTIME' %}📱{% elif tx.type == 'ELECTRICITY' %}⚡{% elif tx.type == 'CABLE' %}📺{% elif tx.type == 'BETTING' %}🎯{% elif tx.type == 'EDU' %}📄{% elif tx.type == 'DEPOSIT' %}＋{% else %}•••{% endif %}
-          </div>
-          <div class="tx-details"><div class="tx-title">{{ tx.type|title }}{% if tx.recipient %} — {{ tx.recipient }}{% endif %}</div><div class="tx-meta">{{ tx.created_at.strftime("%b %d, %I:%M %p") }}</div></div>
-          <div class="tx-right"><div class="tx-amount">{{ "+" if tx.type == "DEPOSIT" else "-" }}₦{{ "{:,.2f}".format(tx.amount) }}</div><div class="tx-status status-{{ 'success' if tx.status == 'SUCCESS' else ('pending' if tx.status == 'PENDING' else 'failed') }}">{{ tx.status|title }}</div></div>
-        </div>
-        {% if tx.status == "SUCCESS" %}
-        <details class="transaction-receipt">
-          <summary>View photo receipt</summary>
-          <img src="{{ url_for('web.receipt_image', reference=tx.reference) }}" alt="Photo receipt for {{ tx.reference }}">
-        </details>
-        {% endif %}
-        {% else %}<div class="tx-item"><div class="tx-details"><div class="tx-title">No transactions yet</div><div class="tx-meta">Your activity will appear here.</div></div></div>{% endfor %}
-      </div>
-    </section>
-  </div>
+  </section>
+  {% endif %}
 </main>
 {% endblock %}

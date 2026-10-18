@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#090909">
+  <title>WAJ VTU | Support Form Popup</title>
+  <link rel="icon" type="image/jpeg" href="/static/images/waj-vtu-logo.jpeg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090909;
+      --card-bg: #141414;
+      --border: #262626;
+      --border-focus: #FFDD00;
+      --yellow: #FFDD00;
+      --yellow-hover: #facc15;
+      --text: #ffffff;
+      --text-muted: #94a3b8;
+      --text-dark: #090909;
+      --success: #10b981;
+      --error: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 16px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: center;
+    }
+
+    .popup-wrapper {
+      width: 100%;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    /* Modal Top Sheet Handle */
+    .sheet-handle {
+      width: 44px;
+      height: 4px;
+      background: #333333;
+      border-radius: 9999px;
+      margin: 0 auto 16px auto;
+    }
+
+    /* Header Card */
+    .popup-header {
+      background: var(--card-bg);
+      border: 1.5px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .popup-header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--yellow), #f59e0b);
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .brand-logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 16px;
+      color: #ffffff;
+    }
+
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      background: var(--yellow);
+      color: var(--text-dark);
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34d399;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #10b981;
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .popup-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 4px;
+    }
+
+    .popup-subtitle {
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .connected-phone {
+      margin-top: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #1c1c1c;
+      border: 1px solid #333333;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--yellow);
+      font-weight: 600;
+    }
+
+    /* Form Card */
+    .form-card {
+      background: var(--card-bg);
+      border: 1.5px solid var(--border);
+      border-radius: 16px;
+      padding: 22px;
+      margin-bottom: 16px;
+    }
+
+    .form-group {
+      margin-bottom: 18px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: #e2e8f0;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .form-label span.req {
+      color: var(--yellow);
+    }
+
+    .form-control {
+      width: 100%;
+      background: #1a1a1a;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 14px;
+      color: #ffffff;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .form-control:focus {
+      border-color: var(--yellow);
+      box-shadow: 0 0 0 3px rgba(255, 221, 0, 0.15);
+    }
+
+    textarea.form-control {
+      min-height: 84px;
+      resize: vertical;
+    }
+
+    /* Service Category Grid */
+    .service-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    @media (max-width: 400px) {
+      .service-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .service-option {
+      position: relative;
+    }
+
+    .service-option input[type="radio"] {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .service-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      background: #1a1a1a;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #cbd5e1;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: center;
+      user-select: none;
+    }
+
+    .service-btn .icon {
+      font-size: 18px;
+    }
+
+    .service-option input[type="radio"]:checked + .service-btn {
+      background: rgba(255, 221, 0, 0.12);
+      border-color: var(--yellow);
+      color: var(--yellow);
+      font-weight: 700;
+    }
+
+    /* Submit Button */
+    .submit-btn {
+      width: 100%;
+      background: var(--yellow);
+      color: var(--text-dark);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 15px;
+      font-weight: 800;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: transform 0.1s ease, background 0.15s ease;
+      box-shadow: 0 4px 14px rgba(255, 221, 0, 0.25);
+    }
+
+    .submit-btn:hover {
+      background: var(--yellow-hover);
+    }
+
+    .submit-btn:active {
+      transform: scale(0.98);
+    }
+
+    .submit-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* Success Card View */
+    .success-card {
+      background: var(--card-bg);
+      border: 1.5px solid #10b981;
+      border-radius: 16px;
+      padding: 32px 20px;
+      text-align: center;
+      box-shadow: 0 6px 20px rgba(16, 185, 129, 0.15);
+    }
+
+    .success-icon-badge {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(16, 185, 129, 0.15);
+      border: 2px solid #10b981;
+      color: #10b981;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      margin-bottom: 16px;
+    }
+
+    .ticket-badge {
+      display: inline-block;
+      background: #1e293b;
+      border: 1px dashed var(--yellow);
+      color: var(--yellow);
+      font-family: 'Space Grotesk', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      padding: 6px 14px;
+      border-radius: 8px;
+      margin: 12px 0 16px;
+      letter-spacing: 0.5px;
+    }
+
+    .return-whatsapp-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      background: #25D366;
+      color: #090909;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 14px;
+      font-weight: 800;
+      padding: 13px;
+      border-radius: 10px;
+      text-decoration: none;
+      margin-top: 20px;
+      transition: background 0.15s ease;
+    }
+
+    .return-whatsapp-btn:hover {
+      background: #22bf5b;
+    }
+
+    .track-btn {
+      display: block;
+      width: 100%;
+      background: transparent;
+      color: #cbd5e1;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px;
+      text-decoration: none;
+      margin-top: 8px;
+    }
+
+    .track-btn:hover {
+      color: #ffffff;
+    }
+
+    .security-note {
+      text-align: center;
+      color: #64748b;
+      font-size: 11px;
+      margin-top: 14px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="popup-wrapper">
+    <!-- Sheet Drag Handle (WhatsApp in-app modal aesthetic) -->
+    <div class="sheet-handle"></div>
+
+    {% if submitted %}
+      <!-- SUBMISSION CONFIRMATION VIEW -->
+      <div class="success-card" id="success-screen">
+        <div class="success-icon-badge">✓</div>
+        <h2 style="font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 700; color: #ffffff; margin-bottom: 6px;">
+          Support Ticket Submitted!
+        </h2>
+        <p style="color: var(--text-muted); font-size: 13px; max-width: 380px; margin: 0 auto;">
+          Your dispute has been logged with our 24/7 resolution desk. A supervisor alert was sent directly to our team.
+        </p>
+
+        <div>
+          <span class="ticket-badge">{{ ticket_code }}</span>
+        </div>
+
+        <div style="background: #1a1a1a; border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 16px; text-align: left; font-size: 12px;">
+          <div style="color: var(--text-muted); margin-bottom: 4px;">Transaction Reference: <strong style="color: #ffffff;">{{ reference }}</strong></div>
+          <div style="color: var(--text-muted); margin-bottom: 4px;">Service Type: <strong style="color: #ffffff;">{{ service }}</strong></div>
+          <div style="color: var(--text-muted);">Contact WhatsApp: <strong style="color: var(--yellow);">{{ contact_phone }}</strong></div>
+        </div>
+
+        <a href="https://wa.me/2348102314725?text=Hello%20WAJ%20VTU%2C%20I%20have%20submitted%20ticket%20{{ ticket_code }}%20for%20ref%20{{ reference }}" class="return-whatsapp-btn" onclick="tryCloseWindow();">
+          💬 Return to WhatsApp Chat
+        </a>
+        <a href="{{ url_for('web.support_page', ref=reference) }}" class="track-btn">
+          Track Live Status on Resolution Hub ↗
+        </a>
+      </div>
+    {% else %}
+      <!-- INTERACTIVE SUPPORT FORM VIEW -->
+      <div class="popup-header">
+        <div class="brand-row">
+          <div class="brand-logo">
+            <span class="brand-badge">⚡</span>
+            WAJ <span style="color: var(--yellow);">VTU</span>
+          </div>
+          <div class="status-pill">
+            <span class="status-dot"></span> In-App Support
+          </div>
+        </div>
+        <h1 class="popup-title">Official Support &amp; Dispute Form</h1>
+        <p class="popup-subtitle">
+          Submitted directly from WhatsApp. Verified against telco provider gateway logs.
+        </p>
+        {% if phone %}
+          <div class="connected-phone">
+            <span>📱 Connected:</span> <strong>{{ phone }}</strong>
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="form-card" id="form-container">
+        <form id="support-form" method="POST" action="{{ url_for('web.support_form_popup') }}">
+          <!-- Hidden or visible Contact Phone -->
+          <div class="form-group">
+            <label class="form-label" for="phone">Your WhatsApp Phone Number <span class="req">*</span></label>
+            <input type="tel" id="phone" name="phone" class="form-control" value="{{ phone }}" placeholder="e.g. 08102314725 or 2348102314725" required>
+          </div>
+
+          <!-- Transaction Reference -->
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label class="form-label" for="ref" style="margin-bottom: 0;">Transaction Reference Code</label>
+              <span style="font-size: 11px; color: var(--text-muted); cursor: pointer;" onclick="document.getElementById('ref').value='UNKNOWN';">I don't have it</span>
+            </div>
+            <input type="text" id="ref" name="ref" class="form-control" value="{{ searched_ref }}" placeholder="e.g. REF_DATA_..., DEP_WEBSITE_... or UNKNOWN">
+          </div>
+
+          <!-- Service Category Pills -->
+          <div class="form-group">
+            <label class="form-label">Service Type <span class="req">*</span></label>
+            <div class="service-grid">
+              <label class="service-option">
+                <input type="radio" name="service_type" value="DATA" {% if service_hint == 'DATA' or not service_hint %}checked{% endif %}>
+                <div class="service-btn">
+                  <span class="icon">📶</span>
+                  <span>Data</span>
+                </div>
+              </label>
+
+              <label class="service-option">
+                <input type="radio" name="service_type" value="AIRTIME" {% if service_hint == 'AIRTIME' %}checked{% endif %}>
+                <div class="service-btn">
+                  <span class="icon">📱</span>
+                  <span>Airtime</span>
+                </div>
+              </label>
+
+              <label class="service-option">
+                <input type="radio" name="service_type" value="ELECTRICITY" {% if service_hint == 'ELECTRICITY' %}checked{% endif %}>
+                <div class="service-btn">
+                  <span class="icon">⚡</span>
+                  <span>Electricity</span>
+                </div>
+              </label>
+
+              <label class="service-option">
+                <input type="radio" name="service_type" value="CABLE" {% if service_hint == 'CABLE' %}checked{% endif %}>
+                <div class="service-btn">
+                  <span class="icon">📺</span>
+                  <span>Cable TV</span>
+                </div>
+              </label>
+
+              <label class="service-option">
+                <input type="radio" name="service_type" value="EXAM" {% if service_hint == 'EXAM' %}checked{% endif %}>
+                <div class="service-btn">
+                  <span class="icon">🎓</span>
+                  <span>Exam PIN</span>
+                </div>
+              </label>
+
+              <label class="service-option">
+                <input type="radio" name="service_type" value="WALLET" {% if service_hint == 'WALLET' or service_hint == 'DEPOSIT' %}checked{% endif %}>
+                <div class="service-btn">
+                  <span class="icon">💳</span>
+                  <span>Funding</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Target Recipient -->
+          <div class="form-group">
+            <label class="form-label" for="recipient">Recipient Phone / Meter / Smartcard</label>
+            <input type="text" id="recipient" name="recipient" class="form-control" placeholder="e.g. 08012345678 or 4501238912">
+          </div>
+
+          <!-- Dispute Category -->
+          <div class="form-group">
+            <label class="form-label" for="category">Dispute Category <span class="req">*</span></label>
+            <select id="category" name="category" class="form-control" style="cursor: pointer;">
+              <option value="Debited but value not delivered">Debited from bank/wallet but value not delivered</option>
+              <option value="Transaction stuck on PENDING">Transaction stuck on PENDING for > 10 minutes</option>
+              <option value="Wrong recipient credited">Wrong phone number or meter credited</option>
+              <option value="Duplicate debit for single order">Duplicate debit for single order</option>
+              <option value="Token or Exam PIN recovery">Electricity token or Exam PIN not retrieved</option>
+              <option value="Wallet Paystack funding delayed">Wallet deposit not reflected</option>
+              <option value="Other support inquiry">Other support inquiry</option>
+            </select>
+          </div>
+
+          <!-- Description -->
+          <div class="form-group">
+            <label class="form-label" for="description">Dispute Details / Description <span class="req">*</span></label>
+            <textarea id="description" name="description" class="form-control" placeholder="Briefly describe what happened (e.g. paid N410 for 1GB MTN at 2:15pm, debited but bundle not received)..." required></textarea>
+          </div>
+
+          <!-- Submit Button -->
+          <button type="submit" id="submit-btn" class="submit-btn">
+            <span>Submit Dispute Ticket ↗</span>
+          </button>
+        </form>
+
+        <p class="security-note">
+          🔒 Encrypted WhatsApp In-App Form. Once submitted, an instant supervisor alert is dispatched to our resolution team.
+        </p>
+      </div>
+
+      <!-- In-Page AJAX Success Card (initially hidden) -->
+      <div class="success-card" id="ajax-success" style="display: none;">
+        <div class="success-icon-badge">✓</div>
+        <h2 style="font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 700; color: #ffffff; margin-bottom: 6px;">
+          Support Ticket Submitted!
+        </h2>
+        <p style="color: var(--text-muted); font-size: 13px; max-width: 380px; margin: 0 auto;">
+          Your dispute has been logged with our 24/7 resolution desk. A supervisor alert was sent directly to our team.
+        </p>
+
+        <div>
+          <span class="ticket-badge" id="ajax-ticket-code">TKT-VTU-0001</span>
+        </div>
+
+        <div style="background: #1a1a1a; border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 16px; text-align: left; font-size: 12px;">
+          <div style="color: var(--text-muted); margin-bottom: 4px;">Reference: <strong id="ajax-ref-text" style="color: #ffffff;"></strong></div>
+          <div style="color: var(--text-muted);">Status: <strong style="color: #10b981;">Escalated to Human Supervisor</strong></div>
+        </div>
+
+        <a href="https://wa.me/2348102314725" id="ajax-whatsapp-return" class="return-whatsapp-btn" onclick="tryCloseWindow();">
+          💬 Return to WhatsApp Chat
+        </a>
+      </div>
+    {% endif %}
+  </div>
+
+  <script>
+    function tryCloseWindow() {
+      try {
+        if (window.opener) {
+          window.close();
+        }
+      } catch (e) {}
+    }
+
+    // Handle AJAX form submission for silky-smooth in-app experience
+    const form = document.getElementById('support-form');
+    if (form) {
+      form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const submitBtn = document.getElementById('submit-btn');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span>Submitting Dispute Ticket...</span>';
+
+        const formData = new FormData(form);
+        const payload = {};
+        formData.forEach((value, key) => { payload[key] = value; });
+
+        try {
+          const res = await fetch(form.action, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          const data = await res.json();
+          if (res.ok && data.status === 'success') {
+            document.getElementById('form-container').style.display = 'none';
+            document.getElementById('ajax-ticket-code').textContent = data.ticket_code;
+            document.getElementById('ajax-ref-text').textContent = data.reference || 'N/A';
+            document.getElementById('ajax-whatsapp-return').href = `https://wa.me/2348102314725?text=Hello%20WAJ%20VTU%2C%20I%20have%20submitted%20ticket%20${encodeURIComponent(data.ticket_code)}%20for%20ref%20${encodeURIComponent(data.reference || '')}`;
+            document.getElementById('ajax-success').style.display = 'block';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          } else {
+            alert(data.message || 'Could not submit support form. Please try again.');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span>Submit Dispute Ticket ↗</span>';
+          }
+        } catch (err) {
+          // Fallback to normal form submission if fetch fails
+          form.submit();
+        }
+      });
+    }
+  </script>
+</body>
+</html>
