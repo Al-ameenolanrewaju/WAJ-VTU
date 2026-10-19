@@ -125,57 +125,6 @@ def _swiftbills_error_message(exc: Exception) -> str:
     return str(exc)
 
 
-def _swiftbills_data_payload_variants(network_id: int | str, phone: str, plan_id: int | str, reference: str, amount: float | None = None):
-    """Create several compatible payload shapes for the SwiftBills data endpoint."""
-    variants = []
-    base = {
-        "network": int(network_id),
-        "phone": phone,
-        "data_plan": int(plan_id),
-        "request-id": reference,
-    }
-    if amount is not None:
-        base["amount"] = str(amount)
-    variants.append(base)
-
-    aliases = {
-        "network_id": int(network_id),
-        "network": int(network_id),
-        "phone": phone,
-        "data_plan_id": int(plan_id),
-        "data_plan": int(plan_id),
-        "plan_id": int(plan_id),
-        "plan": int(plan_id),
-        "request_id": reference,
-        "request-id": reference,
-        "requestId": reference,
-    }
-    if amount is not None:
-        aliases["amount"] = str(amount)
-    variants.append(aliases)
-
-    third = {
-        "network": int(network_id),
-        "phone": phone,
-        "plan_id": int(plan_id),
-        "plan": int(plan_id),
-        "request_id": reference,
-        "amount": str(amount) if amount is not None else "",
-    }
-    if amount is None:
-        third.pop("amount")
-    variants.append(third)
-
-    deduped = []
-    seen = set()
-    for variant in variants:
-        key = tuple(sorted((str(k), str(v)) for k, v in variant.items()))
-        if key not in seen:
-            seen.add(key)
-            deduped.append(variant)
-    return deduped
-
-
 def fetch_account_balance():
     """Fetch the current ClubKonnect wallet balance for the admin dashboard."""
     if MOCK_MODE:
@@ -402,41 +351,31 @@ def process_data_purchase(
 
     try:
         _, swift_network, swift_plan_id = str(plan_code).split(":", 2)
-        payload_variants = _swiftbills_data_payload_variants(swift_network, phone, swift_plan_id, ref, amount)
-        
-        if bypass not in (None, ""):
-            bypass_val = str(bypass).lower() in ["true", "1", "yes"]
-            for payload in payload_variants:
-                payload["bypass"] = bypass_val
+        payload = {
+            "network": int(swift_network),
+            "phone": phone,
+            "plan": int(swift_plan_id),
+            "request-id": ref,
+        }
+        if amount is not None:
+            payload["amount"] = str(amount)
         if ported_number not in (None, ""):
-            ported_val = str(ported_number).lower() in ["true", "1", "yes"]
-            for payload in payload_variants:
-                payload["ported_number"] = ported_val
-            
-        last_error = "SwiftBills data purchase failed"
+            payload["Ported_number"] = ported_number
+        else:
+            payload["bypass"] = str(bypass).strip().lower() in {"true", "1", "yes"} if bypass not in (None, "") else False
 
-        for index, payload in enumerate(payload_variants):
-            try:
-                response = _swiftbills_request("data", method="POST", payload=payload)
-                if _is_success(response):
-                    return {"status": "SUCCESS", "reference": ref, "provider": "swiftbills", "provider_reference": response.get("reference", response.get("request_id", ref)), "reason": "", "data": response}
-                last_error = response.get("message", response.get("response", "SwiftBills data purchase failed"))
-                if index < len(payload_variants) - 1:
-                    logger.warning("SwiftBills data request variant %s failed; retrying with alternate payload fields", index + 1)
-                    continue
-                return _failure(ref, str(last_error), provider="swiftbills")
-            except requests.HTTPError as exc:
-                last_error = _swiftbills_error_message(exc)
-                if index < len(payload_variants) - 1:
-                    logger.warning("SwiftBills data request variant %s returned HTTP %s; retrying with alternate payload fields", index + 1, getattr(exc.response, "status_code", "unknown"))
-                    continue
-                logger.error("SwiftBills data purchase failed: %s", last_error)
-                return _failure(ref, last_error, provider="swiftbills")
-            except Exception as exc:
-                logger.error("SwiftBills data purchase failed: %s", exc)
-                return _failure(ref, str(exc), provider="swiftbills")
+        try:
+            response = _swiftbills_request("data", method="POST", payload=payload)
+        except requests.HTTPError as exc:
+            error = _swiftbills_error_message(exc)
+            logger.error("SwiftBills data purchase failed: %s", error)
+            return _failure(ref, error, provider="swiftbills")
 
-        return _failure(ref, str(last_error), provider="swiftbills")
+        if _is_success(response):
+            return {"status": "SUCCESS", "reference": ref, "provider": "swiftbills", "provider_reference": response.get("reference", response.get("request_id", ref)), "reason": "", "data": response}
+        error = response.get("message", response.get("response", "SwiftBills data purchase failed"))
+        logger.error("SwiftBills data purchase failed: %s", error)
+        return _failure(ref, str(error), provider="swiftbills")
     except Exception as exc:
         logger.error("SwiftBills data purchase failed: %s", exc)
         return _failure(ref, str(exc), provider="swiftbills")

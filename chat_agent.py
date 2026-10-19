@@ -1244,12 +1244,14 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
         "support ticket",
     ]
     if any(kw in raw_lower for kw in support_form_triggers) or raw_lower.startswith("support form:"):
-        from app import send_whatsapp_support_flow
-        send_whatsapp_support_flow(
+        from app import send_whatsapp_interactive_url
+        form_url = get_in_app_support_form_url(provider_phone or user.phone, text)
+        send_whatsapp_interactive_url(
             chat_id,
-            reference="",
-            service="VTU Service",
-            header_text="WAJ VTU Support Desk"
+            "Open the official support form to submit your issue and transaction details.",
+            "Open Support Form",
+            form_url,
+            header_text="WAJ VTU Support Desk",
         )
         return
 
@@ -1334,14 +1336,16 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
     
     client = get_groq_client()
     if not client:
-        from app import send_whatsapp_support_flow, send_whatsapp_message
+        from app import send_whatsapp_interactive_url, send_whatsapp_message
         lower_raw = str(text or "").strip().lower()
         if any(w in lower_raw for w in ["support form", "fill support", "fill the support form", "lodge complaint", "ticket", "dispute"]) or lower_raw.startswith("support form:"):
-            send_whatsapp_support_flow(
+            form_url = get_in_app_support_form_url(provider_phone or user.phone, text)
+            send_whatsapp_interactive_url(
                 chat_id,
-                reference="",
-                service="VTU Service",
-                header_text="WAJ VTU Support Desk"
+                "Open the official support form to submit your issue and transaction details.",
+                "Open Support Form",
+                form_url,
+                header_text="WAJ VTU Support Desk",
             )
             return
         send_whatsapp_message(chat_id, "Service is currently unavailable. Please check API configuration.")

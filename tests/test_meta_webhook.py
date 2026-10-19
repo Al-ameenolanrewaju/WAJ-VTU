@@ -1051,34 +1051,65 @@ def test_data_comparison_keeps_lowest_swiftbills_plan_and_purchases_with_swiftbi
     assert captured["payload"] == {
         "network": 1,
         "phone": "08012345678",
-        "data_plan": 101,
+        "plan": 101,
         "request-id": result["reference"],
         "amount": "450",
+        "bypass": False,
     }
 
 
-def test_swiftbills_data_purchase_retries_with_alternate_payload_when_first_variant_fails(monkeypatch):
+def test_swiftbills_ported_data_purchase_sends_ported_number_without_bypass(monkeypatch):
     import provider
 
     monkeypatch.setattr(provider, "MOCK_MODE", False)
     monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "swift-key")
     monkeypatch.setattr(provider, "generate_ref", lambda prefix: "expected-ref")
+    captured = {}
 
+    def fake_swift_request(endpoint, method="GET", payload=None):
+        captured["payload"] = payload
+        return {"status": "success", "message": "Data Purchase Successful."}
+
+    monkeypatch.setattr(provider, "_swiftbills_request", fake_swift_request)
+
+    result = provider.process_data_purchase(
+        "08012345678", "MTN", "swiftbills:1:101", 450,
+        ported_number="08087654321",
+    )
+
+    assert result["status"] == "SUCCESS"
+    assert captured["payload"] == {
+        "network": 1,
+        "phone": "08012345678",
+        "plan": 101,
+        "request-id": "expected-ref",
+        "amount": "450",
+        "Ported_number": "08087654321",
+    }
+
+
+def test_swiftbills_data_purchase_http_400_does_not_retry(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "swift-key")
     payloads = []
 
     def fake_swift_request(endpoint, method="GET", payload=None):
         payloads.append(payload)
-        if payload.get("request-id") == "expected-ref":
-            raise requests.HTTPError("400 Client Error: Bad Request for url: https://swiftbills.com.ng/api/data")
-        return {"status": "success", "message": "Data Purchase Successful."}
+        response = requests.Response()
+        response.status_code = 400
+        response._content = b'{"message":"The bypass field is required."}'
+        raise requests.HTTPError("400 Client Error", response=response)
 
     monkeypatch.setattr(provider, "_swiftbills_request", fake_swift_request)
 
     result = provider.process_data_purchase("08012345678", "MTN", "swiftbills:1:101", 450)
 
-    assert result["status"] == "SUCCESS"
-    assert any("request_id" in payload or "request-id" in payload for payload in payloads)
-    assert any(payload.get("request_id") == "expected-ref" for payload in payloads)
+    assert result["status"] == "FAILED"
+    assert result["reason"] == "The bypass field is required."
+    assert len(payloads) == 1
+    assert payloads[0]["bypass"] is False
 
 
 def test_swiftbills_exam_catalog_includes_neco_and_other_exam_pins(monkeypatch):
@@ -1148,7 +1179,7 @@ def test_submit_support_ticket_tool_escalates_and_alerts_admin(monkeypatch):
         assert "MTN 1GB" in sent_alerts[0][1]
 
 
-def test_support_page_contains_no_direct_call_and_shows_whatsapp_support_form():
+def test_support_page_contains_no_direct_call_and_links_to_support_form():
     import app as app_module
 
     client = app_module.app.test_client()
@@ -1166,9 +1197,8 @@ def test_support_page_contains_no_direct_call_and_shows_whatsapp_support_form():
     assert "Official Inbox" not in html
     assert "mailto:" not in html
 
-    # Ensure official support form is inside WhatsApp
-    assert "Fill Support Form in WhatsApp" in html
-    assert "SUPPORT%20FORM" in html or "Support Form" in html
+    assert "Open Support Form" in html
+    assert 'href="/support/form' in html
 
 
 def test_support_form_popup_page_renders_and_submits(monkeypatch):
@@ -1211,34 +1241,17 @@ def test_support_form_popup_page_renders_and_submits(monkeypatch):
     assert any("08012345678" in alert[0] for alert in sent_alerts)
 
 
-def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch, client):
-    import json
+def test_chat_support_form_request_opens_web_form(monkeypatch, client):
     import app as app_module
     import chat_agent
-    from models import SupportTicket
 
-    sent_messages = []
-    sent_flows = []
-    class ImmediateThread:
-        def __init__(self, target, args=()):
-            self.target = target
-            self.args = args
-
-        def start(self):
-            self.target(*self.args)
-
-    monkeypatch.setattr(app_module.threading, "Thread", ImmediateThread)
+    sent_forms = []
+    monkeypatch.setenv("APP_BASE_URL", "https://wajvtu.test")
     monkeypatch.setattr(
         app_module,
-        "send_whatsapp_support_flow",
-        lambda recipient, reference="", service="VTU Service", header_text="WAJ VTU Dispute Desk": sent_flows.append((recipient, reference, service, header_text)),
+        "send_whatsapp_interactive_url",
+        lambda recipient, body_text, button_title, url, header_text="WAJ VTU Support": sent_forms.append((recipient, body_text, button_title, url, header_text)),
     )
-    monkeypatch.setattr(
-        app_module,
-        "send_whatsapp_message",
-        lambda phone, message: sent_messages.append((phone, message)),
-    )
-    monkeypatch.setenv("ADMIN_PHONE", "2348100000099")
 
     with app_module.app.app_context():
         user = app_module.User(
@@ -1249,7 +1262,6 @@ def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch, client):
         app_module.db.session.add(user)
         app_module.db.session.commit()
 
-        # Step 1: User asks to fill support form in WhatsApp -> Native WhatsApp Flow dispatched
         chat_agent.handle_chat_message(
             app_module.app,
             app_module.db,
@@ -1259,65 +1271,13 @@ def test_chat_message_support_form_in_chat_open_and_submit(monkeypatch, client):
             user.phone,
         )
 
-        assert len(sent_flows) == 1
-        recipient, reference, service, header_text = sent_flows[0]
+        assert len(sent_forms) == 1
+        recipient, body_text, button_title, url, header_text = sent_forms[0]
         assert user.phone in recipient
-        assert "Support" in header_text or "Dispute" in header_text
-
-        # Step 2: User completes and submits the Native WhatsApp Flow form (nfm_reply)
-        flow_payload = {
-            "service_type": "DATA",
-            "recipient": "08012345678",
-            "reference": "REF_FLOW_888",
-            "category": "Debited but value not delivered",
-            "description": "Paid for data bundle inside WhatsApp Flow, debited but not credited",
-        }
-        webhook_payload = {
-            "entry": [
-                {
-                    "changes": [
-                        {
-                            "value": {
-                                "messages": [
-                                    {
-                                        "from": user.phone,
-                                        "id": f"wamid.flow_{uuid.uuid4().hex[:8]}",
-                                        "type": "interactive",
-                                        "interactive": {
-                                            "type": "nfm_reply",
-                                            "nfm_reply": {
-                                                "name": "flow",
-                                                "response_json": json.dumps(flow_payload),
-                                            },
-                                        },
-                                    }
-                                ]
-                            }
-                        }
-                    ]
-                }
-            ]
-        }
-
-        sent_messages.clear()
-        res_submit = client.post("/webhook", json=webhook_payload)
-        assert res_submit.status_code == 200
-
-        # Confirmation sent in WhatsApp to customer and admin alerted
-        assert any(user.phone in msg[0] and "Support Form Received" in msg[1] for msg in sent_messages)
-        assert any("2348100000099" in msg[0] and "REF_FLOW_888" in msg[1] for msg in sent_messages)
-
-        # User is escalated to human support
-        app_module.db.session.refresh(user)
-        assert user.is_escalated is True
-
-        # Support ticket exists in DB
-        tkt = SupportTicket.query.filter_by(reference="REF_FLOW_888").first()
-        assert tkt is not None
-        assert tkt.customer_phone == user.phone
-        assert tkt.status == "OPEN"
-        assert tkt.service_type == "DATA"
-        assert tkt.recipient == "08012345678"
+        assert "Open the official support form" in body_text
+        assert button_title == "Open Support Form"
+        assert url == f"https://wajvtu.test/support/form?phone={user.phone}"
+        assert header_text == "WAJ VTU Support Desk"
 
 
 def test_mobile_bottom_navigation_and_more_sheet_structure(client):
