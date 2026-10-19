@@ -671,14 +671,43 @@ def test_send_whatsapp_message_uses_meta_api(monkeypatch):
     monkeypatch.setenv("META_PHONE_NUMBER_ID", "1234567890")
     monkeypatch.setattr(app.requests, "post", fake_post)
 
-    result = app.send_whatsapp_message("2348012345678", "Hello from Meta")
+    result = app.send_whatsapp_message("08012345678", "Hello from Meta")
 
     assert result is True
     assert captured["url"].endswith("/1234567890/messages")
     assert captured["headers"]["Authorization"] == "Bearer meta-token"
-    assert captured["json"]["to"] == "2348012345678"
+    assert captured["json"]["to"] == "+2348012345678"
     assert captured["json"]["type"] == "text"
     assert captured["json"]["text"]["body"] == "Hello from Meta"
+
+
+def test_send_whatsapp_interactive_url_preserves_e164_recipient(monkeypatch):
+    import app
+
+    captured = {}
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        text = "{}"
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured["json"] = json
+        return FakeResponse()
+
+    monkeypatch.setenv("META_API_TOKEN", "meta-token")
+    monkeypatch.setenv("META_PHONE_NUMBER_ID", "1234567890")
+    monkeypatch.setattr(app.requests, "post", fake_post)
+
+    result = app.send_whatsapp_interactive_url(
+        "2348012345678@s.whatsapp.net",
+        "Open the support form.",
+        "Open Support Form",
+        "https://wajvtu.com.ng/support/form",
+    )
+
+    assert result is True
+    assert captured["json"]["to"] == "+2348012345678"
 
 
 def test_admin_dashboard_shows_timestamps(client):

@@ -915,6 +915,19 @@ def _handle_checkout_link_charge(data):
     return jsonify({"status": "ok", "credited_amount": str(net_credit)}), 200
 
 
+def _format_meta_recipient(recipient):
+    """Normalize Nigerian local numbers and bridge JIDs to an E.164 recipient."""
+    value = str(recipient or "").split("@", 1)[0].strip()
+    digits = "".join(character for character in value if character in "0123456789")
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = "234" + digits[1:]
+    elif len(digits) == 10 and digits[0] in "789":
+        digits = "234" + digits
+    if not 8 <= len(digits) <= 15 or digits.startswith("0"):
+        return ""
+    return f"+{digits}"
+
+
 def send_whatsapp_message(recipient, text):
     """
     Sends outgoing WhatsApp messages through the official Meta Cloud API when configured,
@@ -927,9 +940,10 @@ def send_whatsapp_message(recipient, text):
 
         if meta_api_token and meta_phone_number_id:
             meta_url = f"https://graph.facebook.com/{meta_api_version}/{meta_phone_number_id}/messages"
-            # Meta's Cloud API requires a bare MSISDN (digits only) as "to" - strip any
-            # bridge-style JID suffix (e.g. "...@s.whatsapp.net") or leading + sign if present.
-            meta_recipient = str(recipient).split("@", 1)[0].replace("+", "")
+            meta_recipient = _format_meta_recipient(recipient)
+            if not meta_recipient:
+                print("Meta API message not sent: recipient is not a valid phone number")
+                return False
             payload = {
                 "messaging_product": "whatsapp",
                 "to": meta_recipient,
@@ -976,7 +990,10 @@ def send_whatsapp_interactive_url(recipient, body_text, button_title, url, heade
 
         if meta_api_token and meta_phone_number_id:
             meta_url = f"https://graph.facebook.com/{meta_api_version}/{meta_phone_number_id}/messages"
-            meta_recipient = str(recipient).split("@", 1)[0].replace("+", "")
+            meta_recipient = _format_meta_recipient(recipient)
+            if not meta_recipient:
+                print("Meta CTA message not sent: recipient is not a valid phone number")
+                return False
             payload = {
                 "messaging_product": "whatsapp",
                 "recipient_type": "individual",
@@ -1061,6 +1078,10 @@ def send_whatsapp_receipt(recipient, reference):
     transaction = Transaction.query.filter_by(reference=reference, status="SUCCESS").first()
     if transaction is None:
         return False
+    meta_recipient = _format_meta_recipient(recipient)
+    if not meta_recipient:
+        print("WhatsApp receipt not sent: recipient is not a valid phone number")
+        return False
     image_buffer = generate_receipt_png(transaction)
     api_version = os.getenv("META_API_VERSION", META_API_VERSION).strip()
     base_url = f"https://graph.facebook.com/{api_version}/{meta_phone_number_id}"
@@ -1083,7 +1104,7 @@ def send_whatsapp_receipt(recipient, reference):
             f"{base_url}/messages",
             json={
                 "messaging_product": "whatsapp",
-                "to": str(recipient).split("@", 1)[0].replace("+", ""),
+                "to": meta_recipient,
                 "type": "image",
                 "image": {"id": media_id, "caption": f"Receipt: {transaction.reference}"},
             },
