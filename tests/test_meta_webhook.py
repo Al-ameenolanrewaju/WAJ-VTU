@@ -1084,11 +1084,9 @@ def test_data_comparison_keeps_lowest_swiftbills_plan_and_purchases_with_swiftbi
     assert captured["endpoint"] == "data"
     assert captured["method"] == "POST"
     assert captured["payload"] == {
-        "network": 1,
         "phone": "08012345678",
         "plan": 101,
         "request-id": result["reference"],
-        "amount": "450",
         "bypass": False,
     }
 
@@ -1114,11 +1112,9 @@ def test_swiftbills_ported_data_purchase_sends_ported_number_without_bypass(monk
 
     assert result["status"] == "SUCCESS"
     assert captured["payload"] == {
-        "network": 1,
         "phone": "08012345678",
         "plan": 101,
         "request-id": "expected-ref",
-        "amount": "450",
         "Ported_number": "08087654321",
     }
 

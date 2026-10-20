@@ -350,15 +350,12 @@ def process_data_purchase(
         return _failure(ref, "SwiftBills API credentials are missing", provider="swiftbills")
 
     try:
-        _, swift_network, swift_plan_id = str(plan_code).split(":", 2)
+        _, _, swift_plan_id = str(plan_code).split(":", 2)
         payload = {
-            "network": int(swift_network),
             "phone": phone,
             "plan": int(swift_plan_id),
             "request-id": ref,
         }
-        if amount is not None:
-            payload["amount"] = str(amount)
         if ported_number not in (None, ""):
             payload["Ported_number"] = ported_number
         else:
