@@ -315,7 +315,12 @@ def test_webhook_ignores_new_user_when_db_mutations_disabled(client):
     assert response.get_json()["status"] == "ignored"
 
 
-def test_webhook_ignores_non_message_events(client):
+def test_webhook_ignores_non_message_events(client, monkeypatch):
+    sent_messages = []
+    monkeypatch.setattr(
+        "app.send_whatsapp_message",
+        lambda recipient, text: sent_messages.append((recipient, text)),
+    )
     payload = {
         "entry": [
             {
@@ -335,6 +340,7 @@ def test_webhook_ignores_non_message_events(client):
     response = client.post("/webhook", json=payload)
     assert response.status_code == 200
     assert response.get_json()["status"] == "ignored"
+    assert sent_messages == []
 
 
 def test_data_purchase_applies_margin_from_selected_plan(monkeypatch, client):

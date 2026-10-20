@@ -1206,6 +1206,9 @@ def whatsapp_webhook():
         if sender:
             break
 
+    if not has_message:
+        return jsonify({"status": "ignored"}), 200
+
     if message_type != "text":
         threading.Thread(
             target=send_whatsapp_message,
