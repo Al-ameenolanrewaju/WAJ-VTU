@@ -3109,6 +3109,7 @@ def admin_analytics():
         </tr>
         """
 
+    site_url = (request.host_url or APP_BASE_URL or "https://wajvtu.com.ng").rstrip("/")
     looker_url = (os.getenv("LOOKER_STUDIO_EMBED_URL") or "https://datastudio.google.com/embed/reporting/d8d7eb55-9665-40f0-9e60-e49503640e84/page/1y3CG").strip()
     if "/reporting/" in looker_url and "/embed/reporting/" not in looker_url:
         looker_embed_src = looker_url.replace("/reporting/", "/embed/reporting/")
@@ -3211,6 +3212,118 @@ def admin_analytics():
         <div class="card"><h3>Active Customers</h3><p>{active_customers}</p></div>
         <div class="card"><h3>Total Transactions</h3><p>{Transaction.query.count()}</p></div>
     </div>
+
+    <!-- Quick Marketing Campaign Link Generator -->
+    <div class="card" style="padding:22px; margin-bottom:30px; border-left:4px solid var(--admin-amber, #ffc400); background:#ffffff;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+            <div>
+                <h3 style="font-size:17px; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+                    <span>🔗</span> Tracked Campaign Links (1-Click Copy)
+                </h3>
+                <small style="color:var(--admin-muted, #64748b);">Share these links on social media and broadcasts to automatically track visitor sources and conversions.</small>
+            </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px; margin-bottom:8px;">
+            <!-- WhatsApp -->
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:6px;">
+                <span style="font-size:13px; font-weight:700; color:#0f172a;">💬 WhatsApp Broadcast / Status</span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input type="text" readonly value="{site_url}/?utm_source=whatsapp&utm_campaign=promo" id="link-wa" style="flex:1; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; padding:7px 10px; font-size:12px; font-family:monospace; color:#334155;">
+                    <button type="button" onclick="copyTrackedLink('link-wa', this)" style="background:var(--admin-amber, #ffc400); color:#09090b; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap;">📋 Copy</button>
+                </div>
+            </div>
+
+            <!-- Instagram -->
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:6px;">
+                <span style="font-size:13px; font-weight:700; color:#0f172a;">📷 Instagram Bio / Stories</span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input type="text" readonly value="{site_url}/?utm_source=instagram" id="link-ig" style="flex:1; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; padding:7px 10px; font-size:12px; font-family:monospace; color:#334155;">
+                    <button type="button" onclick="copyTrackedLink('link-ig', this)" style="background:var(--admin-amber, #ffc400); color:#09090b; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap;">📋 Copy</button>
+                </div>
+            </div>
+
+            <!-- Facebook -->
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:6px;">
+                <span style="font-size:13px; font-weight:700; color:#0f172a;">👥 Facebook Post / Ad</span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input type="text" readonly value="{site_url}/?utm_source=facebook" id="link-fb" style="flex:1; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; padding:7px 10px; font-size:12px; font-family:monospace; color:#334155;">
+                    <button type="button" onclick="copyTrackedLink('link-fb', this)" style="background:var(--admin-amber, #ffc400); color:#09090b; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap;">📋 Copy</button>
+                </div>
+            </div>
+
+            <!-- X (Twitter) -->
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:6px;">
+                <span style="font-size:13px; font-weight:700; color:#0f172a;">🐦 X (Twitter)</span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input type="text" readonly value="{site_url}/?utm_source=twitter" id="link-tw" style="flex:1; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; padding:7px 10px; font-size:12px; font-family:monospace; color:#334155;">
+                    <button type="button" onclick="copyTrackedLink('link-tw', this)" style="background:var(--admin-amber, #ffc400); color:#09090b; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap;">📋 Copy</button>
+                </div>
+            </div>
+
+            <!-- TikTok -->
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:6px;">
+                <span style="font-size:13px; font-weight:700; color:#0f172a;">🎵 TikTok Bio</span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input type="text" readonly value="{site_url}/?utm_source=tiktok" id="link-tt" style="flex:1; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; padding:7px 10px; font-size:12px; font-family:monospace; color:#334155;">
+                    <button type="button" onclick="copyTrackedLink('link-tt', this)" style="background:var(--admin-amber, #ffc400); color:#09090b; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap;">📋 Copy</button>
+                </div>
+            </div>
+
+            <!-- Custom Campaign Generator -->
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:6px;">
+                <span style="font-size:13px; font-weight:700; color:#0f172a;">🎯 Custom Campaign Tag Builder</span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input type="text" placeholder="Type tag (e.g. weekend_promo)" id="custom-campaign-input" oninput="buildCustomLink()" style="flex:1; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; padding:7px 10px; font-size:12px; color:#334155;">
+                    <input type="hidden" id="link-custom" value="{site_url}/?utm_source=whatsapp&utm_campaign=promo">
+                    <button type="button" id="btn-custom-copy" onclick="copyCustomLink(this)" style="background:var(--admin-amber, #ffc400); color:#09090b; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap;">📋 Copy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function copyTrackedLink(inputId, btn) {{
+        var copyText = document.getElementById(inputId);
+        if (!copyText) return;
+        copyText.select();
+        copyText.setSelectionRange(0, 99999);
+        navigator.clipboard.writeText(copyText.value).then(function() {{
+            var oldText = btn.innerText;
+            btn.innerText = "✓ Copied!";
+            btn.style.background = "#16a34a";
+            btn.style.color = "#ffffff";
+            setTimeout(function() {{
+                btn.innerText = oldText;
+                btn.style.background = "var(--admin-amber, #ffc400)";
+                btn.style.color = "#09090b";
+            }}, 2000);
+        }});
+    }}
+
+    function buildCustomLink() {{
+        var input = document.getElementById('custom-campaign-input');
+        var val = (input ? input.value : '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+        var base = '{site_url}/?utm_source=whatsapp&utm_campaign=' + (val || 'promo');
+        document.getElementById('link-custom').value = base;
+    }}
+
+    function copyCustomLink(btn) {{
+        buildCustomLink();
+        var link = document.getElementById('link-custom').value;
+        navigator.clipboard.writeText(link).then(function() {{
+            var oldText = btn.innerText;
+            btn.innerText = "✓ Copied!";
+            btn.style.background = "#16a34a";
+            btn.style.color = "#ffffff";
+            setTimeout(function() {{
+                btn.innerText = oldText;
+                btn.style.background = "var(--admin-amber, #ffc400)";
+                btn.style.color = "#09090b";
+            }}, 2000);
+        }});
+    }}
+    </script>
 
     <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:20px; margin-bottom:30px;">
         <!-- Traffic Sources Breakdown -->
