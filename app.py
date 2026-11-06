@@ -3107,7 +3107,7 @@ def admin_analytics():
         </tr>
         """
 
-    looker_url = (os.getenv("LOOKER_STUDIO_EMBED_URL") or "https://lookerstudio.google.com/embed/reporting/d8d7eb55-9665-40f0-9e60-e49503640e84").strip()
+    looker_url = (os.getenv("LOOKER_STUDIO_EMBED_URL") or "https://datastudio.google.com/embed/reporting/d8d7eb55-9665-40f0-9e60-e49503640e84/page/1y3CG").strip()
     if "/reporting/" in looker_url and "/embed/reporting/" not in looker_url:
         looker_embed_src = looker_url.replace("/reporting/", "/embed/reporting/")
     else:
@@ -3191,7 +3191,8 @@ def admin_analytics():
                 src="{escape(looker_embed_src)}"
                 frameborder="0"
                 style="border:0; width:100%; height:100%; display:block;"
-                allowfullscreen>
+                allowfullscreen
+                sandbox="allow-storage-access-by-user-activation allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox">
             </iframe>
         </div>
     </div>
