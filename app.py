@@ -3191,8 +3191,7 @@ def admin_analytics():
                 src="{escape(looker_embed_src)}"
                 frameborder="0"
                 style="border:0; width:100%; height:100%; display:block;"
-                allowfullscreen
-                sandbox="allow-storage-access-by-user-activation allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox">
+                allowfullscreen>
             </iframe>
         </div>
     </div>
