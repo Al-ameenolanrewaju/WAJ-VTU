@@ -1098,7 +1098,9 @@ def send_whatsapp_message(recipient, text):
             }
             response = requests.post(meta_url, json=payload, headers=headers, timeout=20)
             if not response.ok:
-                print(f"Meta API HTTP Error ({response.status_code}): {response.text}")
+                err_detail = f"Meta API HTTP Error ({response.status_code}): {response.text}"
+                print(err_detail)
+                app.logger.error(err_detail)
             return response.ok
 
         payload = {

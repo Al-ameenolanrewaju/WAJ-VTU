@@ -17,11 +17,25 @@ class NotificationService:
 
     @staticmethod
     def is_whatsapp_linked(user):
-        """Checks if a user has an active, linked WhatsApp account."""
+        """
+        Checks if a user can receive WhatsApp messages.
+        A user is reachable if they have a valid phone number (including website users)
+        or an active WhatsApp ID.
+        """
         if not user:
             return False
-        w_id = str(user.whatsapp_id or "")
-        return bool(w_id and not w_id.startswith("web_"))
+        # 1. Any user with a valid phone number (10+ digits) is reachable on WhatsApp
+        phone = str(user.phone or "").strip()
+        phone_digits = "".join(c for c in phone if c.isdigit())
+        if len(phone_digits) >= 10:
+            return True
+        # 2. Or user with an active WhatsApp ID that is not an unlinked web placeholder
+        w_id = str(user.whatsapp_id or "").strip()
+        if w_id and not w_id.startswith("web_"):
+            w_digits = "".join(c for c in w_id.split("@")[0] if c.isdigit())
+            if len(w_digits) >= 10:
+                return True
+        return False
 
     @staticmethod
     def send_whatsapp(recipient, message_text):
@@ -148,7 +162,12 @@ class NotificationService:
                 db.session.commit()
                 return False, "User does not have linked WhatsApp."
 
-            recipient_phone = user.phone or str(user.whatsapp_id).split("@", 1)[0]
+            recipient_phone = user.phone or (str(user.whatsapp_id).split("@", 1)[0] if not str(user.whatsapp_id).startswith("web_") else None)
+            if not recipient_phone:
+                message_record.status = "FAILED"
+                message_record.error_message = "No valid phone number for user"
+                db.session.commit()
+                return False, "No valid phone number."
             success = cls.send_whatsapp(recipient_phone, message_record.message_body)
             if not success:
                 error_msg = "WhatsApp delivery failed via Meta API / Bridge"

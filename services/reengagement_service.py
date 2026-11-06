@@ -239,21 +239,22 @@ def create_reengagement_campaign(segment_key, selected_user_ids=None, channel="B
             db.session.add(email_msg)
             messages_created += 1
 
-        # Queue WhatsApp if user has a linked account
+        # Queue WhatsApp if user has a valid phone or linked account
         if channel in ("WHATSAPP", "BOTH") and NotificationService.is_whatsapp_linked(user):
-            wa_recipient = user.phone or str(user.whatsapp_id).split("@", 1)[0]
-            wa_msg = MarketingMessage(
-                campaign_id=campaign.id,
-                user_id=user.id,
-                channel="WHATSAPP",
-                recipient=wa_recipient,
-                subject=None,
-                message_body=msg_body,
-                status="DRAFT",
-                created_at=now,
-            )
-            db.session.add(wa_msg)
-            messages_created += 1
+            wa_recipient = user.phone or (str(user.whatsapp_id).split("@", 1)[0] if not str(user.whatsapp_id).startswith("web_") else None)
+            if wa_recipient:
+                wa_msg = MarketingMessage(
+                    campaign_id=campaign.id,
+                    user_id=user.id,
+                    channel="WHATSAPP",
+                    recipient=wa_recipient,
+                    subject=None,
+                    message_body=msg_body,
+                    status="DRAFT",
+                    created_at=now,
+                )
+                db.session.add(wa_msg)
+                messages_created += 1
 
     campaign.total_recipients = messages_created
     db.session.commit()
