@@ -9,7 +9,7 @@ import secrets
 import requests
 import threading
 from dotenv import load_dotenv
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from markupsafe import escape
@@ -20,7 +20,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from models import (
     db, User, Transaction, InboundMessage, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog,
     Referral, ReferralReward, MarketingContent, MarketingCampaign, MarketingMessage, MarketingSetting,
-    SupportTicket
+    SupportTicket, VisitorLog
 )
 from wallet_service import generate_payment_link, get_payment_fee_percentage
 
@@ -131,6 +131,146 @@ def _register_marketing_blueprint():
 _register_marketing_blueprint()
 
 
+@app.context_processor
+def inject_global_analytics():
+    return {
+        "ga_measurement_id": os.getenv("GA_MEASUREMENT_ID", "").strip(),
+    }
+
+
+def detect_traffic_source(req):
+    """
+    Determines the visitor traffic source from UTM parameters or HTTP Referer.
+    """
+    utm_source = (req.args.get("utm_source") or req.args.get("source") or "").strip().lower()
+    if utm_source:
+        name_map = {
+            "whatsapp": "WhatsApp",
+            "wa": "WhatsApp",
+            "facebook": "Facebook",
+            "fb": "Facebook",
+            "instagram": "Instagram",
+            "ig": "Instagram",
+            "twitter": "X (Twitter)",
+            "x": "X (Twitter)",
+            "tiktok": "TikTok",
+            "google": "Google Ads / Campaign",
+            "linkedin": "LinkedIn",
+            "youtube": "YouTube",
+            "telegram": "Telegram",
+            "email": "Email Campaign",
+            "sms": "SMS Campaign",
+        }
+        return name_map.get(utm_source, utm_source.title())
+
+    referrer = req.referrer
+    if not referrer:
+        return "Direct"
+
+    try:
+        parsed = urlsplit(referrer)
+        domain = (parsed.netloc or "").lower()
+        if req.host and (domain == req.host.lower() or domain.endswith("." + req.host.lower())):
+            return "Internal"
+
+        if any(w in domain for w in ["whatsapp", "l.wl.co", "wa.me"]):
+            return "WhatsApp"
+        if any(f in domain for f in ["facebook.com", "fb.me", "l.facebook.com", "m.facebook.com"]):
+            return "Facebook"
+        if any(i in domain for i in ["instagram.com", "l.instagram.com"]):
+            return "Instagram"
+        if any(t in domain for t in ["twitter.com", "t.co", "x.com"]):
+            return "X (Twitter)"
+        if "google." in domain:
+            return "Google Search"
+        if "bing." in domain:
+            return "Bing Search"
+        if "tiktok.com" in domain:
+            return "TikTok"
+        if any(y in domain for y in ["youtube.com", "youtu.be"]):
+            return "YouTube"
+        if any(tel in domain for tel in ["t.me", "telegram.org"]):
+            return "Telegram"
+        if "linkedin.com" in domain:
+            return "LinkedIn"
+        if "nairaland.com" in domain:
+            return "Nairaland"
+
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain or "Referral"
+    except Exception:
+        return "Referral"
+
+
+@app.before_request
+def track_visitor_traffic():
+    if request.method != "GET":
+        return
+
+    path = request.path
+    ignored_prefixes = (
+        "/static/",
+        "/favicon.ico",
+        "/robots.txt",
+        "/sitemap.xml",
+        "/manifest.webmanifest",
+        "/health",
+        "/webhook",
+        "/payments/paystack/webhook",
+        "/payments/paystack/callback",
+        "/api/",
+        "/admin",
+    )
+    if any(path.startswith(prefix) for prefix in ignored_prefixes):
+        return
+
+    user_agent_str = (request.headers.get("User-Agent") or "").lower()
+    bot_markers = ("bot", "spider", "crawler", "curl", "wget", "headless", "uptime", "python-requests", "render-ping")
+    if any(marker in user_agent_str for marker in bot_markers):
+        return
+
+    try:
+        visitor_id = session.get("visitor_id")
+        if not visitor_id:
+            visitor_id = secrets.token_hex(16)
+            session["visitor_id"] = visitor_id
+
+        last_logged_time = session.get("_v_last_time")
+        last_logged_path = session.get("_v_last_path")
+        now_ts = datetime.now(timezone.utc).timestamp()
+        if last_logged_path == path and last_logged_time and (now_ts - last_logged_time < 30):
+            return
+
+        source = detect_traffic_source(request)
+        if source == "Internal":
+            source = session.get("_v_initial_source", "Direct")
+        else:
+            session["_v_initial_source"] = source
+
+        session["_v_last_time"] = now_ts
+        session["_v_last_path"] = path
+
+        user_id = session.get("user_id")
+
+        visit = VisitorLog(
+            visitor_id=visitor_id,
+            user_id=user_id,
+            path=path[:250],
+            source=source[:100],
+            referrer=(request.referrer or "")[:500] if request.referrer else None,
+            utm_source=(request.args.get("utm_source") or "")[:100] or None,
+            utm_medium=(request.args.get("utm_medium") or "")[:100] or None,
+            utm_campaign=(request.args.get("utm_campaign") or "")[:100] or None,
+            user_agent=user_agent_str[:250] if user_agent_str else None,
+        )
+        db.session.add(visit)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        app.logger.debug(f"[visitor_log] Could not record visit: {exc}")
+
+
 @app.route("/sitemap.xml")
 def sitemap():
     """Expose public pages to search engines without indexing private screens."""
@@ -170,6 +310,8 @@ def ensure_database_schema():
     existing_tables = set(inspector.get_table_names())
     if "admin_audit_logs" not in existing_tables:
         AdminAuditLog.__table__.create(bind=db.engine)
+    if "visitor_logs" not in existing_tables:
+        VisitorLog.__table__.create(bind=db.engine)
 
     marketing_table_map = {
         "referrals": Referral,
@@ -2907,8 +3049,157 @@ def admin_analytics():
         </tr>
         """
 
+    # --- Website Visitor Tracking Metrics ---
+    total_visits = VisitorLog.query.count()
+    visits_today = VisitorLog.query.filter(VisitorLog.created_at >= start_of_day).count()
+    unique_visitors_all = db.session.query(func.count(func.distinct(VisitorLog.visitor_id))).scalar() or 0
+    unique_visitors_today = (
+        db.session.query(func.count(func.distinct(VisitorLog.visitor_id)))
+        .filter(VisitorLog.created_at >= start_of_day)
+        .scalar() or 0
+    )
+    guest_visits = VisitorLog.query.filter(VisitorLog.user_id.is_(None)).count()
+    guest_percent = round((guest_visits / total_visits * 100), 1) if total_visits else 0
+
+    source_stats = (
+        db.session.query(VisitorLog.source, func.count(VisitorLog.id).label("count"))
+        .group_by(VisitorLog.source)
+        .order_by(func.count(VisitorLog.id).desc())
+        .limit(8)
+        .all()
+    )
+
+    source_icons = {
+        "WhatsApp": "💬",
+        "Google Search": "🔍",
+        "Google Ads / Campaign": "🎯",
+        "Direct": "🌐",
+        "Instagram": "📷",
+        "Facebook": "👥",
+        "X (Twitter)": "🐦",
+        "TikTok": "🎵",
+        "YouTube": "▶️",
+        "Telegram": "✈️",
+        "LinkedIn": "💼",
+        "Nairaland": "🇳🇬",
+        "Email Campaign": "📧",
+        "SMS Campaign": "📱",
+    }
+
+    source_rows = ""
+    for src_name, src_count in source_stats:
+        pct = round((src_count / total_visits * 100), 1) if total_visits else 0
+        icon = source_icons.get(src_name, "🔗")
+        source_rows += f"""
+        <tr>
+            <td style="font-weight:600;"><span style="margin-right:8px;">{icon}</span>{escape(src_name)}</td>
+            <td><strong>{src_count:,}</strong></td>
+            <td>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="flex:1; background:#e2e8f0; border-radius:999px; height:8px; max-width:120px; overflow:hidden;">
+                        <div style="background:var(--admin-amber, #ffc400); width:{min(pct, 100)}%; height:100%;"></div>
+                    </div>
+                    <span style="font-size:12px; color:var(--admin-muted, #64748b);">{pct}%</span>
+                </div>
+            </td>
+        </tr>
+        """
+
+    looker_url = (os.getenv("LOOKER_STUDIO_EMBED_URL") or "https://lookerstudio.google.com/embed/reporting/d8d7eb55-9665-40f0-9e60-e49503640e84").strip()
+    if "/reporting/" in looker_url and "/embed/reporting/" not in looker_url:
+        looker_embed_src = looker_url.replace("/reporting/", "/embed/reporting/")
+    else:
+        looker_embed_src = looker_url
+    looker_view_url = looker_url.replace("/embed/reporting/", "/reporting/")
+
+    recent_visits = VisitorLog.query.order_by(VisitorLog.created_at.desc()).limit(15).all()
+    recent_visit_rows = ""
+    for v in recent_visits:
+        src_icon = source_icons.get(v.source, "🔗")
+        if v.user_id:
+            user_badge = f'<span style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">👤 User #{v.user_id}</span>'
+        else:
+            user_badge = '<span style="background:#f1f5f9; color:#475569; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">👁️ Guest (Not Signed Up)</span>'
+
+        meta_detail = ""
+        if v.utm_source or v.utm_campaign:
+            meta_detail = f'<span style="font-size:11px; color:#2563eb; font-weight:600;">UTM: {escape(v.utm_campaign or v.utm_source)}</span>'
+        elif v.referrer and "http" in v.referrer:
+            try:
+                ref_host = urlsplit(v.referrer).netloc
+                meta_detail = f'<span style="font-size:11px; color:#64748b;" title="{escape(v.referrer)}">{escape(ref_host)}</span>'
+            except Exception:
+                pass
+
+        recent_visit_rows += f"""
+        <tr>
+            <td style="font-size:12px; white-space:nowrap;">{format_admin_datetime(v.created_at)}</td>
+            <td><code style="background:#f1f5f9; padding:2px 6px; border-radius:4px; font-size:12px;">{escape(v.path)}</code></td>
+            <td><span style="margin-right:4px;">{src_icon}</span><strong>{escape(v.source)}</strong></td>
+            <td>{user_badge}</td>
+            <td>{meta_detail if meta_detail else '<span style="color:#94a3b8; font-size:12px;">—</span>'}</td>
+        </tr>
+        """
+
     content = f"""
-    <div class="section-grid">
+    <div style="margin-bottom:25px;">
+        <h2 style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; margin-bottom:6px;">🌐 Website Traffic & Sources</h2>
+        <p style="color:var(--admin-muted, #64748b); font-size:14px;">Real-time tracking of visits to your website, including visitors who have not signed up.</p>
+    </div>
+
+    <!-- Website Visitor Cards -->
+    <div class="section-grid" style="margin-bottom:30px;">
+        <div class="card">
+            <h3>🌐 Total Visits</h3>
+            <p>{total_visits:,}</p>
+            <small style="color:#64748b;">All page views recorded</small>
+        </div>
+        <div class="card">
+            <h3>📅 Visits Today</h3>
+            <p style="color:#2563eb;">{visits_today:,}</p>
+            <small style="color:#64748b;">Unique today: {unique_visitors_today:,}</small>
+        </div>
+        <div class="card">
+            <h3>👤 Unique Visitors</h3>
+            <p>{unique_visitors_all:,}</p>
+            <small style="color:#64748b;">Distinct browser sessions</small>
+        </div>
+        <div class="card">
+            <h3>👁️ Guests (No Sign Up)</h3>
+            <p style="color:#16a34a;">{guest_visits:,}</p>
+            <small style="color:#64748b;">{guest_percent}% of all site visits</small>
+        </div>
+    </div>
+
+    <!-- Google Analytics Interactive Live Report -->
+    <div class="card" style="padding:20px; margin-bottom:30px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+            <div>
+                <h3 style="font-size:17px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                    <span>📊</span> Google Analytics Live Interactive Report
+                </h3>
+                <small style="color:var(--admin-muted, #64748b);">Real-time visitor counts, traffic sources, and geographical charts powered by Google</small>
+            </div>
+            <a href="{escape(looker_view_url)}" target="_blank" rel="noopener noreferrer" style="font-size:12px; font-weight:700; color:var(--admin-ink, #09090b); background:var(--admin-amber, #ffc400); padding:7px 14px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                Open Fullscreen ↗
+            </a>
+        </div>
+        <div style="position:relative; width:100%; height:620px; border-radius:8px; overflow:hidden; border:1px solid #e2e8f0; background:#f8fafc;">
+            <iframe
+                src="{escape(looker_embed_src)}"
+                frameborder="0"
+                style="border:0; width:100%; height:100%; display:block;"
+                allowfullscreen
+                sandbox="allow-storage-access-by-user-activation allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox">
+            </iframe>
+        </div>
+    </div>
+
+    <!-- Revenue & Sales Section -->
+    <div style="margin-bottom:20px;">
+        <h2 style="font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; margin-bottom:6px;">💳 Financial & Transaction Metrics</h2>
+    </div>
+    <div class="section-grid" style="margin-bottom:30px;">
         <div class="card"><h3>Total Revenue</h3><p>₦{total_revenue:,.2f}</p></div>
         <div class="card"><h3>Today's Sales</h3><p>₦{today_sales:,.2f}</p></div>
         <div class="card"><h3>Failed</h3><p>{failed}</p></div>
@@ -2916,11 +3207,45 @@ def admin_analytics():
         <div class="card"><h3>Active Customers</h3><p>{active_customers}</p></div>
         <div class="card"><h3>Total Transactions</h3><p>{Transaction.query.count()}</p></div>
     </div>
-    <h2 style="margin-bottom:15px;">📈 Customer Value Tracker</h2>
-    <table>
-        <thead><tr><th>Customer</th><th>Total Spent</th></tr></thead>
-        <tbody>{customer_rows if customer_rows else '<tr><td colspan="2" style="text-align:center;">No customer analytics yet</td></tr>'}</tbody>
-    </table>
+
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:20px; margin-bottom:30px;">
+        <!-- Traffic Sources Breakdown -->
+        <div class="card" style="padding:20px;">
+            <h3 style="margin-bottom:15px; font-size:16px;">📊 Top Traffic Sources</h3>
+            <table>
+                <thead>
+                    <tr><th>Source</th><th>Visits</th><th>Share</th></tr>
+                </thead>
+                <tbody>{source_rows if source_rows else '<tr><td colspan="3" style="text-align:center; color:#94a3b8;">No traffic source data yet</td></tr>'}</tbody>
+            </table>
+        </div>
+
+        <!-- Customer Value Tracker -->
+        <div class="card" style="padding:20px;">
+            <h3 style="margin-bottom:15px; font-size:16px;">📈 Top Customer Value Tracker</h3>
+            <table>
+                <thead><tr><th>Customer</th><th>Total Spent</th></tr></thead>
+                <tbody>{customer_rows if customer_rows else '<tr><td colspan="2" style="text-align:center; color:#94a3b8;">No customer analytics yet</td></tr>'}</tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Recent Visits Table -->
+    <div class="card" style="padding:20px;">
+        <h3 style="margin-bottom:15px; font-size:16px;">🕒 Recent Website Activity (Last 15 Visits)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Page</th>
+                    <th>Source</th>
+                    <th>Visitor Type</th>
+                    <th>Referrer / Campaign</th>
+                </tr>
+            </thead>
+            <tbody>{recent_visit_rows if recent_visit_rows else '<tr><td colspan="5" style="text-align:center; color:#94a3b8;">No website visits recorded yet</td></tr>'}</tbody>
+        </table>
+    </div>
     """
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="analytics")
 

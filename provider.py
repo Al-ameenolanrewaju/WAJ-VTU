@@ -53,13 +53,15 @@ def _provider_request(endpoint: str, params: dict):
         response = requests.get(url, timeout=15)
     if not response.ok:
         logger.error(
-            "ClubKonnect request failed: endpoint=%s status=%s base_url=%s response=%s",
+            "ClubKonnect request failed: endpoint=%s status=%s base_url=%s",
             endpoint,
             response.status_code,
             url.split("?")[0],
-            response.text[:200],
         )
-    response.raise_for_status()
+        raise requests.HTTPError(
+            f"ClubKonnect request failed with status {response.status_code}",
+            response=response,
+        )
     return response.json()
 
 

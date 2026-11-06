@@ -319,3 +319,25 @@ class SupportTicket(db.Model):
 
     def __repr__(self):
         return f"<SupportTicket {self.ticket_code} ({self.customer_phone}) - {self.status}>"
+
+
+class VisitorLog(db.Model):
+    __tablename__ = 'visitor_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    visitor_id = db.Column(db.String(64), nullable=False, index=True)  # Anonymous unique visitor session token
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)  # Null if not signed up
+    path = db.Column(db.String(255), nullable=False)
+    source = db.Column(db.String(100), nullable=False, default="Direct", index=True)  # e.g. WhatsApp, Google, Instagram, Direct
+    referrer = db.Column(db.String(500), nullable=True)
+    utm_source = db.Column(db.String(100), nullable=True)
+    utm_medium = db.Column(db.String(100), nullable=True)
+    utm_campaign = db.Column(db.String(100), nullable=True)
+    user_agent = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+
+    user = db.relationship('User', backref=db.backref('visit_logs', lazy=True))
+
+    def __repr__(self):
+        auth_status = f"User #{self.user_id}" if self.user_id else "Guest"
+        return f"<VisitorLog {self.path} from {self.source} ({auth_status})>"
