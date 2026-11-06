@@ -20,6 +20,7 @@ from models import (
     MarketingMessage,
     MarketingSetting,
     VisitorLog,
+    PushSubscription,
 )
 from services.marketing_settings import seed_default_marketing_settings
 from services.referral_service import generate_unique_referral_code
@@ -42,6 +43,7 @@ def run_migrations():
             MarketingMessage,
             MarketingSetting,
             VisitorLog,
+            PushSubscription,
         ]
 
         for model in marketing_models:

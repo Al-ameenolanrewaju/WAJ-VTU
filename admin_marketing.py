@@ -48,6 +48,7 @@ def _marketing_subnav(active_subpage):
         ("daily_deals", "🏷️ Daily Deals", "/admin/marketing/daily-deals"),
         ("reengagement", "🔁 Re-engagement", "/admin/marketing/reengagement"),
         ("campaigns", "📬 Campaigns", "/admin/marketing/campaigns"),
+        ("push", "🔔 Web Push", "/admin/marketing/push"),
         ("settings", "⚙️ Settings", "/admin/marketing/settings"),
     ]
     html = '<div class="admin-subnav-bar">'
@@ -826,3 +827,135 @@ def settings():
     </form>
     """
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=body, active_page="marketing")
+
+
+# ----------------------------------------------------------------------
+# 6. WEB PUSH NOTIFICATIONS
+# ----------------------------------------------------------------------
+@marketing_admin_bp.route("/push")
+def push_dashboard():
+    require_admin_auth, _, format_admin_datetime, ADMIN_BASE_TEMPLATE = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from models import PushSubscription
+    total_subscribers = PushSubscription.query.count()
+    user_subscribers = PushSubscription.query.filter(PushSubscription.user_id.isnot(None)).count()
+    guest_subscribers = PushSubscription.query.filter(PushSubscription.user_id.is_(None)).count()
+
+    recent_subs = PushSubscription.query.order_by(PushSubscription.created_at.desc()).limit(15).all()
+    sub_rows = ""
+    for s in recent_subs:
+        if s.user_id:
+            user_label = f'<span style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">👤 User #{s.user_id}</span>'
+        else:
+            user_label = '<span style="background:#f1f5f9; color:#475569; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">👁️ Guest Visitor</span>'
+
+        ua_clean = (s.user_agent or "Unknown Browser")
+        if len(ua_clean) > 60:
+            ua_clean = ua_clean[:57] + "..."
+
+        sub_rows += f"""
+        <tr>
+            <td style="font-size:12px; white-space:nowrap;">{escape(format_admin_datetime(s.created_at))}</td>
+            <td>{user_label}</td>
+            <td style="font-size:12px; color:#475569; font-family:monospace;">{escape(ua_clean)}</td>
+            <td style="font-size:11px; color:#94a3b8; font-family:monospace;">{escape(s.endpoint[:45])}...</td>
+        </tr>
+        """
+
+    body = f"""
+    {_marketing_subnav('push')}
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+        <div>
+            <h2 style="font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; margin-bottom:4px;">🔔 Web Push Notifications</h2>
+            <p style="font-size:13px; color:#626262;">Broadcast free, instant alerts directly to customer Android, Windows, and Mac screens.</p>
+        </div>
+    </div>
+
+    <!-- Subscriber Metric Cards -->
+    <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom:24px;">
+        <div class="card">
+            <h3>🔔 Total Subscribers</h3>
+            <p style="color:#2563eb;">{total_subscribers:,}</p>
+            <small>Active device push endpoints</small>
+        </div>
+        <div class="card">
+            <h3>👤 Registered Customers</h3>
+            <p style="color:#16a34a;">{user_subscribers:,}</p>
+            <small>Linked to account wallets</small>
+        </div>
+        <div class="card">
+            <h3>👁️ Guest Subscribers</h3>
+            <p style="color:#d97706;">{guest_subscribers:,}</p>
+            <small>Subscribed before creating account</small>
+        </div>
+    </div>
+
+    <!-- Broadcast Composer Form -->
+    <div class="card" style="margin-bottom:28px; background:#ffffff; border-radius:14px; padding:24px; border-left:4px solid #ffc400;">
+        <h3 style="font-size:17px; font-weight:700; margin-bottom:6px; color:#090909;">🚀 Send Instant Push Broadcast</h3>
+        <p style="font-size:13px; color:#64748b; margin-bottom:18px;">Sends an immediate notification to all <strong>{total_subscribers:,}</strong> subscribed devices.</p>
+
+        <form method="POST" action="/admin/marketing/push/broadcast">
+            <div style="margin-bottom:16px;">
+                <label style="display:block; font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase;">Notification Title</label>
+                <input type="text" name="title" required placeholder="e.g. 🔥 1GB MTN for ₦280 - Flash Sale Today!" style="width:100%; padding:10px 12px; font-size:14px; border-radius:8px; border:1px solid #cbd5e1;">
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <label style="display:block; font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase;">Notification Body</label>
+                <textarea name="body" required rows="3" placeholder="e.g. Data prices just crashed! Tap to top up your line instantly on WAJ VTU." style="width:100%; padding:10px 12px; font-size:13px; border-radius:8px; border:1px solid #cbd5e1;"></textarea>
+            </div>
+
+            <div style="margin-bottom:20px;">
+                <label style="display:block; font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase;">Click Target Link (URL)</label>
+                <input type="text" name="target_url" value="/buy/data" placeholder="/buy/data or /" style="width:100%; padding:10px 12px; font-size:14px; border-radius:8px; border:1px solid #cbd5e1;">
+                <small style="color:#64748b; font-size:11px;">Where the user lands when they tap the notification (e.g. /buy/data, /, or https://...)</small>
+            </div>
+
+            <button type="submit" onclick="return confirm('Broadcast this notification to all active subscribers now?');" style="background:#ffc400; color:#090909; font-weight:700; padding:12px 28px; border-radius:8px; font-size:14px; border:none; cursor:pointer;">
+                🚀 Broadcast Notification to All Devices
+            </button>
+        </form>
+    </div>
+
+    <!-- Recent Subscribers -->
+    <div class="card" style="padding:22px;">
+        <h3 style="font-size:16px; font-weight:700; margin-bottom:14px;">🕒 Recent Push Device Subscriptions (Last 15)</h3>
+        <table>
+            <thead>
+                <tr><th>Subscribed</th><th>User Type</th><th>Browser / OS</th><th>Endpoint</th></tr>
+            </thead>
+            <tbody>
+                {sub_rows if sub_rows else '<tr><td colspan="4" style="text-align:center; padding:24px; color:#94a3b8;">No push subscriptions recorded yet.</td></tr>'}
+            </tbody>
+        </table>
+    </div>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=body, active_page="marketing")
+
+
+@marketing_admin_bp.route("/push/broadcast", methods=["POST"])
+def push_broadcast_route():
+    require_admin_auth, record_admin_audit, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from services.push_service import broadcast_push
+    from flask import flash, redirect, url_for
+
+    title = (request.form.get("title") or "").strip()
+    body_text = (request.form.get("body") or "").strip()
+    target_url = (request.form.get("target_url") or request.form.get("url") or "/buy/data").strip()
+
+    if not title or not body_text:
+        flash("Title and body are required for push notification.", "error")
+        return redirect(url_for("marketing_admin.push_dashboard"))
+
+    result = broadcast_push(title=title, body=body_text, url=target_url)
+    record_admin_audit("admin", f"Broadcast Push: {title[:40]}", success=True)
+    flash(f"Push notification sent to {result['sent']} devices ({result['failed']} failed).", "success")
+    return redirect(url_for("marketing_admin.push_dashboard"))

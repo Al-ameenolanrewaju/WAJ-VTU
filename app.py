@@ -20,7 +20,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from models import (
     db, User, Transaction, InboundMessage, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog,
     Referral, ReferralReward, MarketingContent, MarketingCampaign, MarketingMessage, MarketingSetting,
-    SupportTicket, VisitorLog
+    SupportTicket, VisitorLog, PushSubscription
 )
 from wallet_service import generate_payment_link, get_payment_fee_percentage
 
@@ -133,8 +133,10 @@ _register_marketing_blueprint()
 
 @app.context_processor
 def inject_global_analytics():
+    from services.push_service import get_vapid_public_key
     return {
         "ga_measurement_id": os.getenv("GA_MEASUREMENT_ID", "").strip(),
+        "vapid_public_key": get_vapid_public_key(),
     }
 
 
@@ -271,6 +273,34 @@ def track_visitor_traffic():
         app.logger.debug(f"[visitor_log] Could not record visit: {exc}")
 
 
+# --- WEB PUSH API ROUTES ---
+@app.route("/api/push/vapid-public-key", methods=["GET"])
+def api_push_vapid_key():
+    from services.push_service import get_vapid_public_key
+    return jsonify({"success": True, "publicKey": get_vapid_public_key()})
+
+
+@app.route("/api/push/subscribe", methods=["POST"])
+def api_push_subscribe():
+    from services.push_service import save_subscription
+    sub_data = request.get_json(silent=True) or {}
+    user_id = session.get("user_id")
+    user_agent = request.headers.get("User-Agent")
+    sub, err = save_subscription(sub_data, user_id=user_id, user_agent=user_agent)
+    if not sub:
+        return jsonify({"status": "error", "message": err}), 400
+    return jsonify({"status": "success", "message": "Subscribed to push notifications"})
+
+
+@app.route("/api/push/unsubscribe", methods=["POST"])
+def api_push_unsubscribe():
+    from services.push_service import remove_subscription
+    sub_data = request.get_json(silent=True) or {}
+    endpoint = sub_data.get("endpoint")
+    remove_subscription(endpoint)
+    return jsonify({"status": "success", "message": "Unsubscribed"})
+
+
 @app.route("/sitemap.xml")
 def sitemap():
     """Expose public pages to search engines without indexing private screens."""
@@ -312,6 +342,8 @@ def ensure_database_schema():
         AdminAuditLog.__table__.create(bind=db.engine)
     if "visitor_logs" not in existing_tables:
         VisitorLog.__table__.create(bind=db.engine)
+    if "push_subscriptions" not in existing_tables:
+        PushSubscription.__table__.create(bind=db.engine)
 
     marketing_table_map = {
         "referrals": Referral,

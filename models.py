@@ -341,3 +341,21 @@ class VisitorLog(db.Model):
     def __repr__(self):
         auth_status = f"User #{self.user_id}" if self.user_id else "Guest"
         return f"<VisitorLog {self.path} from {self.source} ({auth_status})>"
+
+class PushSubscription(db.Model):
+    __tablename__ = 'push_subscriptions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    endpoint = db.Column(db.Text, unique=True, nullable=False, index=True)
+    p256dh = db.Column(db.String(255), nullable=False)
+    auth = db.Column(db.String(255), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    user_agent = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False)
+
+    user = db.relationship('User', backref=db.backref('push_subscriptions', lazy=True))
+
+    def __repr__(self):
+        auth_status = f"User #{self.user_id}" if self.user_id else "Guest"
+        return f"<PushSubscription {self.endpoint[:30]}... ({auth_status})>"
+
