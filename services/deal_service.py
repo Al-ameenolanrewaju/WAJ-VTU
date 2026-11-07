@@ -136,25 +136,40 @@ def score_plan_for_deal(plan, network, recent_deals):
 def collect_available_plans():
     """
     Fetches real, active plans across all supported networks from the provider layer.
-    Guarantees no duplicated or invented plans.
+    Returns plans with the final customer-facing price (base cost + markup), exactly
+    as shown on the /buy/data page. Guarantees no duplicated or invented plans.
     """
+    try:
+        from app import get_markup  # deferred to avoid circular import at module load
+    except Exception:
+        def get_markup(service_key, base_amount):
+            return Decimal("0.00")
+
     all_plans = []
     for network in SUPPORTED_NETWORKS:
         try:
             variations = fetch_data_variations(network) or []
             for item in variations:
-                price = None
+                base_price = None
                 try:
-                    price = Decimal(str(item.get("variation_amount", 0))).quantize(Decimal("0.01"))
+                    base_price = Decimal(str(item.get("variation_amount", 0))).quantize(Decimal("0.01"))
                 except Exception:
                     continue
 
-                if price > 0 and item.get("name") and item.get("variation_code"):
+                if base_price > 0 and item.get("name") and item.get("variation_code"):
+                    # Apply the same markup used on the buy_data page so the
+                    # deal price shown in /marketing matches what customers pay
+                    try:
+                        markup = get_markup(f"DATA_{network}", base_price)
+                    except Exception:
+                        markup = Decimal("0.00")
+                    final_price = (base_price + markup).quantize(Decimal("0.01"))
                     all_plans.append({
                         "network": network,
                         "name": item["name"],
                         "variation_code": item["variation_code"],
-                        "price": price,
+                        "price": final_price,
+                        "base_price": base_price,  # kept for scoring value-ratio only
                     })
         except Exception:
             continue
@@ -179,10 +194,11 @@ def select_best_daily_deal(recent_deals=None):
 
     scored_plans = []
     for p in plans:
+        # Score using base provider price for accurate MB/₦ value-ratio
         plan_dict = {
             "name": p["name"],
             "variation_code": p["variation_code"],
-            "variation_amount": float(p["price"]),
+            "variation_amount": float(p.get("base_price", p["price"])),
         }
         score = score_plan_for_deal(plan_dict, p["network"], recent_deals)
         scored_plans.append((score, p))
