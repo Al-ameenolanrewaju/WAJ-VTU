@@ -46,6 +46,7 @@ def _marketing_subnav(active_subpage):
         ("overview", "📊 Overview", "/admin/marketing"),
         ("referrals", "🤝 Referrals", "/admin/marketing/referrals"),
         ("daily_deals", "🏷️ Daily Deals", "/admin/marketing/daily-deals"),
+        ("social", "📢 Social Studio", "/admin/marketing/social"),
         ("reengagement", "🔁 Re-engagement", "/admin/marketing/reengagement"),
         ("campaigns", "📬 Campaigns", "/admin/marketing/campaigns"),
         ("push", "🔔 Web Push", "/admin/marketing/push"),
@@ -1118,12 +1119,479 @@ def download_deal_poster(deal_id=None):
     if not deal:
         abort(404)
 
+    fmt = request.args.get("format", "story").lower()
     buf = generate_status_poster(
         network=deal.network or "MTN",
         plan_name=deal.data_size or deal.plan_name or "5GB",
         price=deal.price or 0,
         validity=deal.validity or "30 Days",
         website_url=request.host_url,
+        format=fmt,
     )
     clean_net = (deal.network or "network").lower()
-    return send_file(buf, mimetype="image/png", as_attachment=True, download_name=f"waj-vtu-{clean_net}-status-deal.png")
+    return send_file(buf, mimetype="image/png", as_attachment=True, download_name=f"waj-vtu-{clean_net}-{fmt}-deal.png")
+
+
+# ----------------------------------------------------------------------
+# 8. SOCIAL MEDIA CAMPAIGN STUDIO
+# ----------------------------------------------------------------------
+@marketing_admin_bp.route("/social")
+def social_studio():
+    require_admin_auth, _, format_admin_datetime, ADMIN_BASE_TEMPLATE = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from services.deal_service import get_lagos_today, generate_daily_deal
+    from services.social_campaign_service import generate_social_pack
+    import urllib.parse
+
+    campaign_type = request.args.get("campaign_type", "DAILY_DEAL").upper()
+    deal_id = request.args.get("deal_id", type=int)
+
+    deal = None
+    if campaign_type == "DAILY_DEAL":
+        if deal_id:
+            deal = db.session.get(MarketingContent, deal_id)
+        if not deal:
+            deal, _ = generate_daily_deal(target_date=get_lagos_today())
+
+    # Custom campaign parameters
+    custom_net = request.args.get("custom_net", "MTN")
+    custom_headline = request.args.get("custom_headline", "5GB Mega Data Offer")
+    custom_price = request.args.get("custom_price", "1200")
+    custom_validity = request.args.get("custom_validity", "30 Days")
+    custom_body = request.args.get("custom_body", "Super-fast internet data at discount distributor rates on WAJ VTU.")
+
+    custom_data = {
+        "network": custom_net,
+        "headline": custom_headline,
+        "price": f"₦{custom_price}" if not str(custom_price).startswith("₦") else custom_price,
+        "validity": custom_validity,
+        "body": custom_body,
+    }
+
+    deal_dict = None
+    if deal:
+        deal_dict = {
+            "network": deal.network or "MTN",
+            "data_size": deal.data_size or deal.plan_name or "2.0 GB",
+            "price": deal.price or 0,
+            "validity": deal.validity or "30 Days",
+        }
+    elif campaign_type == "CUSTOM":
+        deal_dict = {
+            "network": custom_net,
+            "data_size": custom_headline,
+            "price": custom_price,
+            "validity": custom_validity,
+        }
+
+    pack = generate_social_pack(
+        campaign_type=campaign_type,
+        deal=deal_dict,
+        custom_data=custom_data,
+        base_url=request.host_url,
+    )
+
+    flyer_net = pack["details"]["network"]
+    flyer_plan = pack["details"]["data_size"]
+    flyer_price = pack["details"]["price"].replace("₦", "").replace(",", "")
+    flyer_val = pack["details"]["validity"]
+
+    # Build flyer URLs
+    flyer_params = urllib.parse.urlencode({
+        "network": flyer_net,
+        "plan_name": flyer_plan,
+        "price": flyer_price,
+        "validity": flyer_val,
+    })
+    story_flyer_preview = f"/admin/marketing/social/flyer?format=story&{flyer_params}"
+    story_flyer_download = f"/admin/marketing/social/flyer?format=story&{flyer_params}&download=1"
+    square_flyer_preview = f"/admin/marketing/social/flyer?format=square&{flyer_params}"
+    square_flyer_download = f"/admin/marketing/social/flyer?format=square&{flyer_params}&download=1"
+
+    # Campaign selector tabs
+    campaign_tabs = [
+        ("DAILY_DEAL", "🔥 Today's Deal", f"/admin/marketing/social?campaign_type=DAILY_DEAL"),
+        ("WEEKEND_PROMO", "🍿 Weekend Rush", f"/admin/marketing/social?campaign_type=WEEKEND_PROMO"),
+        ("REFERRAL_EARN", "💰 Referral & Earn", f"/admin/marketing/social?campaign_type=REFERRAL_EARN"),
+        ("PAYDAY_FLASH", "💼 Payday Bonanza", f"/admin/marketing/social?campaign_type=PAYDAY_FLASH"),
+        ("CUSTOM", "✏️ Custom Promo", f"/admin/marketing/social?campaign_type=CUSTOM"),
+    ]
+
+    pills_html = '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:24px;">'
+    for c_key, c_label, c_url in campaign_tabs:
+        is_active = (campaign_type == c_key)
+        bg = "#ffc400" if is_active else "#f4f4f5"
+        col = "#09090b" if is_active else "#52525b"
+        border = "#e4e4e7" if not is_active else "#ffc400"
+        font_weight = "700" if is_active else "600"
+        pills_html += f'<a href="{c_url}" style="text-decoration:none; background:{bg}; color:{col}; border:1px solid {border}; border-radius:8px; padding:8px 16px; font-size:13px; font-weight:{font_weight};">{c_label}</a>'
+    pills_html += '</div>'
+
+    custom_form_html = ""
+    if campaign_type == "CUSTOM":
+        custom_form_html = f"""
+        <div class="card" style="margin-bottom:24px; background:#ffffff; border:1px solid #e4e4e0; border-radius:12px; padding:20px;">
+            <h4 style="font-size:15px; font-weight:700; margin-bottom:14px; color:#090909;">Custom Campaign Configuration</h4>
+            <form method="GET" action="/admin/marketing/social" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px;">
+                <input type="hidden" name="campaign_type" value="CUSTOM">
+                <div>
+                    <label style="font-size:12px; font-weight:700; color:#52525b; display:block; margin-bottom:4px;">Network</label>
+                    <select name="custom_net" style="width:100%; padding:8px; border:1px solid #d4d4d8; border-radius:6px; font-size:13px;">
+                        <option value="MTN" {'selected' if custom_net=='MTN' else ''}>MTN</option>
+                        <option value="AIRTEL" {'selected' if custom_net=='AIRTEL' else ''}>AIRTEL</option>
+                        <option value="GLO" {'selected' if custom_net=='GLO' else ''}>GLO</option>
+                        <option value="9MOBILE" {'selected' if custom_net=='9MOBILE' else ''}>9MOBILE</option>
+                        <option value="ALL NETWORKS" {'selected' if custom_net=='ALL NETWORKS' else ''}>ALL NETWORKS</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:700; color:#52525b; display:block; margin-bottom:4px;">Offer Headline / Plan</label>
+                    <input type="text" name="custom_headline" value="{escape(custom_headline)}" style="width:100%; padding:8px; border:1px solid #d4d4d8; border-radius:6px; font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:700; color:#52525b; display:block; margin-bottom:4px;">Price (₦)</label>
+                    <input type="text" name="custom_price" value="{escape(custom_price)}" style="width:100%; padding:8px; border:1px solid #d4d4d8; border-radius:6px; font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:700; color:#52525b; display:block; margin-bottom:4px;">Validity</label>
+                    <input type="text" name="custom_validity" value="{escape(custom_validity)}" style="width:100%; padding:8px; border:1px solid #d4d4d8; border-radius:6px; font-size:13px;">
+                </div>
+                <div style="grid-column: 1 / -1;">
+                    <label style="font-size:12px; font-weight:700; color:#52525b; display:block; margin-bottom:4px;">Campaign Hook / Body</label>
+                    <input type="text" name="custom_body" value="{escape(custom_body)}" style="width:100%; padding:8px; border:1px solid #d4d4d8; border-radius:6px; font-size:13px;">
+                </div>
+                <div>
+                    <button type="submit" style="background:#ffc400; color:#09090b; font-weight:700; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-size:13px;">✨ Update Studio Assets</button>
+                </div>
+            </form>
+        </div>
+        """
+
+    body = f"""
+    {_marketing_subnav("social")}
+
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px;">
+        <div>
+            <h2 style="font-size:24px; font-weight:800; color:#09090b; margin:0 0 6px 0;">📢 Social Media Campaign Studio</h2>
+            <p style="font-size:14px; color:#71717a; margin:0; max-width:700px;">
+                Launch high-converting social campaigns in 1 click across WhatsApp, Twitter/X, Instagram, and Facebook.
+                Includes ultra-crisp dual-format promotional flyers and automated UTM conversion tracking.
+            </p>
+        </div>
+        <div style="text-align:right;">
+            <span style="display:inline-block; background:#ecfdf5; border:1px solid #a7f3d0; color:#047857; font-size:12px; font-weight:700; padding:6px 12px; border-radius:20px;">
+                ✓ 1-Click Free Web Intents (No Paid API Required)
+            </span>
+        </div>
+    </div>
+
+    {pills_html}
+    {custom_form_html}
+
+    <div style="display:grid; grid-template-columns: 380px 1fr; gap:24px; align-items:start;" id="social-studio-grid">
+
+        <!-- ========================================== -->
+        <!-- LEFT COLUMN: GRAPHICAL FLYER STUDIO        -->
+        <!-- ========================================== -->
+        <div style="display:flex; flex-direction:column; gap:24px;">
+
+            <!-- 1. WhatsApp Status & Story Flyer (9:16) -->
+            <div class="card" style="background:#ffffff; border:1px solid #e4e4e7; border-radius:14px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div>
+                        <span style="font-size:11px; font-weight:800; color:#10b981; background:#ecfdf5; padding:3px 8px; border-radius:6px; text-transform:uppercase;">9:16 Portrait</span>
+                        <h4 style="font-size:16px; font-weight:700; color:#09090b; margin:6px 0 0 0;">WhatsApp Status & Story Flyer</h4>
+                    </div>
+                    <span style="font-size:11px; color:#71717a;">1080 × 1920</span>
+                </div>
+                <p style="font-size:12px; color:#71717a; margin-bottom:14px;">
+                    Optimized for WhatsApp Status, Instagram Stories, Facebook Stories, and TikTok.
+                </p>
+
+                <!-- Phone Frame Preview -->
+                <div style="background:#09090b; border-radius:16px; padding:10px; border:2px solid #27272a; text-align:center; margin-bottom:14px;">
+                    <img src="{story_flyer_preview}" alt="Status Flyer Preview" style="width:100%; max-height:360px; object-fit:contain; border-radius:8px; display:block; margin:0 auto; background:#18181b;" loading="lazy">
+                </div>
+
+                <div style="display:flex; gap:8px;">
+                    <a href="{story_flyer_download}" style="flex:1; background:#10b981; color:#ffffff; font-weight:700; font-size:13px; padding:10px 14px; border-radius:8px; text-align:center; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:6px;">
+                        📥 Download 9:16 PNG
+                    </a>
+                    <a href="{story_flyer_preview}" target="_blank" style="background:#f4f4f5; color:#27272a; font-weight:700; font-size:13px; padding:10px 14px; border-radius:8px; text-align:center; text-decoration:none;">
+                        🔍 Preview
+                    </a>
+                </div>
+            </div>
+
+            <!-- 2. Feed & Social Post Flyer (1:1 Square) -->
+            <div class="card" style="background:#ffffff; border:1px solid #e4e4e7; border-radius:14px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div>
+                        <span style="font-size:11px; font-weight:800; color:#3b82f6; background:#eff6ff; padding:3px 8px; border-radius:6px; text-transform:uppercase;">1:1 Square</span>
+                        <h4 style="font-size:16px; font-weight:700; color:#09090b; margin:6px 0 0 0;">Feed & Social Media Flyer</h4>
+                    </div>
+                    <span style="font-size:11px; color:#71717a;">1080 × 1080</span>
+                </div>
+                <p style="font-size:12px; color:#71717a; margin-bottom:14px;">
+                    Optimized for Instagram Feed, Twitter/X Posts, Facebook Posts, and LinkedIn.
+                </p>
+
+                <div style="background:#09090b; border-radius:16px; padding:10px; border:2px solid #27272a; text-align:center; margin-bottom:14px;">
+                    <img src="{square_flyer_preview}" alt="Square Flyer Preview" style="width:100%; max-height:280px; object-fit:contain; border-radius:8px; display:block; margin:0 auto; background:#18181b;" loading="lazy">
+                </div>
+
+                <div style="display:flex; gap:8px;">
+                    <a href="{square_flyer_download}" style="flex:1; background:#2563eb; color:#ffffff; font-weight:700; font-size:13px; padding:10px 14px; border-radius:8px; text-align:center; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:6px;">
+                        📥 Download 1:1 PNG
+                    </a>
+                    <a href="{square_flyer_preview}" target="_blank" style="background:#f4f4f5; color:#27272a; font-weight:700; font-size:13px; padding:10px 14px; border-radius:8px; text-align:center; text-decoration:none;">
+                        🔍 Preview
+                    </a>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ========================================== -->
+        <!-- RIGHT COLUMN: 1-CLICK PLATFORM LAUNCHPADS  -->
+        <!-- ========================================== -->
+        <div style="display:flex; flex-direction:column; gap:20px;">
+
+            <!-- 1. WHATSAPP STATUS -->
+            <div class="card" style="background:#ffffff; border:1px solid #e4e4e7; border-radius:14px; padding:22px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:22px;">📱</span>
+                        <div>
+                            <h4 style="font-size:16px; font-weight:800; color:#09090b; margin:0;">WhatsApp Status (1-Click Share)</h4>
+                            <span style="font-size:12px; color:#15803d; font-weight:600;">High Urgency • Punchy Hook • Direct Order Link</span>
+                        </div>
+                    </div>
+                    <span style="font-size:11px; background:#f0fdf4; color:#166534; padding:4px 8px; border-radius:6px; font-weight:700;">UTM: whatsapp_status</span>
+                </div>
+
+                <textarea id="copy-wa-status" readonly style="width:100%; min-height:120px; background:#fafaf9; border:1px solid #d4d4d8; border-radius:8px; padding:12px; font-size:13px; font-family:monospace; line-height:1.5; resize:vertical; margin-bottom:14px;">{escape(pack['whatsapp_status']['text'])}</textarea>
+
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                    <a href="{pack['whatsapp_status']['share_url']}" target="_blank" style="background:#25d366; color:#ffffff; font-weight:800; font-size:13px; padding:11px 20px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+                        💬 Open & Post to WhatsApp
+                    </a>
+                    <button type="button" onclick="copyStudioText('copy-wa-status', this)" style="background:#f4f4f5; color:#18181b; font-weight:700; font-size:13px; padding:11px 18px; border-radius:8px; border:1px solid #d4d4d8; cursor:pointer;">
+                        📋 Copy Text
+                    </button>
+                    <a href="{story_flyer_download}" style="background:#f0fdf4; color:#15803d; border:1px solid #86efac; font-weight:700; font-size:13px; padding:11px 16px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                        🖼️ Download 9:16 Story Flyer
+                    </a>
+                </div>
+            </div>
+
+            <!-- 2. WHATSAPP BROADCAST & GROUPS -->
+            <div class="card" style="background:#ffffff; border:1px solid #e4e4e7; border-radius:14px; padding:22px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:22px;">📢</span>
+                        <div>
+                            <h4 style="font-size:16px; font-weight:800; color:#09090b; margin:0;">WhatsApp Groups & Broadcast Lists</h4>
+                            <span style="font-size:12px; color:#15803d; font-weight:600;">Full Value Proposition • Features • Trust Badges</span>
+                        </div>
+                    </div>
+                    <span style="font-size:11px; background:#f0fdf4; color:#166534; padding:4px 8px; border-radius:6px; font-weight:700;">UTM: whatsapp_group</span>
+                </div>
+
+                <textarea id="copy-wa-group" readonly style="width:100%; min-height:140px; background:#fafaf9; border:1px solid #d4d4d8; border-radius:8px; padding:12px; font-size:13px; font-family:monospace; line-height:1.5; resize:vertical; margin-bottom:14px;">{escape(pack['whatsapp_group']['text'])}</textarea>
+
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                    <a href="{pack['whatsapp_group']['share_url']}" target="_blank" style="background:#128c7e; color:#ffffff; font-weight:800; font-size:13px; padding:11px 20px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+                        📢 Broadcast on WhatsApp
+                    </a>
+                    <button type="button" onclick="copyStudioText('copy-wa-group', this)" style="background:#f4f4f5; color:#18181b; font-weight:700; font-size:13px; padding:11px 18px; border-radius:8px; border:1px solid #d4d4d8; cursor:pointer;">
+                        📋 Copy Broadcast
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3. TWITTER / X -->
+            <div class="card" style="background:#ffffff; border:1px solid #e4e4e7; border-radius:14px; padding:22px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:22px;">✖️</span>
+                        <div>
+                            <h4 style="font-size:16px; font-weight:800; color:#09090b; margin:0;">Twitter / X (1-Click Web Intent)</h4>
+                            <span style="font-size:12px; color:#52525b; font-weight:600;">100% Free • Pre-filled Tweet • Viral Hashtags</span>
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:11px; background:#eff6ff; color:#1d4ed8; padding:4px 8px; border-radius:6px; font-weight:700;">{pack['twitter']['char_count']} / 280 chars</span>
+                        <span style="font-size:11px; background:#f4f4f5; color:#52525b; padding:4px 8px; border-radius:6px; font-weight:700;">UTM: twitter</span>
+                    </div>
+                </div>
+
+                <textarea id="copy-twitter" readonly style="width:100%; min-height:100px; background:#fafaf9; border:1px solid #d4d4d8; border-radius:8px; padding:12px; font-size:13px; font-family:monospace; line-height:1.5; resize:vertical; margin-bottom:14px;">{escape(pack['twitter']['text'])}</textarea>
+
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                    <a href="{pack['twitter']['share_url']}" target="_blank" style="background:#000000; color:#ffffff; font-weight:800; font-size:13px; padding:11px 20px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+                        ✖️ 1-Click Tweet to X
+                    </a>
+                    <button type="button" onclick="copyStudioText('copy-twitter', this)" style="background:#f4f4f5; color:#18181b; font-weight:700; font-size:13px; padding:11px 18px; border-radius:8px; border:1px solid #d4d4d8; cursor:pointer;">
+                        📋 Copy Tweet
+                    </button>
+                    <a href="{square_flyer_download}" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:700; font-size:13px; padding:11px 16px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                        🖼️ Download 1:1 Flyer for Tweet
+                    </a>
+                </div>
+            </div>
+
+            <!-- 4. INSTAGRAM -->
+            <div class="card" style="background:#ffffff; border:1px solid #e4e4e7; border-radius:14px; padding:22px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:22px;">📸</span>
+                        <div>
+                            <h4 style="font-size:16px; font-weight:800; color:#09090b; margin:0;">Instagram Caption & Hashtags</h4>
+                            <span style="font-size:12px; color:#d97706; font-weight:600;">Spaced Paragraphs • Bio Prompt • 18 VTU Hashtags</span>
+                        </div>
+                    </div>
+                    <span style="font-size:11px; background:#fffbeb; color:#92400e; padding:4px 8px; border-radius:6px; font-weight:700;">UTM: instagram</span>
+                </div>
+
+                <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:#92400e;">
+                    💡 <em>Tip: Instagram does not allow clickable links inside post captions. The copy instructs followers to click the link in your bio. Copy the caption below and upload the 1:1 square flyer!</em>
+                </div>
+
+                <textarea id="copy-instagram" readonly style="width:100%; min-height:140px; background:#fafaf9; border:1px solid #d4d4d8; border-radius:8px; padding:12px; font-size:13px; font-family:monospace; line-height:1.5; resize:vertical; margin-bottom:14px;">{escape(pack['instagram']['text'])}</textarea>
+                <textarea id="copy-ig-tags" style="display:none;">{escape(pack['instagram']['hashtags'])}</textarea>
+
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                    <button type="button" onclick="copyStudioText('copy-instagram', this)" style="background:#e1306c; color:#ffffff; font-weight:800; font-size:13px; padding:11px 20px; border-radius:8px; border:none; cursor:pointer;">
+                        📋 Copy Full Caption & Tags
+                    </button>
+                    <button type="button" onclick="copyStudioText('copy-ig-tags', this)" style="background:#f4f4f5; color:#18181b; font-weight:700; font-size:13px; padding:11px 18px; border-radius:8px; border:1px solid #d4d4d8; cursor:pointer;">
+                        🏷️ Copy Hashtags Only
+                    </button>
+                    <a href="{square_flyer_download}" style="background:#fdf2f8; color:#be185d; border:1px solid #fbcfe8; font-weight:700; font-size:13px; padding:11px 16px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                        🖼️ Download 1:1 Square Flyer
+                    </a>
+                </div>
+            </div>
+
+            <!-- 5. FACEBOOK -->
+            <div class="card" style="background:#ffffff; border:1px solid #e4e4e7; border-radius:14px; padding:22px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:22px;">📘</span>
+                        <div>
+                            <h4 style="font-size:16px; font-weight:800; color:#09090b; margin:0;">Facebook Post (1-Click Share)</h4>
+                            <span style="font-size:12px; color:#1d4ed8; font-weight:600;">Personal Profile & Groups • Trust Story • Clickable Link</span>
+                        </div>
+                    </div>
+                    <span style="font-size:11px; background:#eff6ff; color:#1d4ed8; padding:4px 8px; border-radius:6px; font-weight:700;">UTM: facebook</span>
+                </div>
+
+                <textarea id="copy-facebook" readonly style="width:100%; min-height:110px; background:#fafaf9; border:1px solid #d4d4d8; border-radius:8px; padding:12px; font-size:13px; font-family:monospace; line-height:1.5; resize:vertical; margin-bottom:14px;">{escape(pack['facebook']['text'])}</textarea>
+
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                    <a href="{pack['facebook']['share_url']}" target="_blank" style="background:#1877f2; color:#ffffff; font-weight:800; font-size:13px; padding:11px 20px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+                        📘 1-Click Share to Facebook
+                    </a>
+                    <button type="button" onclick="copyStudioText('copy-facebook', this)" style="background:#f4f4f5; color:#18181b; font-weight:700; font-size:13px; padding:11px 18px; border-radius:8px; border:1px solid #d4d4d8; cursor:pointer;">
+                        📋 Copy Post
+                    </button>
+                    <a href="{square_flyer_download}" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:700; font-size:13px; padding:11px 16px; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                        🖼️ Download 1:1 Flyer
+                    </a>
+                </div>
+            </div>
+
+            <!-- 6. UTM ATTRIBUTION EXPLAINER -->
+            <div class="card" style="background:#fafaf9; border:1px solid #e4e4e7; border-radius:14px; padding:20px;">
+                <h4 style="font-size:14px; font-weight:800; color:#09090b; margin:0 0 8px 0;">🎯 Automatic Traffic Attribution & UTM Parameters</h4>
+                <p style="font-size:12px; color:#52525b; margin:0 0 12px 0;">
+                    Every platform link is tagged automatically so that customer visits and signups can be analyzed in the
+                    <a href="/admin/marketing" style="color:#2563eb; text-decoration:none; font-weight:600;">Marketing Dashboard</a>:
+                </p>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; font-size:12px; font-family:monospace;">
+                    <div style="background:#ffffff; border:1px solid #e4e4e7; border-radius:6px; padding:8px;">
+                        <strong>WhatsApp Status:</strong><br>
+                        <span style="color:#15803d;">?utm_source=whatsapp_status</span>
+                    </div>
+                    <div style="background:#ffffff; border:1px solid #e4e4e7; border-radius:6px; padding:8px;">
+                        <strong>WhatsApp Group:</strong><br>
+                        <span style="color:#15803d;">?utm_source=whatsapp_group</span>
+                    </div>
+                    <div style="background:#ffffff; border:1px solid #e4e4e7; border-radius:6px; padding:8px;">
+                        <strong>Twitter / X:</strong><br>
+                        <span style="color:#0284c7;">?utm_source=twitter</span>
+                    </div>
+                    <div style="background:#ffffff; border:1px solid #e4e4e7; border-radius:6px; padding:8px;">
+                        <strong>Instagram:</strong><br>
+                        <span style="color:#d946ef;">?utm_source=instagram</span>
+                    </div>
+                    <div style="background:#ffffff; border:1px solid #e4e4e7; border-radius:6px; padding:8px;">
+                        <strong>Facebook:</strong><br>
+                        <span style="color:#2563eb;">?utm_source=facebook</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script>
+        function copyStudioText(textareaId, btnElement) {{
+            const ta = document.getElementById(textareaId);
+            if (!ta) return;
+            const originalText = btnElement.innerText;
+            navigator.clipboard.writeText(ta.value).then(function() {{
+                btnElement.innerText = "✓ Copied!";
+                setTimeout(function() {{
+                    btnElement.innerText = originalText;
+                }}, 2500);
+            }}).catch(function(err) {{
+                ta.select();
+                document.execCommand("copy");
+                btnElement.innerText = "✓ Copied!";
+                setTimeout(function() {{
+                    btnElement.innerText = originalText;
+                }}, 2500);
+            }});
+        }}
+    </script>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=body, active_page="marketing")
+
+
+@marketing_admin_bp.route("/social/flyer")
+def social_flyer():
+    require_admin_auth, _, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from flask import send_file
+    from services.poster_service import generate_status_poster
+
+    fmt = request.args.get("format", "story").lower()
+    if fmt not in ["story", "square"]:
+        fmt = "story"
+    network = request.args.get("network", "MTN")
+    plan_name = request.args.get("plan_name", "2.0 GB")
+    price = request.args.get("price", "500")
+    validity = request.args.get("validity", "30 Days")
+    download = request.args.get("download", "0") == "1"
+
+    buf = generate_status_poster(
+        network=network,
+        plan_name=plan_name,
+        price=price,
+        validity=validity,
+        website_url=request.host_url,
+        format=fmt,
+    )
+    clean_net = network.lower()
+    filename = f"waj-vtu-{clean_net}-{fmt}-flyer.png"
+    return send_file(buf, mimetype="image/png", as_attachment=download, download_name=filename)
+
