@@ -852,14 +852,15 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 64px;
-    background: #090909;
-    border-top: 1px solid #262626;
+    min-height: 64px;
+    height: calc(64px + env(safe-area-inset-bottom, 0px));
+    background: #09090b;
+    border-top: 1px solid #27272a;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.45);
     z-index: 990;
     justify-content: space-around;
     align-items: center;
-    padding: 0 4px calc(env(safe-area-inset-bottom, 0px));
+    padding: 0 4px env(safe-area-inset-bottom, 0px);
   }
 
   .bnav-item {
@@ -1894,6 +1895,84 @@
     color: var(--indigo);
   }
 
+  /* Network Pills Selector */
+  .network-pills-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 480px) {
+    .network-pills-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  .network-pill {
+    position: relative;
+    padding: 12px 8px;
+    border-radius: var(--radius-md);
+    border: 2px solid var(--border);
+    background: #ffffff;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+  .network-pill:hover {
+    border-color: #cbd5e1;
+    transform: translateY(-2px);
+  }
+  .network-pill.active {
+    border-width: 2.5px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    transform: scale(1.02);
+  }
+  .network-pill[data-network="MTN"].active {
+    border-color: #eab308;
+    background: #fefce8;
+  }
+  .network-pill[data-network="AIRTEL"].active {
+    border-color: #ef4444;
+    background: #fef2f2;
+  }
+  .network-pill[data-network="GLO"].active {
+    border-color: #22c55e;
+    background: #f0fdf4;
+  }
+  .network-pill[data-network="9MOBILE"].active {
+    border-color: #047857;
+    background: #ecfdf5;
+  }
+
+  /* Balance Calculation & Difference Card */
+  .balance-calc-card {
+    background: #fafaf9;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+  }
+  .balance-calc-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+  }
+  .balance-calc-card.insufficient {
+    background: #fef2f2;
+    border-color: #fecaca;
+  }
+  .balance-calc-card.sufficient {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+  }
+
   /* ------------------------------------------------------------- */
   /* LANDING PAGE CSS (PRESERVED IN FULL)                          */
   /* ------------------------------------------------------------- */
@@ -2024,7 +2103,8 @@
     .nav-user-cluster { display: none; }
     .mobile-bottom-nav { display: flex; }
     
-    .customer-dashboard-container { padding: 16px 16px 88px; }
+    .customer-dashboard-container { padding: 16px 16px calc(88px + env(safe-area-inset-bottom, 0px)); }
+    .page-shell { padding: 16px 16px calc(90px + env(safe-area-inset-bottom, 0px)); }
     .welcome-box { flex-direction: column; align-items: flex-start; gap: 10px; }
     .welcome-title { font-size: 22px; }
     .wallet-card-main { padding: 22px 20px; }

@@ -371,7 +371,13 @@ def dashboard():
         from urllib.parse import quote
         whatsapp_link_url = f"https://wa.me/2348102314725?text={quote('LINK ' + whatsapp_link_token)}"
     from services.referral_service import get_user_referral_summary
+    from services.deal_service import generate_daily_deal, get_lagos_today
     referral_summary = get_user_referral_summary(user)
+    today_deal = None
+    try:
+        today_deal, _ = generate_daily_deal(target_date=get_lagos_today())
+    except Exception:
+        pass
     return render_template(
         "web/dashboard.html",
         user=user,
@@ -383,6 +389,7 @@ def dashboard():
         whatsapp_link_url=whatsapp_link_url,
         purchase_receipt=session.pop("purchase_receipt", None),
         referral=referral_summary,
+        today_deal=today_deal,
     )
 
 
@@ -424,6 +431,7 @@ def buy_data():
 
     if request.method == "GET":
         network = request.args.get("network", "MTN")
+        phone_prefill = (request.args.get("phone") or "").strip()
         raw_plans = fetch_data_variations(network)
         plans = []
         for plan in raw_plans:
@@ -433,7 +441,14 @@ def buy_data():
                 "code": plan.get("variation_code"),
                 "amount": base_amount + get_markup(f"DATA_{network}", base_amount),
             })
-        return render_template("web/buy_data.html", user=user, network=network, plans=plans)
+        return render_template(
+            "web/buy_data.html",
+            user=user,
+            network=network,
+            plans=plans,
+            phone_prefill=phone_prefill,
+            saved_services=saved_services_for(user),
+        )
 
     network = request.form.get("network", "").upper()
     plan_code = request.form.get("plan_code", "")

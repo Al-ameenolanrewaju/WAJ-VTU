@@ -4,47 +4,186 @@
 {% block content %}
 {% include "web/_service_nav.html" %}
 
-{% if purchase_receipt %}
-<div class="receipt-backdrop" id="purchase-receipt" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
-  <div class="receipt-modal">
-    <div class="receipt-top">
-      <div>
-        <div class="receipt-success">Payment successful</div>
-        <h2 id="receipt-title">Transaction Receipt</h2>
+<!-- INTERACTIVE FINTECH RECEIPT MODAL -->
+<div class="receipt-backdrop" id="interactive-receipt-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="receipt-modal-title">
+  <div class="receipt-modal" style="border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.35); padding: 28px 24px;">
+    <div style="text-align: center; margin-bottom: 16px;">
+      <div style="width: 58px; height: 58px; border-radius: 50%; background: #dcfce7; color: #16a34a; font-size: 28px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 8px; box-shadow: 0 4px 14px rgba(22, 163, 74, 0.25);">
+        ✓
       </div>
-      <button class="receipt-close" type="button" onclick="closeReceipt()" aria-label="Close receipt">&times;</button>
+      <div style="color: #16a34a; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;">Transaction Successful</div>
+      <h2 id="receipt-modal-title" style="font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 700; color: #09090b; margin-top: 4px;">Transaction Receipt</h2>
     </div>
-    <div class="receipt-amount">
-      <small>Amount Charged</small>
-      <strong>₦{{ "{:,.2f}".format(purchase_receipt.amount|float) }}</strong>
+
+    <div class="receipt-amount" style="background: #fafaf9; border: 1.5px solid #e4e4e7; border-radius: 12px; padding: 14px; text-align: center; margin-bottom: 16px;">
+      <small style="color: #71717a; font-size: 11px; font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 2px;">Amount Paid</small>
+      <strong id="rcpt-amount" style="font-family: 'Space Grotesk', sans-serif; font-size: 28px; color: #09090b;">₦0.00</strong>
     </div>
-    <div class="receipt-row"><span>Service</span><strong>{{ purchase_receipt.service }}</strong></div>
-    <div class="receipt-row"><span>Reference</span><code>{{ purchase_receipt.reference }}</code></div>
-    {% if purchase_receipt.recipient %}<div class="receipt-row"><span>Recipient</span><strong>{{ purchase_receipt.recipient }}</strong></div>{% endif %}
-    {% if purchase_receipt.token %}<div class="receipt-extra"><strong>Electricity Token:</strong><br>{{ purchase_receipt.token }}</div>{% endif %}
-    {% if purchase_receipt.pins %}<div class="receipt-extra"><strong>Exam PIN(s):</strong><br>{{ purchase_receipt.pins|join(", ") }}</div>{% endif %}
-    <img class="receipt-image" src="{{ url_for('web.receipt_image', reference=purchase_receipt.reference) }}" alt="Photo receipt">
-    <div class="receipt-actions">
-      <button type="button" class="secondary" onclick="closeReceipt()">Done</button>
-      <button type="button" onclick="window.print()">Print Receipt</button>
+
+    <div style="border-top: 1px solid #f4f4f5; border-bottom: 1px solid #f4f4f5; padding: 6px 0; margin-bottom: 16px; font-size: 13px;">
+      <div class="receipt-row" style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #e4e4e7;">
+        <span style="color: #71717a;">Service</span>
+        <strong id="rcpt-service" style="color: #09090b;">VTU Service</strong>
+      </div>
+      <div class="receipt-row" style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #e4e4e7;">
+        <span style="color: #71717a;">Reference</span>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <code id="rcpt-ref" style="font-family: monospace; font-size: 12px; background: #f4f4f5; padding: 2px 6px; border-radius: 4px;">REF-12345</code>
+          <button type="button" onclick="copyReceiptRef()" style="background: none; border: none; cursor: pointer; font-size: 12px;" title="Copy reference">📋</button>
+        </div>
+      </div>
+      <div class="receipt-row" id="rcpt-recipient-row" style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #e4e4e7;">
+        <span style="color: #71717a;">Recipient</span>
+        <strong id="rcpt-recipient" style="color: #09090b;">—</strong>
+      </div>
+      <div class="receipt-row" style="display: flex; justify-content: space-between; padding: 8px 0;">
+        <span style="color: #71717a;">Date & Time</span>
+        <span id="rcpt-date" style="color: #52525b; font-weight: 600;">Today</span>
+      </div>
+    </div>
+
+    <!-- Extra: Token or PIN -->
+    <div id="rcpt-extra-box" style="display: none; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 12px; margin-bottom: 16px; text-align: center;">
+      <span style="font-size: 11px; font-weight: 700; color: #047857; text-transform: uppercase;" id="rcpt-extra-label">Electricity Token</span>
+      <div id="rcpt-extra-val" style="font-family: monospace; font-size: 18px; font-weight: 800; color: #065f46; letter-spacing: 1px; margin-top: 4px;"></div>
+    </div>
+
+    <!-- Actions -->
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <button type="button" id="rcpt-whatsapp-btn" onclick="shareReceiptToWhatsApp()" style="background: #25d366; color: #ffffff; font-weight: 800; border: none; padding: 12px; border-radius: 10px; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 2px 8px rgba(37,211,102,0.3);">
+        <span>💬</span> Share Receipt to WhatsApp
+      </button>
+      <div style="display: flex; gap: 8px;">
+        <button type="button" id="rcpt-share-btn" onclick="shareReceiptNative()" style="flex: 1; background: #09090b; color: #ffffff; font-weight: 700; border: none; padding: 10px; border-radius: 8px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+          <span>📱</span> Share
+        </button>
+        <a id="rcpt-download-btn" href="#" target="_blank" style="flex: 1; background: #f4f4f5; color: #09090b; font-weight: 700; text-decoration: none; padding: 10px; border-radius: 8px; font-size: 12px; text-align: center; border: 1px solid #e4e4e7; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+          <span>📥</span> PNG Image
+        </a>
+        <button type="button" onclick="window.print()" style="background: #f4f4f5; color: #09090b; font-weight: 700; border: 1px solid #e4e4e7; padding: 10px 14px; border-radius: 8px; font-size: 12px; cursor: pointer;" title="Print">
+          🖨️
+        </button>
+      </div>
+      <button type="button" onclick="closeInteractiveReceipt()" style="background: transparent; border: none; color: #71717a; font-weight: 600; padding: 8px; font-size: 13px; cursor: pointer; margin-top: 4px;">
+        Close
+      </button>
     </div>
   </div>
 </div>
+
 <script>
-  function closeReceipt() {
-    const r = document.getElementById("purchase-receipt");
-    if (r) r.remove();
+  let currentReceiptData = {};
+
+  function openInteractiveReceipt(evt, data) {
+    if (evt) evt.preventDefault();
+    currentReceiptData = data || {};
+
+    document.getElementById('rcpt-amount').textContent = '₦' + (data.amount || '0.00');
+    document.getElementById('rcpt-service').textContent = data.service || 'Service Purchase';
+    document.getElementById('rcpt-ref').textContent = data.reference || '—';
+    document.getElementById('rcpt-date').textContent = data.date || 'Today';
+
+    const rRow = document.getElementById('rcpt-recipient-row');
+    const rVal = document.getElementById('rcpt-recipient');
+    if (data.recipient) {
+      rRow.style.display = 'flex';
+      rVal.textContent = data.recipient;
+    } else {
+      rRow.style.display = 'none';
+    }
+
+    const exBox = document.getElementById('rcpt-extra-box');
+    const exLabel = document.getElementById('rcpt-extra-label');
+    const exVal = document.getElementById('rcpt-extra-val');
+    if (data.token) {
+      exBox.style.display = 'block';
+      exLabel.textContent = 'Electricity Token';
+      exVal.textContent = data.token;
+    } else if (data.pins) {
+      exBox.style.display = 'block';
+      exLabel.textContent = 'Exam PIN(s)';
+      exVal.textContent = Array.isArray(data.pins) ? data.pins.join(', ') : data.pins;
+    } else {
+      exBox.style.display = 'none';
+    }
+
+    const dlBtn = document.getElementById('rcpt-download-btn');
+    if (dlBtn && data.pngUrl) {
+      dlBtn.href = data.pngUrl;
+    }
+
+    const modal = document.getElementById('interactive-receipt-modal');
+    if (modal) modal.style.display = 'flex';
+    if (navigator.vibrate) navigator.vibrate(15);
   }
-  document.getElementById("purchase-receipt")?.addEventListener("click", function (e) {
-    if (e.target === this) closeReceipt();
+
+  function closeInteractiveReceipt() {
+    const modal = document.getElementById('interactive-receipt-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  document.getElementById('interactive-receipt-modal')?.addEventListener('click', function(e) {
+    if (e.target === this) closeInteractiveReceipt();
   });
+
+  function copyReceiptRef() {
+    if (!currentReceiptData.reference) return;
+    navigator.clipboard.writeText(currentReceiptData.reference).then(() => {
+      alert('Reference copied: ' + currentReceiptData.reference);
+    });
+  }
+
+  function buildReceiptShareText() {
+    let t = `🧾 *WAJ VTU Transaction Receipt*\n`;
+    t += `• Service: ${currentReceiptData.service || 'VTU Recharge'}\n`;
+    t += `• Amount: ₦${currentReceiptData.amount || '0.00'}\n`;
+    t += `• Reference: ${currentReceiptData.reference || ''}\n`;
+    if (currentReceiptData.recipient) t += `• Recipient: ${currentReceiptData.recipient}\n`;
+    if (currentReceiptData.date) t += `• Date: ${currentReceiptData.date}\n`;
+    if (currentReceiptData.token) t += `• Token: ${currentReceiptData.token}\n`;
+    if (currentReceiptData.pins) t += `• PIN: ${Array.isArray(currentReceiptData.pins) ? currentReceiptData.pins.join(', ') : currentReceiptData.pins}\n`;
+    t += `• Status: SUCCESSFUL ✅\n\n`;
+    t += `Order instant data & airtime 24/7 on WAJ VTU: https://wajvtu.com.ng`;
+    return t;
+  }
+
+  function shareReceiptToWhatsApp() {
+    const text = buildReceiptShareText();
+    window.open('https://api.whatsapp.com/send?text=' + encodeURIComponent(text), '_blank');
+  }
+
+  async function shareReceiptNative() {
+    const text = buildReceiptShareText();
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'WAJ VTU Receipt',
+          text: text,
+        });
+      } catch (err) {}
+    } else {
+      shareReceiptToWhatsApp();
+    }
+  }
+
+  {% if purchase_receipt %}
   window.addEventListener('load', function() {
+    openInteractiveReceipt(null, {
+      service: '{{ purchase_receipt.service }}',
+      reference: '{{ purchase_receipt.reference }}',
+      amount: '{{ "{:,.2f}".format(purchase_receipt.amount|float) }}',
+      recipient: '{{ purchase_receipt.recipient or "" }}',
+      token: '{{ purchase_receipt.token or "" }}',
+      pins: {{ purchase_receipt.pins|tojson if purchase_receipt.pins else 'null' }},
+      date: 'Just now',
+      pngUrl: '{{ url_for('web.receipt_image', reference=purchase_receipt.reference) }}'
+    });
     setTimeout(function() {
       if (typeof playSuccessChime === 'function') playSuccessChime();
     }, 400);
   });
+  {% endif %}
 </script>
-{% endif %}
 
 <main class="customer-dashboard-container">
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -104,6 +243,51 @@
     </div>
   </div>
 
+  {% if today_deal %}
+  <!-- SECTION 1.6: TODAY'S SPECIAL DEAL BANNER -->
+  <div class="dash-deal-banner" id="dash-deal-banner" style="background: linear-gradient(135deg, #18181b 0%, #09090b 100%); border: 1.5px solid #FFC400; border-radius: 16px; padding: 18px 22px; margin-bottom: 24px; box-shadow: 0 6px 24px rgba(255, 196, 0, 0.12); position: relative; overflow: hidden;">
+    <div style="position: absolute; right: -25px; top: -25px; width: 120px; height: 120px; background: rgba(255,196,0,0.06); border-radius: 50%; pointer-events: none;"></div>
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; position: relative; z-index: 1;">
+      <div style="display: flex; align-items: center; gap: 14px; flex: 1; min-width: 260px;">
+        <div style="width: 48px; height: 48px; border-radius: 14px; background: #FFC400; color: #09090b; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800; flex-shrink: 0; box-shadow: 0 4px 14px rgba(255,196,0,0.35);">
+          🔥
+        </div>
+        <div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px;">
+            <span style="background: #FFC400; color: #09090b; font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 5px; text-transform: uppercase;">TODAY'S SPECIAL DEAL</span>
+            <span style="color: #93c5fd; font-size: 12px; font-weight: 600;">⏳ {{ today_deal.validity }}</span>
+          </div>
+          <h4 style="font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700; color: #ffffff; margin: 0 0 2px 0;">
+            {{ today_deal.network }} {{ today_deal.data_size }} for only <span style="color: #4ade80; font-weight: 800;">₦{{ "{:,.2f}".format(today_deal.price|float) }}</span>
+          </h4>
+          <p style="font-size: 12px; color: #a1a1aa; margin: 0;">
+            Fast automated 10-second delivery directly to your phone.
+          </p>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <a href="{{ url_for('web.buy_data', network=today_deal.network) }}" onclick="if(navigator.vibrate) navigator.vibrate(15);" style="background: #FFC400; color: #09090b; font-weight: 800; text-decoration: none; padding: 11px 22px; border-radius: 8px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(255, 196, 0, 0.25); transition: transform 0.1s ease;">
+          ⚡ Claim Deal Now →
+        </a>
+        <button type="button" onclick="dismissDealBanner()" style="background: transparent; border: none; color: #71717a; font-size: 22px; cursor: pointer; padding: 4px 8px; line-height: 1;" title="Dismiss">&times;</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    function dismissDealBanner() {
+      const b = document.getElementById('dash-deal-banner');
+      if (b) {
+        b.style.display = 'none';
+        sessionStorage.setItem('waj_deal_dismissed', 'true');
+      }
+    }
+    if (sessionStorage.getItem('waj_deal_dismissed') === 'true') {
+      const b = document.getElementById('dash-deal-banner');
+      if (b) b.style.display = 'none';
+    }
+  </script>
+  {% endif %}
+
   <!-- SECTION 2: WALLET -->
   <section class="dash-section dash-wallet-section">
     <div class="prominent-wallet-card">
@@ -112,8 +296,13 @@
           <span class="wallet-kicker">AVAILABLE BALANCE</span>
           <span class="wallet-instant-badge">● Instant Funding</span>
         </div>
-        <div class="wallet-figure">
-          <span class="currency-symbol">₦</span>{{ "{:,.2f}".format(user.wallet_balance) }}
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+          <div class="wallet-figure" style="margin-bottom: 0;">
+            <span class="currency-symbol">₦</span><span id="dash-balance-amount">{{ "{:,.2f}".format(user.wallet_balance) }}</span>
+          </div>
+          <button type="button" id="toggle-balance-btn" onclick="toggleWalletBalancePrivacy()" aria-label="Toggle balance visibility" title="Show/Hide balance" style="background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 50%; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: #ffffff; font-size: 15px; transition: all 0.15s ease;">
+            <span id="balance-eye-icon">👁️</span>
+          </button>
         </div>
         <div class="wallet-actions">
           <a class="btn-wallet-primary" href="{{ url_for('web.fund_wallet') }}">
@@ -301,7 +490,7 @@
               </td>
               <td style="text-align:right;">
                 {% if tx.status == "SUCCESS" %}
-                <a class="btn-receipt-view" href="{{ url_for('web.receipt_image', reference=tx.reference) }}" target="_blank" rel="noopener">
+                <a class="btn-receipt-view" href="{{ url_for('web.receipt_image', reference=tx.reference) }}" onclick="openInteractiveReceipt(event, {service: '{{ tx.type|title }}', reference: '{{ tx.reference }}', amount: '{{ '{:,.2f}'.format(tx.amount) }}', recipient: '{{ tx.recipient or tx.description or '' }}', date: '{{ tx.created_at.strftime('%b %d, %Y %I:%M %p') }}', pngUrl: '{{ url_for('web.receipt_image', reference=tx.reference) }}'})" target="_blank" rel="noopener">
                   Receipt
                 </a>
                 {% else %}
@@ -405,6 +594,35 @@
     if (banner) banner.style.display = 'none';
     sessionStorage.setItem('dismissed_dash_push_banner', '1');
   }
+
+  function toggleWalletBalancePrivacy() {
+    const amountSpan = document.getElementById('dash-balance-amount');
+    const eyeIcon = document.getElementById('balance-eye-icon');
+    if (!amountSpan) return;
+    const raw = '{{ "{:,.2f}".format(user.wallet_balance) }}';
+    const isHidden = localStorage.getItem('waj_hide_balance') === 'true';
+
+    if (isHidden) {
+      amountSpan.textContent = raw;
+      if (eyeIcon) eyeIcon.textContent = '👁️';
+      localStorage.setItem('waj_hide_balance', 'false');
+    } else {
+      amountSpan.textContent = '••••••';
+      if (eyeIcon) eyeIcon.textContent = '🙈';
+      localStorage.setItem('waj_hide_balance', 'true');
+    }
+    if (navigator.vibrate) navigator.vibrate(15);
+  }
+
+  // Restore balance privacy preference immediately
+  (function() {
+    if (localStorage.getItem('waj_hide_balance') === 'true') {
+      const amountSpan = document.getElementById('dash-balance-amount');
+      const eyeIcon = document.getElementById('balance-eye-icon');
+      if (amountSpan) amountSpan.textContent = '••••••';
+      if (eyeIcon) eyeIcon.textContent = '🙈';
+    }
+  })();
 
   window.addEventListener('load', () => {
     setTimeout(updateDashboardPushBannerState, 600);

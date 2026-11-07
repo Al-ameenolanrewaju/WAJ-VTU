@@ -1,27 +1,219 @@
 {% extends "web/base.html" %}
+{% block title %}Buy Airtime | WAJ VTU{% endblock %}
 {% block content %}
 {% include "web/_service_nav.html" %}
 {% include "web/_header.html" %}
+
 <main class="page-shell">
-  <div class="page-heading"><div><h1>Buy airtime</h1><p>Top up any Nigerian number instantly.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
-  <div class="form-card">
-    <form method="POST" action="{{ url_for('web.buy_airtime') }}">
-      <label>Network</label>
-      <select name="network">
-        <option value="MTN">MTN</option>
-        <option value="AIRTEL">Airtel</option>
-        <option value="GLO">Glo</option>
-        <option value="9MOBILE">9mobile</option>
-      </select>
-      <label>Recipient phone number</label>
-      {% if saved_services %}<select onchange="document.querySelector('[name=phone]').value=this.value"><option value="">Use a saved number</option>{% for saved in saved_services %}<option value="{{ saved.identifier }}">{{ saved.label }}</option>{% endfor %}</select>{% endif %}
-      <input name="phone" placeholder="08012345678" required>
-      <label>Amount</label>
-      <input name="amount" type="number" min="50" step="0.01" placeholder="Amount in NGN" required>
-      <label><input type="checkbox" name="save_service"> Save this number for next time</label>
-      <input name="save_label" placeholder="Label (optional)">
-      <button type="submit">Buy Airtime</button>
+  <div class="page-heading">
+    <div>
+      <h1>Buy Airtime</h1>
+      <p>Instant top-up for all Nigerian mobile networks with 10-second automated delivery.</p>
+    </div>
+    <a class="page-back" href="{{ url_for('web.dashboard') }}">← Back to dashboard</a>
+  </div>
+
+  <div class="form-card" style="max-width: 620px; margin: 0 auto;">
+    <form method="POST" action="{{ url_for('web.buy_airtime') }}" id="airtime-form">
+      <!-- 1. VISUAL NETWORK SELECTOR -->
+      <label style="margin-bottom: 8px;">Select Network</label>
+      <input type="hidden" name="network" id="network-input" value="MTN" required>
+
+      <div class="network-pills-grid">
+        <div class="network-pill active" data-network="MTN" onclick="selectNetwork('MTN')">
+          <strong style="font-size: 15px; color: #000000; font-family: 'Space Grotesk', sans-serif;">MTN</strong>
+          <span class="network-pill-badge" style="background: #eab308; color: #000000;">Fast 4G/5G</span>
+        </div>
+        <div class="network-pill" data-network="AIRTEL" onclick="selectNetwork('AIRTEL')">
+          <strong style="font-size: 15px; color: #dc2626; font-family: 'Space Grotesk', sans-serif;">Airtel</strong>
+          <span class="network-pill-badge" style="background: #fee2e2; color: #dc2626;">Instant</span>
+        </div>
+        <div class="network-pill" data-network="GLO" onclick="selectNetwork('GLO')">
+          <strong style="font-size: 15px; color: #16a34a; font-family: 'Space Grotesk', sans-serif;">Glo</strong>
+          <span class="network-pill-badge" style="background: #dcfce7; color: #16a34a;">Bonus Airtime</span>
+        </div>
+        <div class="network-pill" data-network="9MOBILE" onclick="selectNetwork('9MOBILE')">
+          <strong style="font-size: 15px; color: #047857; font-family: 'Space Grotesk', sans-serif;">9mobile</strong>
+          <span class="network-pill-badge" style="background: #ecfdf5; color: #047857;">Automated</span>
+        </div>
+      </div>
+
+      <!-- 2. RECIPIENT PHONE NUMBER WITH SMART AUTO-DETECT -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <label style="margin: 0;">Recipient Phone Number</label>
+        <span id="detected-net-badge" style="display: none; font-size: 11px; font-weight: 700; color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 2px 8px; border-radius: 10px;">
+          Auto-detected: MTN
+        </span>
+      </div>
+
+      {% if saved_services %}
+      <div style="margin-bottom: 10px;">
+        <select onchange="if(this.value){ document.getElementById('phone-input').value = this.value; handlePhoneChange(this.value); }" style="margin-bottom: 8px; font-size: 13px; color: #52525b; background: #fafaf9;">
+          <option value="">⚡ Select from saved beneficiaries...</option>
+          {% for saved in saved_services %}
+          <option value="{{ saved.identifier }}">{{ saved.label or saved.identifier }} ({{ saved.identifier }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <input name="phone" id="phone-input" type="tel" placeholder="e.g. 08012345678" value="{{ user.phone if user and user.phone and user.phone != 'Not linked' else '' }}" oninput="handlePhoneChange(this.value)" required style="font-size: 16px; font-weight: 600; letter-spacing: 0.5px;">
+
+      <!-- Quick Preset Amounts -->
+      <label style="margin-bottom: 8px;">Recharge Amount (₦)</label>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
+        <button type="button" onclick="setAirtimeAmount(100)" style="flex: 1; padding: 7px 10px; background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer;">₦100</button>
+        <button type="button" onclick="setAirtimeAmount(200)" style="flex: 1; padding: 7px 10px; background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer;">₦200</button>
+        <button type="button" onclick="setAirtimeAmount(500)" style="flex: 1; padding: 7px 10px; background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer;">₦500</button>
+        <button type="button" onclick="setAirtimeAmount(1000)" style="flex: 1; padding: 7px 10px; background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer;">₦1,000</button>
+        <button type="button" onclick="setAirtimeAmount(2000)" style="flex: 1; padding: 7px 10px; background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer;">₦2,000</button>
+      </div>
+
+      <input name="amount" id="amount-input" type="number" min="50" step="1" placeholder="Enter amount (min ₦50)" oninput="updateBalanceCalculation(this.value)" required style="font-size: 16px; font-weight: 700;">
+
+      <!-- 3. LIVE WALLET BALANCE & DIFFERENCE CALCULATION CARD -->
+      <div class="balance-calc-card" id="balance-calc-card">
+        <div class="balance-calc-row">
+          <span style="color: #71717a;">Wallet Balance:</span>
+          <strong>₦{{ "{:,.2f}".format(user.wallet_balance) }}</strong>
+        </div>
+        <div class="balance-calc-row">
+          <span style="color: #71717a;">Airtime Amount:</span>
+          <strong id="calc-cost">₦0.00</strong>
+        </div>
+        <div class="balance-calc-row" style="border-top: 1px dashed #e4e4e7; margin-top: 4px; padding-top: 6px;">
+          <span style="font-weight: 700;" id="calc-status-label">Balance After Purchase:</span>
+          <strong id="calc-remaining" style="color: #16a34a; font-size: 14px;">₦{{ "{:,.2f}".format(user.wallet_balance) }}</strong>
+        </div>
+        <div id="calc-insufficient-msg" style="display: none; margin-top: 8px; color: #dc2626; font-size: 12px; font-weight: 600;">
+          ⚠️ Insufficient balance. <a href="{{ url_for('web.fund_wallet') }}" style="color: #dc2626; text-decoration: underline; font-weight: 800;">Fund your wallet</a> to continue.
+        </div>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none; font-size: 13px; font-weight: 600;">
+          <input type="checkbox" name="save_service" style="width: auto; margin: 0;"> Save this number to beneficiaries
+        </label>
+        <input name="save_label" placeholder="Beneficiary name (e.g. My MTN, Mom, Shop SIM)" style="margin-top: 8px; font-size: 13px;">
+      </div>
+
+      <button type="submit" id="submit-btn" style="padding: 14px; font-size: 15px; border-radius: 10px;">
+        ⚡ Recharge Airtime Now
+      </button>
     </form>
   </div>
 </main>
+
+<script>
+  const userBalance = {{ user.wallet_balance|float }};
+
+  function selectNetwork(net) {
+    document.getElementById('network-input').value = net;
+    document.querySelectorAll('.network-pill').forEach(pill => {
+      if (pill.getAttribute('data-network') === net) {
+        pill.classList.add('active');
+      } else {
+        pill.classList.remove('active');
+      }
+    });
+    if (navigator.vibrate) navigator.vibrate(15);
+  }
+
+  function detectNetworkFromPhone(phone) {
+    if (!phone) return null;
+    let clean = phone.replace(/\D/g, '');
+    if (clean.startsWith('234')) clean = '0' + clean.slice(3);
+    if (clean.length < 4) return null;
+    const p4 = clean.slice(0, 4);
+    const p5 = clean.slice(0, 5);
+
+    const mtn = ['0803', '0806', '0703', '0706', '0813', '0816', '0810', '0814', '0903', '0906', '0913', '0916', '0704'];
+    const airtel = ['0802', '0808', '0708', '0812', '0701', '0902', '0901', '0904', '0907', '0912', '0911'];
+    const glo = ['0805', '0807', '0705', '0815', '0811', '0905', '0915'];
+    const etisalat = ['0809', '0817', '0818', '0909', '0908'];
+
+    if (mtn.includes(p4) || p5 === '07025' || p5 === '07026') return 'MTN';
+    if (airtel.includes(p4)) return 'AIRTEL';
+    if (glo.includes(p4)) return 'GLO';
+    if (etisalat.includes(p4)) return '9MOBILE';
+    return null;
+  }
+
+  function handlePhoneChange(phone) {
+    const detected = detectNetworkFromPhone(phone);
+    const badge = document.getElementById('detected-net-badge');
+    if (detected) {
+      selectNetwork(detected);
+      if (badge) {
+        badge.style.display = 'inline-block';
+        badge.textContent = `📶 Auto-detected: ${detected}`;
+      }
+    } else {
+      if (badge) badge.style.display = 'none';
+    }
+  }
+
+  function setAirtimeAmount(amt) {
+    const input = document.getElementById('amount-input');
+    if (input) {
+      input.value = amt;
+      updateBalanceCalculation(amt);
+    }
+    if (navigator.vibrate) navigator.vibrate(15);
+  }
+
+  function updateBalanceCalculation(val) {
+    const amt = parseFloat(val) || 0;
+    const costSpan = document.getElementById('calc-cost');
+    const remSpan = document.getElementById('calc-remaining');
+    const card = document.getElementById('balance-calc-card');
+    const statusLabel = document.getElementById('calc-status-label');
+    const errMsg = document.getElementById('calc-insufficient-msg');
+    const submitBtn = document.getElementById('submit-btn');
+
+    costSpan.textContent = '₦' + amt.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+    if (amt > 0) {
+      const remaining = userBalance - amt;
+      if (remaining < 0) {
+        card.classList.add('insufficient');
+        card.classList.remove('sufficient');
+        statusLabel.textContent = 'Shortfall:';
+        remSpan.style.color = '#dc2626';
+        remSpan.textContent = '-₦' + Math.abs(remaining).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        errMsg.style.display = 'block';
+        submitBtn.disabled = true;
+        submitBtn.style.opacity = '0.6';
+        submitBtn.textContent = '⚠️ Insufficient Wallet Balance';
+      } else {
+        card.classList.add('sufficient');
+        card.classList.remove('insufficient');
+        statusLabel.textContent = 'Balance After:';
+        remSpan.style.color = '#16a34a';
+        remSpan.textContent = '₦' + remaining.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        errMsg.style.display = 'none';
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = '1';
+        submitBtn.textContent = '⚡ Recharge Airtime Now';
+      }
+    } else {
+      card.classList.remove('insufficient');
+      card.classList.remove('sufficient');
+      statusLabel.textContent = 'Balance After Purchase:';
+      remSpan.style.color = '#16a34a';
+      remSpan.textContent = '₦' + userBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      errMsg.style.display = 'none';
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '1';
+      submitBtn.textContent = '⚡ Recharge Airtime Now';
+    }
+  }
+
+  // Initial check on load
+  document.addEventListener('DOMContentLoaded', function() {
+    const p = document.getElementById('phone-input');
+    if (p && p.value) handlePhoneChange(p.value);
+  });
+</script>
 {% endblock %}
+

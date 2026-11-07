@@ -1,50 +1,245 @@
 {% extends "web/base.html" %}
+{% block title %}Buy Data Bundles | WAJ VTU{% endblock %}
 {% block content %}
 {% include "web/_service_nav.html" %}
 {% include "web/_header.html" %}
+
 <main class="page-shell">
-  <div class="page-heading"><div><h1>Buy data</h1><p>Choose a bundle and send it to any number instantly.</p></div><a class="page-back" href="{{ url_for('web.dashboard') }}">Back to dashboard</a></div>
-  <div class="form-card">
-    <form method="GET" action="{{ url_for('web.buy_data') }}">
-      <label>Network</label>
-      <select name="network" onchange="this.form.submit()">
-        {% for net in ["MTN", "AIRTEL", "GLO", "9MOBILE"] %}
-        <option value="{{ net }}" {{ "selected" if net == network }}>{{ net }}</option>
-        {% endfor %}
-      </select>
+  <div class="page-heading">
+    <div>
+      <h1>Buy Data Bundles</h1>
+      <p>High-speed SME, Corporate Gifting & Direct data with automated 10-second delivery.</p>
+    </div>
+    <a class="page-back" href="{{ url_for('web.dashboard') }}">← Back to dashboard</a>
+  </div>
+
+  <div class="form-card" style="max-width: 620px; margin: 0 auto;">
+    <!-- 1. VISUAL NETWORK SELECTOR -->
+    <label style="margin-bottom: 8px;">Select Network</label>
+    <div class="network-pills-grid">
+      <div class="network-pill {{ 'active' if network == 'MTN' else '' }}" data-network="MTN" onclick="switchNetwork('MTN')">
+        <strong style="font-size: 15px; color: #000000; font-family: 'Space Grotesk', sans-serif;">MTN</strong>
+        <span class="network-pill-badge" style="background: #eab308; color: #000000;">Fast 4G/5G</span>
+      </div>
+      <div class="network-pill {{ 'active' if network == 'AIRTEL' else '' }}" data-network="AIRTEL" onclick="switchNetwork('AIRTEL')">
+        <strong style="font-size: 15px; color: #dc2626; font-family: 'Space Grotesk', sans-serif;">Airtel</strong>
+        <span class="network-pill-badge" style="background: #fee2e2; color: #dc2626;">SME & Direct</span>
+      </div>
+      <div class="network-pill {{ 'active' if network == 'GLO' else '' }}" data-network="GLO" onclick="switchNetwork('GLO')">
+        <strong style="font-size: 15px; color: #16a34a; font-family: 'Space Grotesk', sans-serif;">Glo</strong>
+        <span class="network-pill-badge" style="background: #dcfce7; color: #16a34a;">Heavy Data</span>
+      </div>
+      <div class="network-pill {{ 'active' if network == '9MOBILE' else '' }}" data-network="9MOBILE" onclick="switchNetwork('9MOBILE')">
+        <strong style="font-size: 15px; color: #047857; font-family: 'Space Grotesk', sans-serif;">9mobile</strong>
+        <span class="network-pill-badge" style="background: #ecfdf5; color: #047857;">Instant Auto</span>
+      </div>
+    </div>
+
+    <!-- Hidden Network Switcher Form -->
+    <form method="GET" action="{{ url_for('web.buy_data') }}" id="network-switch-form" style="display: none;">
+      <input type="hidden" name="network" id="network-switch-input" value="{{ network }}">
+      <input type="hidden" name="phone" id="network-switch-phone" value="">
     </form>
 
     {% if plans %}
-    <form method="POST" action="{{ url_for('web.buy_data') }}">
+    <form method="POST" action="{{ url_for('web.buy_data') }}" id="data-purchase-form">
       <input type="hidden" name="network" value="{{ network }}">
-      <label>Recipient phone number</label>
-      <input name="phone" placeholder="08012345678" required>
-      <label>Data plan</label>
-      <select name="plan_code" required>
-        <option value="" disabled selected>Select a data plan</option>
+      <input type="hidden" name="amount" id="data-amount" required>
+
+      <!-- 2. RECIPIENT PHONE NUMBER WITH SMART AUTO-DETECT -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <label style="margin: 0;">Recipient Phone Number</label>
+        <span id="detected-net-badge" style="display: none; font-size: 11px; font-weight: 700; color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 2px 8px; border-radius: 10px;">
+          Auto-detected: {{ network }}
+        </span>
+      </div>
+
+      {% if saved_services %}
+      <div style="margin-bottom: 10px;">
+        <select onchange="if(this.value){ document.getElementById('phone-input').value = this.value; handlePhoneInput(this.value); }" style="margin-bottom: 8px; font-size: 13px; color: #52525b; background: #fafaf9;">
+          <option value="">⚡ Select from saved beneficiaries...</option>
+          {% for saved in saved_services %}
+          <option value="{{ saved.identifier }}">{{ saved.label or saved.identifier }} ({{ saved.identifier }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <input name="phone" id="phone-input" type="tel" placeholder="e.g. 08012345678" value="{{ phone_prefill or (user.phone if user and user.phone and user.phone != 'Not linked' else '') }}" oninput="handlePhoneInput(this.value)" required style="font-size: 16px; font-weight: 600; letter-spacing: 0.5px;">
+
+      <!-- 3. DATA PLAN SELECTOR -->
+      <label for="plan-select" style="margin-bottom: 6px;">Select {{ network }} Data Plan</label>
+      <select name="plan_code" id="plan-select" required onchange="handlePlanSelect(this)" style="font-size: 14px; font-weight: 600; padding: 13px 14px;">
+        <option value="" disabled selected>— Choose your bundle —</option>
         {% for plan in plans %}
-        <option value="{{ plan.code }}" data-amount="{{ plan.amount }}">{{ plan.name }} - ₦{{ "{:,.2f}".format(plan.amount) }}</option>
+        <option value="{{ plan.code }}" data-amount="{{ plan.amount }}">{{ plan.name }}  •  ₦{{ "{:,.2f}".format(plan.amount) }}</option>
         {% endfor %}
       </select>
-      <label>Ported number (optional)</label>
-      <input name="ported_number" placeholder="If your line is ported, enter the ported number">
-      <label>Bypass code (optional)</label>
-      <input name="bypass" placeholder="Provide bypass if no ported number is available">
-      <input type="hidden" name="amount" id="data-amount" required>
-      <button type="submit">Buy Data</button>
+
+      <!-- Optional Ported Line Fields Collapsible -->
+      <details style="margin-bottom: 18px; font-size: 12px; color: #52525b; background: #fafaf9; border: 1px solid #e4e4e7; border-radius: 8px; padding: 10px 14px;">
+        <summary style="cursor: pointer; font-weight: 700; color: #09090b;">Ported Number / Bypass Options (Optional)</summary>
+        <div style="margin-top: 12px;">
+          <label style="font-size: 11px;">Ported Number</label>
+          <input name="ported_number" placeholder="Enter original network number if line was ported" style="margin-bottom: 10px; font-size: 13px;">
+          <label style="font-size: 11px;">Bypass Code</label>
+          <input name="bypass" placeholder="Provide bypass code if required by provider" style="margin-bottom: 0; font-size: 13px;">
+        </div>
+      </details>
+
+      <!-- 4. LIVE WALLET BALANCE & DIFFERENCE CALCULATION CARD -->
+      <div class="balance-calc-card" id="balance-calc-card">
+        <div class="balance-calc-row">
+          <span style="color: #71717a;">Wallet Balance:</span>
+          <strong>₦{{ "{:,.2f}".format(user.wallet_balance) }}</strong>
+        </div>
+        <div class="balance-calc-row">
+          <span style="color: #71717a;">Plan Price:</span>
+          <strong id="calc-cost">₦0.00</strong>
+        </div>
+        <div class="balance-calc-row" style="border-top: 1px dashed #e4e4e7; margin-top: 4px; padding-top: 6px;">
+          <span style="font-weight: 700;" id="calc-status-label">Balance After Purchase:</span>
+          <strong id="calc-remaining" style="color: #16a34a; font-size: 14px;">₦{{ "{:,.2f}".format(user.wallet_balance) }}</strong>
+        </div>
+        <div id="calc-insufficient-msg" style="display: none; margin-top: 8px; color: #dc2626; font-size: 12px; font-weight: 600;">
+          ⚠️ Insufficient balance. <a href="{{ url_for('web.fund_wallet') }}" style="color: #dc2626; text-decoration: underline; font-weight: 800;">Fund your wallet</a> to continue.
+        </div>
+      </div>
+
+      <button type="submit" id="submit-btn" style="padding: 14px; font-size: 15px; border-radius: 10px;">
+        ⚡ Buy {{ network }} Data Now
+      </button>
     </form>
     {% else %}
-    <p>No data plans are available right now.</p>
+    <div style="text-align: center; padding: 30px 10px;">
+      <p style="color: #71717a; margin-bottom: 14px;">No data plans are available for {{ network }} right now.</p>
+      <button type="button" onclick="switchNetwork('MTN')" style="background: #FFC400; color: #09090b; border: none; font-weight: 700; padding: 10px 20px; border-radius: 8px; cursor: pointer;">
+        View MTN Plans
+      </button>
+    </div>
     {% endif %}
   </div>
 </main>
+
 <script>
-  const planSelect = document.querySelector('select[name="plan_code"]');
-  const amountInput = document.getElementById('data-amount');
-  if (planSelect && amountInput) {
-    planSelect.addEventListener('change', () => {
-      amountInput.value = planSelect.options[planSelect.selectedIndex].dataset.amount;
-    });
+  const userBalance = {{ user.wallet_balance|float }};
+  const currentNetwork = "{{ network }}";
+
+  function switchNetwork(net) {
+    if (net === currentNetwork) return;
+    const phoneVal = document.getElementById('phone-input') ? document.getElementById('phone-input').value : '';
+    document.getElementById('network-switch-input').value = net;
+    document.getElementById('network-switch-phone').value = phoneVal;
+    if (navigator.vibrate) navigator.vibrate(15);
+    document.getElementById('network-switch-form').submit();
   }
+
+  function detectNetworkFromPhone(phone) {
+    if (!phone) return null;
+    let clean = phone.replace(/\D/g, '');
+    if (clean.startsWith('234')) clean = '0' + clean.slice(3);
+    if (clean.length < 4) return null;
+    const p4 = clean.slice(0, 4);
+    const p5 = clean.slice(0, 5);
+
+    const mtn = ['0803', '0806', '0703', '0706', '0813', '0816', '0810', '0814', '0903', '0906', '0913', '0916', '0704'];
+    const airtel = ['0802', '0808', '0708', '0812', '0701', '0902', '0901', '0904', '0907', '0912', '0911'];
+    const glo = ['0805', '0807', '0705', '0815', '0811', '0905', '0915'];
+    const etisalat = ['0809', '0817', '0818', '0909', '0908'];
+
+    if (mtn.includes(p4) || p5 === '07025' || p5 === '07026') return 'MTN';
+    if (airtel.includes(p4)) return 'AIRTEL';
+    if (glo.includes(p4)) return 'GLO';
+    if (etisalat.includes(p4)) return '9MOBILE';
+    return null;
+  }
+
+  function handlePhoneInput(phone) {
+    const detected = detectNetworkFromPhone(phone);
+    const badge = document.getElementById('detected-net-badge');
+    if (detected) {
+      if (badge) {
+        badge.style.display = 'inline-block';
+        badge.textContent = `📶 Detected: ${detected}`;
+      }
+      // If detected network differs from current and user typed a full prefix, suggest/auto switch
+      if (detected !== currentNetwork && phone.replace(/\D/g, '').length >= 4) {
+        // Only auto-switch once if freshly typed
+        if (!sessionStorage.getItem('waj_switched_for_' + phone.slice(0, 4))) {
+          sessionStorage.setItem('waj_switched_for_' + phone.slice(0, 4), '1');
+          switchNetwork(detected);
+        }
+      }
+    } else {
+      if (badge) badge.style.display = 'none';
+    }
+  }
+
+  function handlePlanSelect(selectEl) {
+    const selectedOption = selectEl.options[selectEl.selectedIndex];
+    const amount = parseFloat(selectedOption.dataset.amount) || 0;
+    document.getElementById('data-amount').value = amount;
+    updateBalanceCalculation(amount);
+    if (navigator.vibrate) navigator.vibrate(15);
+  }
+
+  function updateBalanceCalculation(amt) {
+    const costSpan = document.getElementById('calc-cost');
+    const remSpan = document.getElementById('calc-remaining');
+    const card = document.getElementById('balance-calc-card');
+    const statusLabel = document.getElementById('calc-status-label');
+    const errMsg = document.getElementById('calc-insufficient-msg');
+    const submitBtn = document.getElementById('submit-btn');
+
+    costSpan.textContent = '₦' + amt.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+    if (amt > 0) {
+      const remaining = userBalance - amt;
+      if (remaining < 0) {
+        card.classList.add('insufficient');
+        card.classList.remove('sufficient');
+        statusLabel.textContent = 'Shortfall:';
+        remSpan.style.color = '#dc2626';
+        remSpan.textContent = '-₦' + Math.abs(remaining).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        errMsg.style.display = 'block';
+        submitBtn.disabled = true;
+        submitBtn.style.opacity = '0.6';
+        submitBtn.textContent = '⚠️ Insufficient Wallet Balance';
+      } else {
+        card.classList.add('sufficient');
+        card.classList.remove('insufficient');
+        statusLabel.textContent = 'Balance After:';
+        remSpan.style.color = '#16a34a';
+        remSpan.textContent = '₦' + remaining.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        errMsg.style.display = 'none';
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = '1';
+        submitBtn.textContent = '⚡ Buy ' + currentNetwork + ' Data Now';
+      }
+    } else {
+      card.classList.remove('insufficient');
+      card.classList.remove('sufficient');
+      statusLabel.textContent = 'Balance After Purchase:';
+      remSpan.style.color = '#16a34a';
+      remSpan.textContent = '₦' + userBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      errMsg.style.display = 'none';
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '1';
+      submitBtn.textContent = '⚡ Buy ' + currentNetwork + ' Data Now';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    const p = document.getElementById('phone-input');
+    if (p && p.value) {
+      const detected = detectNetworkFromPhone(p.value);
+      const badge = document.getElementById('detected-net-badge');
+      if (detected && badge) {
+        badge.style.display = 'inline-block';
+        badge.textContent = `📶 Line: ${detected}`;
+      }
+    }
+  });
 </script>
 {% endblock %}
+
