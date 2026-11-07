@@ -14,24 +14,43 @@
   </div>
 
   <div class="form-card" style="max-width: 620px; margin: 0 auto;">
-    <!-- 1. VISUAL NETWORK SELECTOR -->
-    <label style="margin-bottom: 8px;">Select Network</label>
-    <div class="network-pills-grid">
-      <div class="network-pill {{ 'active' if network == 'MTN' else '' }}" data-network="MTN" onclick="switchNetwork('MTN')">
-        <strong style="font-size: 15px; color: #000000; font-family: 'Space Grotesk', sans-serif;">MTN</strong>
-        <span class="network-pill-badge" style="background: #eab308; color: #000000;">Fast 4G/5G</span>
+    <!-- 1. OPAY/PALMPAY STYLE CARRIER SELECTOR -->
+    <label style="margin-bottom: 12px; display: block; font-size: 12px; font-weight: 700; color: #71717a; text-transform: uppercase;">Select Network</label>
+    <div class="carrier-picker-row">
+      <!-- MTN -->
+      <div class="carrier-item {{ 'active' if network == 'MTN' else '' }}" data-network="MTN" onclick="switchNetwork('MTN')">
+        <div class="carrier-avatar-wrapper">
+          <span style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 900; letter-spacing: -0.5px;">MTN</span>
+          <span class="carrier-check-badge">✓</span>
+        </div>
+        <span class="carrier-label">MTN</span>
       </div>
-      <div class="network-pill {{ 'active' if network == 'AIRTEL' else '' }}" data-network="AIRTEL" onclick="switchNetwork('AIRTEL')">
-        <strong style="font-size: 15px; color: #dc2626; font-family: 'Space Grotesk', sans-serif;">Airtel</strong>
-        <span class="network-pill-badge" style="background: #fee2e2; color: #dc2626;">SME & Direct</span>
+
+      <!-- Airtel -->
+      <div class="carrier-item {{ 'active' if network == 'AIRTEL' else '' }}" data-network="AIRTEL" onclick="switchNetwork('AIRTEL')">
+        <div class="carrier-avatar-wrapper">
+          <span style="font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 900; letter-spacing: -0.5px;">airtel</span>
+          <span class="carrier-check-badge">✓</span>
+        </div>
+        <span class="carrier-label">Airtel</span>
       </div>
-      <div class="network-pill {{ 'active' if network == 'GLO' else '' }}" data-network="GLO" onclick="switchNetwork('GLO')">
-        <strong style="font-size: 15px; color: #16a34a; font-family: 'Space Grotesk', sans-serif;">Glo</strong>
-        <span class="network-pill-badge" style="background: #dcfce7; color: #16a34a;">Heavy Data</span>
+
+      <!-- Glo -->
+      <div class="carrier-item {{ 'active' if network == 'GLO' else '' }}" data-network="GLO" onclick="switchNetwork('GLO')">
+        <div class="carrier-avatar-wrapper">
+          <span style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 900; letter-spacing: -0.5px;">glo</span>
+          <span class="carrier-check-badge">✓</span>
+        </div>
+        <span class="carrier-label">Glo</span>
       </div>
-      <div class="network-pill {{ 'active' if network == '9MOBILE' else '' }}" data-network="9MOBILE" onclick="switchNetwork('9MOBILE')">
-        <strong style="font-size: 15px; color: #047857; font-family: 'Space Grotesk', sans-serif;">9mobile</strong>
-        <span class="network-pill-badge" style="background: #ecfdf5; color: #047857;">Instant Auto</span>
+
+      <!-- 9mobile -->
+      <div class="carrier-item {{ 'active' if network == '9MOBILE' else '' }}" data-network="9MOBILE" onclick="switchNetwork('9MOBILE')">
+        <div class="carrier-avatar-wrapper">
+          <span style="font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 900; letter-spacing: -0.5px;">9mobile</span>
+          <span class="carrier-check-badge">✓</span>
+        </div>
+        <span class="carrier-label">9mobile</span>
       </div>
     </div>
 

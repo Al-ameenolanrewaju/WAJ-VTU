@@ -1895,57 +1895,118 @@
     color: var(--indigo);
   }
 
-  /* Network Pills Selector */
-  .network-pills-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin-bottom: 20px;
+  /* OPay / PalmPay Style Circular Carrier Picker */
+  .carrier-picker-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 6px 0;
   }
-  @media (max-width: 480px) {
-    .network-pills-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-  .network-pill {
-    position: relative;
-    padding: 12px 8px;
-    border-radius: var(--radius-md);
-    border: 2px solid var(--border);
-    background: #ffffff;
-    cursor: pointer;
-    text-align: center;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  .carrier-item {
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    cursor: pointer;
     user-select: none;
+    transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    background: transparent;
+    border: none;
+    padding: 4px 0;
   }
-  .network-pill:hover {
-    border-color: #cbd5e1;
+  .carrier-item:hover {
     transform: translateY(-2px);
   }
-  .network-pill.active {
-    border-width: 2.5px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
-    transform: scale(1.02);
+  .carrier-avatar-wrapper {
+    position: relative;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  .network-pill[data-network="MTN"].active {
-    border-color: #eab308;
-    background: #fefce8;
+  @media (max-width: 480px) {
+    .carrier-avatar-wrapper {
+      width: 46px;
+      height: 46px;
+    }
   }
-  .network-pill[data-network="AIRTEL"].active {
-    border-color: #ef4444;
-    background: #fef2f2;
+
+  /* Specific Network Avatar Colors */
+  .carrier-item[data-network="MTN"] .carrier-avatar-wrapper {
+    background: #FFC400;
+    color: #000000;
   }
-  .network-pill[data-network="GLO"].active {
-    border-color: #22c55e;
-    background: #f0fdf4;
+  .carrier-item[data-network="AIRTEL"] .carrier-avatar-wrapper {
+    background: #ED1C24;
+    color: #FFFFFF;
   }
-  .network-pill[data-network="9MOBILE"].active {
-    border-color: #047857;
-    background: #ecfdf5;
+  .carrier-item[data-network="GLO"] .carrier-avatar-wrapper {
+    background: #00843D;
+    color: #FFFFFF;
+  }
+  .carrier-item[data-network="9MOBILE"] .carrier-avatar-wrapper {
+    background: #006837;
+    color: #FFFFFF;
+  }
+
+  /* Active Carrier Ring & Shadow */
+  .carrier-item.active .carrier-avatar-wrapper {
+    transform: scale(1.08);
+  }
+  .carrier-item[data-network="MTN"].active .carrier-avatar-wrapper {
+    box-shadow: 0 0 0 2.5px #ffffff, 0 0 0 5px #FFC400, 0 8px 18px rgba(255, 196, 0, 0.4);
+  }
+  .carrier-item[data-network="AIRTEL"].active .carrier-avatar-wrapper {
+    box-shadow: 0 0 0 2.5px #ffffff, 0 0 0 5px #ED1C24, 0 8px 18px rgba(237, 28, 36, 0.35);
+  }
+  .carrier-item[data-network="GLO"].active .carrier-avatar-wrapper {
+    box-shadow: 0 0 0 2.5px #ffffff, 0 0 0 5px #00843D, 0 8px 18px rgba(0, 132, 61, 0.35);
+  }
+  .carrier-item[data-network="9MOBILE"].active .carrier-avatar-wrapper {
+    box-shadow: 0 0 0 2.5px #ffffff, 0 0 0 5px #006837, 0 8px 18px rgba(0, 104, 55, 0.35);
+  }
+
+  /* Active Top-Right Mini Checkmark Badge */
+  .carrier-check-badge {
+    display: none;
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: #16a34a;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 17px;
+    text-align: center;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  }
+  .carrier-item.active .carrier-check-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Carrier Name Label */
+  .carrier-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #71717a;
+    margin-top: 7px;
+    transition: color 0.15s ease;
+  }
+  .carrier-item.active .carrier-label {
+    color: #09090b;
+    font-weight: 800;
   }
 
   /* Balance Calculation & Difference Card */
