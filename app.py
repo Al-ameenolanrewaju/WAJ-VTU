@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from markupsafe import escape
 from sqlalchemy import inspect, text, func, or_
-from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort, Response
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, abort, Response, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from models import (
@@ -274,6 +274,14 @@ def track_visitor_traffic():
 
 
 # --- WEB PUSH API ROUTES ---
+
+@app.route("/service-worker.js")
+def service_worker_root():
+    response = send_from_directory("static", "service-worker.js", mimetype="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
 @app.route("/api/push/vapid-public-key", methods=["GET"])
 def api_push_vapid_key():
     from services.push_service import get_vapid_public_key
@@ -652,6 +660,7 @@ def add_security_headers(response):
     frame_ancestor = "'self'" if is_form_popup else "'none'"
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
+        "worker-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.googletagmanager.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
@@ -664,6 +673,9 @@ def add_security_headers(response):
         "form-action 'self' https://wajvtu.com.ng https://checkout.paystack.com; "
         "upgrade-insecure-requests"
     )
+    if request.path.endswith("service-worker.js"):
+        response.headers['Service-Worker-Allowed'] = '/'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return response
 
 

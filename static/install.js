@@ -1,12 +1,13 @@
+// --- PWA INSTALL PROMPT ---
+let deferredPrompt = null;
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/static/service-worker.js').catch(() => {
-      // Ignore service worker registration failures; the app still works as a normal web app.
+    navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch(() => {
+      navigator.serviceWorker.register('/static/service-worker.js').catch(() => {});
     });
   });
 }
-
-let deferredPrompt = null;
 
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
@@ -47,6 +48,35 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function getOrRegisterServiceWorker() {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    let reg = await navigator.serviceWorker.getRegistration('/');
+    if (!reg) {
+      reg = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+    }
+    await navigator.serviceWorker.ready;
+    return reg;
+  } catch (err) {
+    try {
+      const reg = await navigator.serviceWorker.register('/static/service-worker.js');
+      await navigator.serviceWorker.ready;
+      return reg;
+    } catch (e) {
+      return null;
+    }
+  }
+}
+
 async function subscribeUserToPush() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     return false;
@@ -57,19 +87,27 @@ async function subscribeUserToPush() {
       return false;
     }
 
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await getOrRegisterServiceWorker();
+    if (!reg) return false;
+
     let sub = await reg.pushManager.getSubscription();
 
     if (!sub) {
+      let vapidPublicKey = '';
       const keyMeta = document.querySelector('meta[name="vapid-public-key"]');
-      let vapidPublicKey = keyMeta ? keyMeta.content : '';
+      if (keyMeta && keyMeta.content) {
+        vapidPublicKey = keyMeta.content.trim();
+      }
       if (!vapidPublicKey) {
         const keyResp = await fetch('/api/push/vapid-public-key');
         const keyData = await keyResp.json();
         vapidPublicKey = keyData.publicKey;
       }
 
-      if (!vapidPublicKey) return false;
+      if (!vapidPublicKey) {
+        console.warn('[push] VAPID public key not found');
+        return false;
+      }
 
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -77,15 +115,29 @@ async function subscribeUserToPush() {
       });
     }
 
-    await fetch('/api/push/subscribe', {
+    const rawJson = sub.toJSON ? sub.toJSON() : {};
+    const p256dhKey = sub.getKey ? sub.getKey('p256dh') : null;
+    const authKey = sub.getKey ? sub.getKey('auth') : null;
+
+    const payload = {
+      endpoint: sub.endpoint,
+      keys: {
+        p256dh: (rawJson.keys && rawJson.keys.p256dh) || (p256dhKey ? arrayBufferToBase64(p256dhKey) : ''),
+        auth: (rawJson.keys && rawJson.keys.auth) || (authKey ? arrayBufferToBase64(authKey) : ''),
+      }
+    };
+
+    const resp = await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sub),
+      body: JSON.stringify(payload),
     });
 
-    return true;
+    const resJson = await resp.json().catch(() => ({}));
+    console.log('[push] Subscription status:', resJson);
+    return resp.ok;
   } catch (err) {
-    console.warn('Push subscription failed:', err);
+    console.warn('[push] Push subscription error:', err);
     return false;
   }
 }
@@ -120,8 +172,15 @@ function initPushNotificationPrompt() {
       const enableBtn = document.getElementById('push-enable-btn');
       if (enableBtn) {
         enableBtn.addEventListener('click', async () => {
-          banner.remove();
-          await subscribeUserToPush();
+          enableBtn.disabled = true;
+          enableBtn.textContent = 'Enabling...';
+          const success = await subscribeUserToPush();
+          if (success) {
+            enableBtn.textContent = 'Alerts Active! 🔔';
+            setTimeout(() => banner.remove(), 1200);
+          } else {
+            banner.remove();
+          }
         });
       }
 
@@ -132,8 +191,15 @@ function initPushNotificationPrompt() {
           banner.remove();
         });
       }
-    }, 4000);
+    }, 3000);
   }
 }
 
-window.addEventListener('load', initPushNotificationPrompt);
+window.addEventListener('load', () => {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    // Automatically keep push subscription in sync if user already allowed
+    subscribeUserToPush().catch(() => {});
+  } else {
+    initPushNotificationPrompt();
+  }
+});
