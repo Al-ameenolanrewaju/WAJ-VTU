@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waj-vtu-v1';
+const CACHE_NAME = 'waj-vtu-v2';
 const ASSETS = [
   '/',
   '/static/manifest.webmanifest',
@@ -23,23 +23,47 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
+  const url = new URL(event.request.url);
 
-      return fetch(event.request).then((response) => {
-        if (!response || response.status !== 200 || response.type !== 'basic') {
+  // 1. Never intercept external third-party requests (Google Fonts, CDNs, Analytics)
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  // 2. Never intercept API calls, dynamic pages, admin dashboard, or auth endpoints
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/admin') ||
+    url.pathname.startsWith('/auth/') ||
+    url.pathname.startsWith('/buy/')
+  ) {
+    return;
+  }
+
+  // 3. For same-origin static assets: cache-first with network fallback
+  if (url.pathname.startsWith('/static/')) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        if (cached) return cached;
+        return fetch(event.request).then((response) => {
+          if (!response || response.status !== 200 || response.type !== 'basic') {
+            return response;
+          }
+          const cloned = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
           return response;
-        }
+        });
+      })
+    );
+    return;
+  }
 
-        const cloned = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
-        return response;
-      }).catch(() => caches.match('/'));
-    })
-  );
+  // 4. For page navigations: network first with offline fallback to cached home
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match('/'))
+    );
+  }
 });
 
 
@@ -50,7 +74,7 @@ self.addEventListener('push', (event) => {
     try {
       data = event.data.json();
     } catch (e) {
-      data = { title: 'WAJ VTU Alert 🚀', body: event.data.text() };
+      data = { title: 'WAJ VTU Deal Alert 🚀', body: event.data.text() };
     }
   }
 

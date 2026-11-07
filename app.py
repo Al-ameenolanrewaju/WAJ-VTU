@@ -721,7 +721,7 @@ def add_security_headers(response):
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: https://www.google-analytics.com https://www.googletagmanager.com; "
-        "connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; "
+        "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; "
         "frame-src 'self' https://lookerstudio.google.com https://datastudio.google.com; "
         "object-src 'none'; "
         "base-uri 'self'; "

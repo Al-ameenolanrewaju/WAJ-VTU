@@ -340,6 +340,9 @@
   function closeMoreSheet() {
     var sheet = document.getElementById('site-more-sheet');
     var moreBtn = document.getElementById('bnav-more-btn');
+    if (document.activeElement && sheet && sheet.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
     if (sheet) {
       sheet.classList.remove('open');
       sheet.setAttribute('aria-hidden', 'true');
