@@ -155,13 +155,18 @@ def generate_status_poster(network, plan_name, price, validity="30 Days", websit
     subtag_font = _get_font(24)
     draw.text((width / 2, card_y1 + 145), theme["tag"], fill="#a1a1aa", font=subtag_font, anchor="mm")
 
-    # Plan Size Text (e.g. "5GB")
-    plan_font = _get_font(130)
+    # Plan Size Text (e.g. "5GB" or "Weekend Mega Promo")
     clean_plan = str(plan_name or "DATA").strip()
+    if len(clean_plan) > 22:
+        plan_font = _get_font(52)
+    elif len(clean_plan) > 12:
+        plan_font = _get_font(76)
+    else:
+        plan_font = _get_font(128)
     draw.text((width / 2, card_y1 + 290), clean_plan, fill="#ffffff", font=plan_font, anchor="mm")
 
     # Validity badge
-    val_font = _get_font(32)
+    val_font = _get_font(30)
     draw.text((width / 2, card_y1 + 400), f"⏳ Valid for {validity}", fill="#93c5fd", font=val_font, anchor="mm")
 
     # Price Box
@@ -180,14 +185,16 @@ def generate_status_poster(network, plan_name, price, validity="30 Days", websit
         width=3
     )
 
+    raw_p = str(price or "").strip()
     try:
-        price_num = float(price or 0)
-        price_str = f"₦{price_num:,.0f}"
+        clean_num = float(raw_p.replace("₦", "").replace(",", ""))
+        price_str = f"₦{clean_num:,.0f}"
     except (ValueError, TypeError):
-        price_str = f"₦{price}"
+        price_str = raw_p if (raw_p.startswith("₦") or not any(c.isdigit() for c in raw_p)) else f"₦{raw_p}"
 
+    p_font_size = 52 if len(price_str) > 15 else 72
     draw.text((width / 2, pbox_y1 + 45), "SPECIAL DISCOUNT PRICE", fill="#71717a", font=_get_font(22), anchor="mm")
-    draw.text((width / 2, pbox_y1 + 105), price_str, fill="#22c55e", font=_get_font(72), anchor="mm")
+    draw.text((width / 2, pbox_y1 + 105), price_str, fill="#22c55e", font=_get_font(p_font_size), anchor="mm")
 
     # Features list
     feats_y = card_y1 + 685
@@ -286,8 +293,15 @@ def generate_square_poster(network, plan_name, price, validity="30 Days", websit
     draw.rounded_rectangle((nb_x - int(net_badge_w/2), nb_y - int(net_badge_h/2), nb_x + int(net_badge_w/2), nb_y + int(net_badge_h/2)), radius=14, fill=theme["primary"])
     draw.text((nb_x, nb_y), net_key, fill=theme["text_color"], font=_get_font(30), anchor="mm")
 
-    # Big Plan Size (e.g. "5GB")
-    draw.text((width / 2, card_y1 + 175), str(plan_name or "DATA").strip(), fill="#ffffff", font=_get_font(110), anchor="mm")
+    # Big Plan Size (e.g. "5GB" or "Weekend Mega Promo")
+    clean_plan = str(plan_name or "DATA").strip()
+    if len(clean_plan) > 22:
+        plan_font = _get_font(48)
+    elif len(clean_plan) > 12:
+        plan_font = _get_font(72)
+    else:
+        plan_font = _get_font(110)
+    draw.text((width / 2, card_y1 + 175), clean_plan, fill="#ffffff", font=plan_font, anchor="mm")
     draw.text((width / 2, card_y1 + 265), f"⏳ Valid for {validity} • 4G/5G All Devices", fill="#93c5fd", font=_get_font(26), anchor="mm")
 
     # Price Box inside card
@@ -300,14 +314,16 @@ def generate_square_poster(network, plan_name, price, validity="30 Days", websit
 
     draw.rounded_rectangle((pbox_x1, pbox_y1, pbox_x2, pbox_y2), radius=18, fill="#09090b", outline=theme["primary"], width=3)
 
+    raw_p = str(price or "").strip()
     try:
-        price_num = float(price or 0)
-        price_str = f"₦{price_num:,.0f}"
+        clean_num = float(raw_p.replace("₦", "").replace(",", ""))
+        price_str = f"₦{clean_num:,.0f}"
     except (ValueError, TypeError):
-        price_str = f"₦{price}"
+        price_str = raw_p if (raw_p.startswith("₦") or not any(c.isdigit() for c in raw_p)) else f"₦{raw_p}"
 
+    p_font_size = 46 if len(price_str) > 15 else 60
     draw.text((width / 2, pbox_y1 + 35), "EXCLUSIVE PROMO PRICE", fill="#71717a", font=_get_font(20), anchor="mm")
-    draw.text((width / 2, pbox_y1 + 90), price_str, fill="#22c55e", font=_get_font(60), anchor="mm")
+    draw.text((width / 2, pbox_y1 + 90), price_str, fill="#22c55e", font=_get_font(p_font_size), anchor="mm")
 
     # Bullets inside card
     draw.text((width / 2, card_y1 + 515), "⚡ 10-Second Auto Delivery  •  🔒 100% Reliable", fill="#e4e4e7", font=_get_font(24), anchor="mm")
