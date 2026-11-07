@@ -31,6 +31,33 @@ def create_user_notification(user_id, title, message, notification_type="SYSTEM"
         return None
 
 
+def broadcast_user_notification(title, message, notification_type="PROMO", link_url=None):
+    """Broadcasts an in-app notification to all registered website users."""
+    from models import User
+    try:
+        users = User.query.filter(User.email.isnot(None)).all()
+        notifs = []
+        for u in users:
+            notifs.append(
+                UserNotification(
+                    user_id=u.id,
+                    title=str(title).strip()[:150],
+                    message=str(message).strip() if message else "",
+                    notification_type=str(notification_type or "PROMO").upper(),
+                    link_url=str(link_url)[:255] if link_url else None,
+                    is_read=False,
+                )
+            )
+        if notifs:
+            db.session.bulk_save_objects(notifs)
+            db.session.commit()
+        return len(notifs)
+    except Exception as exc:
+        db.session.rollback()
+        logger.error(f"[user_notifications] Error broadcasting notification: {exc}")
+        return 0
+
+
 def get_user_notifications(user_id, limit=20):
     """Retrieves the recent notifications and unread count for a user."""
     if not user_id:

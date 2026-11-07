@@ -60,6 +60,88 @@ def _marketing_subnav(active_subpage):
     return html
 
 
+def _render_attribution_dashboard(attribution_data):
+    summary = attribution_data["summary"]
+    channels = attribution_data["channels"]
+
+    ch_cards = ""
+    for ch in channels:
+        ch_cards += f"""
+        <div style="background:{ch['bg']}; border:1px solid {ch['border']}; border-radius:12px; padding:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:20px;">{ch['icon']}</span>
+                    <strong style="font-size:13px; color:#09090b;">{ch['name']}</strong>
+                </div>
+                <span style="font-size:11px; font-weight:700; color:{ch['color']}; background:#ffffff; padding:2px 8px; border-radius:12px; border:1px solid {ch['border']};">
+                    {ch['conversion_rate']}% conv
+                </span>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px;">
+                <div>
+                    <span style="color:#71717a;">Clicks:</span>
+                    <div style="font-weight:800; font-size:16px; color:#09090b;">{ch['clicks']}</div>
+                </div>
+                <div>
+                    <span style="color:#71717a;">Signups:</span>
+                    <div style="font-weight:800; font-size:16px; color:#16a34a;">{ch['signups']}</div>
+                </div>
+                <div>
+                    <span style="color:#71717a;">Orders:</span>
+                    <div style="font-weight:700; color:#09090b;">{ch['orders']}</div>
+                </div>
+                <div>
+                    <span style="color:#71717a;">Revenue:</span>
+                    <div style="font-weight:800; color:#16a34a;">₦{ch['revenue']:,.0f}</div>
+                </div>
+            </div>
+        </div>
+        """
+
+    return f"""
+    <div class="card" style="margin-top:24px; background:#ffffff; border:1px solid #e4e4e7; border-radius:14px; padding:22px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+            <div>
+                <h3 style="font-size:17px; font-weight:800; color:#09090b; margin:0 0 4px 0;">🎯 Social Traffic & Revenue Attribution</h3>
+                <p style="font-size:13px; color:#71717a; margin:0;">
+                    Live conversion and sales performance tracked from your WhatsApp, Twitter, Instagram, and Facebook links.
+                </p>
+            </div>
+            <div style="display:flex; gap:12px; font-size:12px;">
+                <span style="background:#f4f4f5; padding:6px 12px; border-radius:8px; font-weight:700; color:#09090b;">
+                    🏆 Top Channel: <strong style="color:#16a34a;">{summary['top_channel']}</strong>
+                </span>
+            </div>
+        </div>
+
+        <!-- 4 Summary Stat Pills -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:18px;">
+            <div style="background:#fafaf9; border:1px solid #e4e4e7; border-radius:10px; padding:12px;">
+                <span style="font-size:11px; text-transform:uppercase; color:#71717a; font-weight:700;">Tracked Social Clicks</span>
+                <div style="font-size:20px; font-weight:800; color:#09090b; margin-top:2px;">{summary['total_clicks']}</div>
+            </div>
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px;">
+                <span style="font-size:11px; text-transform:uppercase; color:#15803d; font-weight:700;">Attributed Signups</span>
+                <div style="font-size:20px; font-weight:800; color:#16a34a; margin-top:2px;">{summary['total_signups']}</div>
+            </div>
+            <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px;">
+                <span style="font-size:11px; text-transform:uppercase; color:#1d4ed8; font-weight:700;">Attributed Orders</span>
+                <div style="font-size:20px; font-weight:800; color:#2563eb; margin-top:2px;">{summary['total_orders']}</div>
+            </div>
+            <div style="background:#fefce8; border:1px solid #fef08a; border-radius:10px; padding:12px;">
+                <span style="font-size:11px; text-transform:uppercase; color:#a16207; font-weight:700;">Total Social Revenue</span>
+                <div style="font-size:20px; font-weight:800; color:#ca8a04; margin-top:2px;">₦{summary['total_revenue']:,.2f}</div>
+            </div>
+        </div>
+
+        <!-- Platforms Grid -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
+            {ch_cards}
+        </div>
+    </div>
+    """
+
+
 # ----------------------------------------------------------------------
 # 1. MAIN MARKETING DASHBOARD
 # ----------------------------------------------------------------------
@@ -78,6 +160,11 @@ def dashboard():
     deals_generated = MarketingContent.query.filter_by(content_type="DAILY_DEAL").count()
     messages_queued = MarketingMessage.query.filter(MarketingMessage.status.in_(["DRAFT", "QUEUED", "APPROVED"])).count()
     today_deal, _ = generate_daily_deal(target_date=get_lagos_today())
+
+    from services.attribution_service import get_social_attribution_metrics
+    attribution_data = get_social_attribution_metrics()
+    attribution_html = _render_attribution_dashboard(attribution_data)
+    summary = attribution_data["summary"]
 
     body = f"""
     {_marketing_subnav('overview')}
@@ -132,7 +219,19 @@ def dashboard():
             <p style="color:#2563eb;">{messages_queued}</p>
             <small>Ready for review/dispatch</small>
         </div>
+        <div class="card">
+            <h3>🎯 Social Signups</h3>
+            <p style="color:#db2777;">{summary['total_signups']}</p>
+            <small>Attributed from campaigns</small>
+        </div>
+        <div class="card">
+            <h3>📊 Social Revenue</h3>
+            <p style="color:#ca8a04;">₦{summary['total_revenue']:,.0f}</p>
+            <small>From attributed users</small>
+        </div>
     </div>
+
+    {attribution_html}
 
     <!-- Quick Sections Grid -->
     <div class="section-grid" style="margin-top:24px;">

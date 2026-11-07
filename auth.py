@@ -312,6 +312,10 @@ def signup():
         existing.password_hash = generate_password_hash(password)
         if name:
             existing.name = name
+        if not getattr(existing, "utm_source", None) and session.get("utm_source"):
+            existing.utm_source = session.get("utm_source")
+            existing.utm_medium = session.get("utm_medium")
+            existing.utm_campaign = session.get("utm_campaign")
         ensure_user_referral_code(existing)
         try:
             db.session.commit()
@@ -336,6 +340,9 @@ def signup():
             email=email,
             password_hash=generate_password_hash(password),
             referral_code=generate_unique_referral_code(),
+            utm_source=session.get("utm_source"),
+            utm_medium=session.get("utm_medium"),
+            utm_campaign=session.get("utm_campaign"),
         )
         db.session.add(user)
         try:

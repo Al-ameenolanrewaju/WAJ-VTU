@@ -221,6 +221,18 @@ def send_daily_deal_push(force=False):
 
     result = broadcast_push(title=title, body=body, url=target_url)
 
+    # Broadcast in-app bell notification to all registered users simultaneously
+    try:
+        from services.user_notification_service import broadcast_user_notification
+        broadcast_user_notification(
+            title=title,
+            message=body,
+            notification_type="PROMO",
+            link_url=target_url,
+        )
+    except Exception as notif_err:
+        logger.warning(f"[push_service] Could not broadcast in-app notification: {notif_err}")
+
     # Mark as sent for today
     set_marketing_setting(setting_key, "true")
 
@@ -280,8 +292,8 @@ def start_daily_push_background_worker(app):
                     from services.marketing_settings import get_marketing_setting, get_setting_bool
                     if get_setting_bool("DAILY_PUSH_ENABLED", True):
                         now_lagos = datetime.now(LAGOS_TZ)
-                        # Broadcast daily deal push between 9:00 AM and 9:00 PM Lagos time
-                        if 9 <= now_lagos.hour <= 21:
+                        # Broadcast daily deal push starting at 8:00 AM Lagos time
+                        if 8 <= now_lagos.hour <= 21:
                             today_str = str(now_lagos.date())
                             already_sent = get_marketing_setting(f"DAILY_PUSH_SENT_{today_str}")
                             if already_sent != "true":

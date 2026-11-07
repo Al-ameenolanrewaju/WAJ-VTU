@@ -20,7 +20,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from models import (
     db, User, Transaction, InboundMessage, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog,
     Referral, ReferralReward, MarketingContent, MarketingCampaign, MarketingMessage, MarketingSetting,
-    SupportTicket, VisitorLog, PushSubscription, UserNotification
+    SupportTicket, VisitorLog, PushSubscription, UserNotification, SocialTrafficClick
 )
 from wallet_service import generate_payment_link, get_payment_fee_percentage
 
@@ -152,6 +152,8 @@ def detect_traffic_source(req):
     utm_source = (req.args.get("utm_source") or req.args.get("source") or "").strip().lower()
     if utm_source:
         name_map = {
+            "whatsapp_status": "WhatsApp Status",
+            "whatsapp_group": "WhatsApp Group",
             "whatsapp": "WhatsApp",
             "wa": "WhatsApp",
             "facebook": "Facebook",
@@ -160,6 +162,7 @@ def detect_traffic_source(req):
             "ig": "Instagram",
             "twitter": "X (Twitter)",
             "x": "X (Twitter)",
+            "web_push": "Web Push Notification",
             "tiktok": "TikTok",
             "google": "Google Ads / Campaign",
             "linkedin": "LinkedIn",
@@ -259,6 +262,27 @@ def track_visitor_traffic():
         session["_v_last_path"] = path
 
         user_id = session.get("user_id")
+
+        req_utm_source = (request.args.get("utm_source") or "").strip().lower()
+        if req_utm_source:
+            session["utm_source"] = req_utm_source[:50]
+            session["utm_medium"] = (request.args.get("utm_medium") or "social").strip()[:50]
+            session["utm_campaign"] = (request.args.get("utm_campaign") or "").strip()[:100]
+            try:
+                import hashlib
+                client_ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
+                ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16] if client_ip else None
+                s_click = SocialTrafficClick(
+                    utm_source=req_utm_source[:50],
+                    utm_medium=session["utm_medium"],
+                    utm_campaign=session["utm_campaign"],
+                    landing_path=path[:250],
+                    ip_hash=ip_hash,
+                    user_id=user_id,
+                )
+                db.session.add(s_click)
+            except Exception:
+                pass
 
         visit = VisitorLog(
             visitor_id=visitor_id,
@@ -440,6 +464,8 @@ def ensure_database_schema():
         PushSubscription.__table__.create(bind=db.engine)
     if "user_notifications" not in existing_tables:
         UserNotification.__table__.create(bind=db.engine)
+    if "social_traffic_clicks" not in existing_tables:
+        SocialTrafficClick.__table__.create(bind=db.engine)
 
     marketing_table_map = {
         "referrals": Referral,
@@ -466,6 +492,9 @@ def ensure_database_schema():
             "referral_code": "VARCHAR(30)",
             "referred_by_id": "INTEGER",
             "push_notifications_enabled": "BOOLEAN NOT NULL DEFAULT TRUE",
+            "utm_source": "VARCHAR(50)",
+            "utm_medium": "VARCHAR(50)",
+            "utm_campaign": "VARCHAR(100)",
         },
         "transactions": {
             "meta_data": json_type,

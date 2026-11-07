@@ -43,6 +43,11 @@ class User(db.Model):
     # Notification & Marketing Preferences (default ON)
     push_notifications_enabled = db.Column(db.Boolean, default=True, server_default=text("true"), nullable=False)
 
+    # Social Campaign & Marketing Attribution
+    utm_source = db.Column(db.String(50), nullable=True, index=True)
+    utm_medium = db.Column(db.String(50), nullable=True)
+    utm_campaign = db.Column(db.String(100), nullable=True)
+
     # Concurrency control to prevent balance race conditions
     version_id = db.Column(db.Integer, nullable=False, default=1)
 
@@ -378,4 +383,21 @@ class UserNotification(db.Model):
 
     def __repr__(self):
         return f"<UserNotification #{self.id} for User #{self.user_id}: {self.title}>"
+
+
+class SocialTrafficClick(db.Model):
+    __tablename__ = 'social_traffic_clicks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    utm_source = db.Column(db.String(50), nullable=False, index=True)
+    utm_medium = db.Column(db.String(50), default="social")
+    utm_campaign = db.Column(db.String(100), nullable=True, index=True)
+    landing_path = db.Column(db.String(255), default="/")
+    ip_hash = db.Column(db.String(64), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<SocialTrafficClick #{self.id}: {self.utm_source} -> {self.landing_path}>"
+
 
