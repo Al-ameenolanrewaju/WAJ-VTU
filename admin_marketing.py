@@ -317,6 +317,9 @@ def daily_deals():
                 <button type="button" id="copy-caption-btn" onclick="copyCaption()" style="background:#ffc400; color:#090909; padding:10px 18px; font-size:13px; font-weight:700; border-radius:8px; border:none; cursor:pointer;">
                     📋 COPY CAPTION
                 </button>
+                <a href="/admin/marketing/daily-deals/poster/{today_deal.id}" target="_blank" download="waj-vtu-{today_deal.network.lower()}-promo.png" style="background:#10b981; color:#ffffff; padding:10px 18px; font-size:13px; font-weight:700; border-radius:8px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                    🎨 DOWNLOAD STATUS POSTER
+                </a>
                 <form method="POST" action="/admin/marketing/daily-deals/regenerate" style="display:inline;">
                     <button type="submit" style="background:#090909; color:#ffffff; padding:10px 18px; font-size:13px; font-weight:600; border-radius:8px; border:none; cursor:pointer;">
                         🔄 REGENERATE
@@ -1093,3 +1096,34 @@ def push_daily_deal_route():
     else:
         flash(f"Daily push skipped or error: {res.get('reason', 'Unknown error')}", "error")
     return redirect(url_for("marketing_admin.push_dashboard"))
+
+@marketing_admin_bp.route("/daily-deals/poster/<int:deal_id>")
+@marketing_admin_bp.route("/daily-deals/poster")
+def download_deal_poster(deal_id=None):
+    require_admin_auth, _, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from flask import send_file, abort
+    from models import MarketingContent
+    from services.poster_service import generate_status_poster
+    from services.deal_service import get_lagos_today
+
+    if deal_id:
+        deal = db.session.get(MarketingContent, deal_id)
+    else:
+        deal = MarketingContent.query.filter_by(content_type="DAILY_DEAL", target_date=get_lagos_today()).first()
+
+    if not deal:
+        abort(404)
+
+    buf = generate_status_poster(
+        network=deal.network or "MTN",
+        plan_name=deal.data_size or deal.plan_name or "5GB",
+        price=deal.price or 0,
+        validity=deal.validity or "30 Days",
+        website_url=request.host_url,
+    )
+    clean_net = (deal.network or "network").lower()
+    return send_file(buf, mimetype="image/png", as_attachment=True, download_name=f"waj-vtu-{clean_net}-status-deal.png")

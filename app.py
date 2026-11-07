@@ -20,7 +20,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from models import (
     db, User, Transaction, InboundMessage, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog,
     Referral, ReferralReward, MarketingContent, MarketingCampaign, MarketingMessage, MarketingSetting,
-    SupportTicket, VisitorLog, PushSubscription
+    SupportTicket, VisitorLog, PushSubscription, UserNotification
 )
 from wallet_service import generate_payment_link, get_payment_fee_percentage
 
@@ -278,6 +278,37 @@ def track_visitor_traffic():
         app.logger.debug(f"[visitor_log] Could not record visit: {exc}")
 
 
+
+
+# --- IN-APP USER NOTIFICATION API ROUTES ---
+@app.route("/api/notifications", methods=["GET"])
+def api_get_notifications():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"unread_count": 0, "notifications": []})
+    from services.user_notification_service import get_user_notifications
+    return jsonify(get_user_notifications(user_id=user_id, limit=20))
+
+
+@app.route("/api/notifications/read/<int:notification_id>", methods=["POST"])
+def api_mark_notification_read(notification_id):
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"status": "error", "message": "Login required"}), 401
+    from services.user_notification_service import mark_notification_as_read
+    success = mark_notification_as_read(notification_id=notification_id, user_id=user_id)
+    return jsonify({"status": "success" if success else "error"})
+
+
+@app.route("/api/notifications/read-all", methods=["POST"])
+def api_mark_all_notifications_read():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"status": "error", "message": "Login required"}), 401
+    from services.user_notification_service import mark_all_notifications_as_read
+    mark_all_notifications_as_read(user_id=user_id)
+    return jsonify({"status": "success"})
+
 # --- WEB PUSH API ROUTES ---
 
 @app.route("/service-worker.js")
@@ -407,6 +438,8 @@ def ensure_database_schema():
         VisitorLog.__table__.create(bind=db.engine)
     if "push_subscriptions" not in existing_tables:
         PushSubscription.__table__.create(bind=db.engine)
+    if "user_notifications" not in existing_tables:
+        UserNotification.__table__.create(bind=db.engine)
 
     marketing_table_map = {
         "referrals": Referral,
@@ -923,6 +956,17 @@ def reconcile_successful_deposit(user, tx, net_credit, paid_gross, data):
     tx.status = "SUCCESS"
     tx.description = f"Paystack deposit; gross paid NGN {paid_gross:,.2f}"
     tx.meta_data = meta
+    try:
+        from services.user_notification_service import create_user_notification
+        create_user_notification(
+            user.id,
+            "Wallet Credited Successfully 💰",
+            f"₦{Decimal(str(net_credit)):,.2f} has been added to your wallet via Paystack.",
+            "WALLET_CREDIT",
+            "/transactions"
+        )
+    except Exception:
+        pass
     db.session.commit()
     return True
 

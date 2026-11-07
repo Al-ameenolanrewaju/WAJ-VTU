@@ -362,3 +362,20 @@ class PushSubscription(db.Model):
         auth_status = f"User #{self.user_id}" if self.user_id else "Guest"
         return f"<PushSubscription {self.endpoint[:30]}... ({auth_status})>"
 
+class UserNotification(db.Model):
+    __tablename__ = 'user_notifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    title = db.Column(db.String(150), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    notification_type = db.Column(db.String(40), default="SYSTEM", nullable=False)
+    link_url = db.Column(db.String(255), nullable=True)
+    is_read = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+
+    user = db.relationship('User', backref=db.backref('notifications', lazy='dynamic', cascade='all, delete-orphan'))
+
+    def __repr__(self):
+        return f"<UserNotification #{self.id} for User #{self.user_id}: {self.title}>"
+

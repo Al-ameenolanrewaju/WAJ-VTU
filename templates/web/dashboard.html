@@ -38,6 +38,11 @@
   document.getElementById("purchase-receipt")?.addEventListener("click", function (e) {
     if (e.target === this) closeReceipt();
   });
+  window.addEventListener('load', function() {
+    setTimeout(function() {
+      if (typeof playSuccessChime === 'function') playSuccessChime();
+    }, 400);
+  });
 </script>
 {% endif %}
 

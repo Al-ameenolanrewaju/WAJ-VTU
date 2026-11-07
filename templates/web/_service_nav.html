@@ -39,6 +39,31 @@
         <span class="pill-add">＋</span>
       </a>
 
+      <!-- In-App Notification Bell & Dropdown -->
+      <div class="nav-notif-container" style="position: relative;">
+        <button type="button" id="nav-notif-bell" onclick="toggleNotificationMenu(event)" aria-label="Notifications" style="background: transparent; border: 1px solid var(--border); border-radius: 50%; width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; position: relative; font-size: 16px;">
+          🔔
+          <span id="nav-notif-count" style="display: none; position: absolute; top: -3px; right: -3px; background: #dc2626; color: #ffffff; font-size: 10px; font-weight: 800; border-radius: 10px; min-width: 17px; height: 17px; line-height: 17px; text-align: center; padding: 0 4px; box-shadow: 0 2px 5px rgba(220,38,38,0.5);">0</span>
+        </button>
+
+        <!-- Dropdown Inbox Menu -->
+        <div id="nav-notif-box" style="display: none; position: absolute; right: 0; top: 48px; width: 340px; max-width: 90vw; background: #ffffff; border: 1px solid #e4e4e7; border-radius: 14px; box-shadow: 0 12px 35px rgba(0,0,0,0.15); z-index: 1000; overflow: hidden; font-family: 'Inter', sans-serif;">
+          <div style="padding: 12px 16px; border-bottom: 1px solid #f4f4f5; display: flex; justify-content: space-between; align-items: center; background: #fafafa;">
+            <div style="font-weight: 700; font-size: 13px; color: #09090b; display: flex; align-items: center; gap: 6px;">
+              <span>🔔 Notifications</span>
+              <button type="button" onclick="playSuccessChime();" title="Test sound chime" style="background: transparent; border: none; font-size: 12px; cursor: pointer;">🔊</button>
+            </div>
+            <button type="button" onclick="markAllNotificationsAsRead()" style="background: transparent; border: none; color: #2563eb; font-size: 11px; font-weight: 600; cursor: pointer;">Mark all read</button>
+          </div>
+          <div id="nav-notif-list" style="max-height: 360px; overflow-y: auto; padding: 4px 0;">
+            <div style="text-align: center; padding: 24px; color: #a1a1aa; font-size: 12px;">Loading notifications...</div>
+          </div>
+          <div style="padding: 8px 14px; border-top: 1px solid #f4f4f5; text-align: center; background: #fafafa;">
+            <a href="{{ url_for('web.transactions_page') }}" style="font-size: 11px; color: #64748b; font-weight: 600;">View Transaction History →</a>
+          </div>
+        </div>
+      </div>
+
       <div class="nav-user-cluster">
         {% if is_admin or session.get('is_admin') or (user and user.is_admin) %}
         <a class="nav-admin-badge" href="{{ url_for('admin_dashboard') }}" title="Admin Control Panel" style="margin-right: 4px;">🛠️ Admin</a>
@@ -471,5 +496,144 @@
       closeProfileModal();
       closeSettingsModal();
     }
+  });
+
+  // --- IN-APP NOTIFICATIONS & AUDIO CHIME ---
+  function playSuccessChime() {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      const now = ctx.currentTime;
+
+      // Tone 1: C6 (1046.5 Hz)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(1046.5, now);
+      gain1.gain.setValueAtTime(0, now);
+      gain1.gain.linearRampToValueAtTime(0.22, now + 0.03);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.33);
+
+      // Tone 2: G6 (1567.98 Hz)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(1567.98, now + 0.11);
+      gain2.gain.setValueAtTime(0, now + 0.11);
+      gain2.gain.linearRampToValueAtTime(0.28, now + 0.14);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.11);
+      osc2.stop(now + 0.53);
+    } catch (e) {
+      // Audio not supported / allowed; fail silently
+    }
+  }
+  window.playSuccessChime = playSuccessChime;
+
+  async function loadUserNotifications() {
+    try {
+      const resp = await fetch('/api/notifications');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const badge = document.getElementById('nav-notif-count');
+      const list = document.getElementById('nav-notif-list');
+
+      if (badge) {
+        if (data.unread_count > 0) {
+          badge.textContent = data.unread_count > 9 ? '9+' : data.unread_count;
+          badge.style.display = 'block';
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+
+      if (list) {
+        if (!data.notifications || data.notifications.length === 0) {
+          list.innerHTML = '<div style="text-align: center; padding: 28px 16px; color: #a1a1aa; font-size: 12px;"><span style="font-size:24px; display:block; margin-bottom:4px;">✨</span>All caught up! No notifications yet.</div>';
+          return;
+        }
+
+        const icons = {
+          'WALLET_CREDIT': '💰',
+          'PURCHASE_SUCCESS': '⚡',
+          'REFERRAL_BONUS': '🎁',
+          'DEAL_ALERT': '🔥',
+          'SYSTEM': 'ℹ️'
+        };
+
+        list.innerHTML = data.notifications.map(n => {
+          const icon = icons[n.type] || '🔔';
+          const bg = n.is_read ? '#ffffff' : '#fefce8';
+          const dot = n.is_read ? '' : '<span style="width:7px; height:7px; border-radius:50%; background:#eab308; display:inline-block; margin-left:6px;"></span>';
+          const target = n.link_url || '#';
+          return `
+            <div onclick="clickNotification(${n.id}, '${target}')" style="padding: 10px 14px; border-bottom: 1px solid #f4f4f5; background: ${bg}; cursor: pointer; transition: background 0.15s ease; display: flex; gap: 10px; align-items: flex-start;">
+              <span style="font-size: 18px; line-height: 1.2;">${icon}</span>
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-size: 12px; font-weight: 700; color: #09090b; display: flex; align-items: center; justify-content: space-between;">
+                  <span>${n.title}${dot}</span>
+                  <span style="font-size: 10px; color: #a1a1aa; font-weight: 400;">${n.created_at}</span>
+                </div>
+                <div style="font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.35; word-break: break-word;">${n.message}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    } catch (err) {
+      console.warn('Error loading notifications:', err);
+    }
+  }
+
+  function toggleNotificationMenu(e) {
+    if (e) e.stopPropagation();
+    const box = document.getElementById('nav-notif-box');
+    if (!box) return;
+    if (box.style.display === 'none') {
+      box.style.display = 'block';
+      loadUserNotifications();
+    } else {
+      box.style.display = 'none';
+    }
+  }
+
+  async function clickNotification(id, url) {
+    try {
+      await fetch(`/api/notifications/read/${id}`, { method: 'POST' });
+    } catch (e) {}
+    if (url && url !== '#' && url !== 'None') {
+      window.location.href = url;
+    } else {
+      loadUserNotifications();
+    }
+  }
+
+  async function markAllNotificationsAsRead() {
+    try {
+      await fetch('/api/notifications/read-all', { method: 'POST' });
+      loadUserNotifications();
+    } catch (e) {}
+  }
+
+  document.addEventListener('click', function(e) {
+    const container = document.querySelector('.nav-notif-container');
+    const box = document.getElementById('nav-notif-box');
+    if (box && box.style.display === 'block' && container && !container.contains(e.target)) {
+      box.style.display = 'none';
+    }
+  });
+
+  window.addEventListener('load', () => {
+    loadUserNotifications();
   });
 </script>

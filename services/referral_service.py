@@ -241,6 +241,17 @@ def process_referral_reward_for_transaction(transaction):
         referral.rewarded_at = now
 
         db.session.commit()
+        try:
+            from services.user_notification_service import create_user_notification
+            create_user_notification(
+                referrer.id,
+                "Referral Bonus Received! 🎁",
+                f"You earned ₦{reward_amount:,.2f} bonus because your referred friend completed their first order!",
+                "REFERRAL_BONUS",
+                "/referrals"
+            )
+        except Exception:
+            pass
         return True, f"Referrer {referrer.id} credited NGN {reward_amount}."
     except Exception as exc:
         db.session.rollback()
