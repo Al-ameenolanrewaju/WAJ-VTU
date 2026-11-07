@@ -834,6 +834,8 @@ def settings():
             "REFERRAL_MAX_REWARDS_PER_REFERRER",
             "DAILY_DEAL_ENABLED",
             "DAILY_DEAL_GENERATION_TIME",
+            "DAILY_PUSH_ENABLED",
+            "LINKEDIN_AUTO_POST_ENABLED",
             "REENGAGEMENT_7_DAYS_ENABLED",
             "REENGAGEMENT_14_DAYS_ENABLED",
             "REENGAGEMENT_30_DAYS_ENABLED",
@@ -899,6 +901,35 @@ def settings():
                 <div>
                     <label style="display:block; font-size:12px; font-weight:700; margin-bottom:6px;">Generation Time (Africa/Lagos)</label>
                     <input type="time" name="DAILY_DEAL_GENERATION_TIME" value="{escape(_val('DAILY_DEAL_GENERATION_TIME', '08:00'))}">
+                </div>
+            </div>
+        </div>
+
+        <!-- Automated Distribution & Social Channels -->
+        <div class="card" style="margin-bottom:24px; padding:24px;">
+            <h3 style="font-size:16px; font-weight:700; margin-bottom:14px; color:#090909;">🚀 Automated Daily Deal Distribution (8:00 AM Lagos)</h3>
+            <p style="font-size:12px; color:#626262; margin-bottom:16px;">
+                Every morning at 8:00 AM (Africa/Lagos), WAJ VTU automatically broadcasts today's data deal to active users and social channels.
+            </p>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px;">
+                <div style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:16px;">
+                    <label style="display:block; font-size:13px; font-weight:700; margin-bottom:6px;">🔔 Web Push & In-App Notification</label>
+                    <p style="font-size:11px; color:#6b7280; margin-bottom:10px;">Broadcast today's deal to all subscribed browsers and in-app bell.</p>
+                    <select name="DAILY_PUSH_ENABLED">
+                        <option value="true" {'selected' if _val('DAILY_PUSH_ENABLED', 'true') == 'true' else ''}>Enabled</option>
+                        <option value="false" {'selected' if _val('DAILY_PUSH_ENABLED', 'true') == 'false' else ''}>Disabled</option>
+                    </select>
+                </div>
+                <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:16px;">
+                    <label style="display:block; font-size:13px; font-weight:700; color:#0369a1; margin-bottom:6px;">💼 LinkedIn Automated Post</label>
+                    <p style="font-size:11px; color:#0284c7; margin-bottom:10px;">Auto-post today's deal copy & flyer to your connected LinkedIn profile.</p>
+                    <select name="LINKEDIN_AUTO_POST_ENABLED">
+                        <option value="true" {'selected' if _val('LINKEDIN_AUTO_POST_ENABLED', 'false') == 'true' else ''}>Enabled</option>
+                        <option value="false" {'selected' if _val('LINKEDIN_AUTO_POST_ENABLED', 'false') == 'false' else ''}>Disabled</option>
+                    </select>
+                    <div style="margin-top:10px;">
+                        <a href="/admin/marketing/social#linkedin-section" style="font-size:11px; font-weight:700; color:#0284c7; text-decoration:none;">View LinkedIn Status in Social Studio →</a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1260,7 +1291,48 @@ def _build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net,
         </div>"""
 
     li_text = pack.get("linkedin", {}).get("text", pack.get("facebook", {}).get("text", ""))
+    auto_post_controls = ""
     if li_connected:
+        from services.marketing_settings import get_setting_bool, get_marketing_setting
+        from services.deal_service import get_lagos_today
+
+        auto_enabled = get_setting_bool("LINKEDIN_AUTO_POST_ENABLED", False)
+        today_str = str(get_lagos_today())
+        posted_today = get_marketing_setting(f"LINKEDIN_POST_SENT_{today_str}") == "true"
+
+        auto_badge = '<span style="font-size:11px; background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:4px; font-weight:700;">ACTIVE</span>' if auto_enabled else '<span style="font-size:11px; background:#f1f5f9; color:#64748b; padding:2px 8px; border-radius:4px; font-weight:700;">DISABLED</span>'
+        today_note = f"✓ Today's deal already auto-posted ({today_str})" if posted_today else ("Scheduled for 8:00 AM Lagos" if auto_enabled else "Automatic posting is turned off")
+        auto_btn_text = "Turn Off Auto-Post" if auto_enabled else "Turn On Auto-Post"
+        auto_btn_style = "background:#fee2e2; color:#991b1b; border:1px solid #fca5a5;" if auto_enabled else "background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;"
+
+        auto_post_controls = f"""
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; margin-bottom:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                <div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:14px;">🤖</span>
+                        <strong style="font-size:13px; color:#0f172a;">Daily Auto-Post (8:00 AM Lagos)</strong>
+                        {auto_badge}
+                    </div>
+                    <div style="font-size:12px; color:#64748b; margin-top:3px;">
+                        {today_note}
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <form method="POST" action="/admin/marketing/linkedin/toggle-auto" style="margin:0;">
+                        <button type="submit" style="{auto_btn_style} font-size:12px; font-weight:700; padding:6px 14px; border-radius:6px; cursor:pointer;">
+                            {auto_btn_text}
+                        </button>
+                    </form>
+                    <form method="POST" action="/admin/marketing/linkedin/auto-post-now" style="margin:0;">
+                        <button type="submit" onclick="return confirm('Immediately generate today\\'s deal and auto-post to LinkedIn?')" style="background:#0a66c2; color:#ffffff; border:none; font-size:12px; font-weight:700; padding:6px 14px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;">
+                            ⚡ Run Auto-Post Now
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>"""
+
         status_badge = '<span style="font-size:11px; background:#dcfce7; color:#15803d; padding:4px 10px; border-radius:6px; font-weight:700;">✓ CONNECTED</span>'
         urn_display = f'<span style="font-size:11px; color:#52525b; font-family:monospace;">{li_author_urn}</span>' if li_author_urn else ""
         connect_action = f"""
@@ -1324,6 +1396,7 @@ def _build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net,
             <span style="font-size:11px; background:#dbeafe; color:#1d4ed8; padding:4px 8px; border-radius:6px; font-weight:700;">UTM: linkedin</span>
         </div>
         {connect_action}
+        {auto_post_controls}
         {post_form}
     </div>"""
 
@@ -1944,14 +2017,57 @@ def linkedin_post():
 
     if result.get("status") == "success":
         post_url = result.get("url", "https://linkedin.com/feed")
-        record_admin_audit("LINKEDIN_POST", f"Posted campaign to LinkedIn: {result.get('post_urn','')}")
+        record_admin_audit("admin", "LINKEDIN_POST", True, f"Posted campaign to LinkedIn: {result.get('post_urn','')}")
         flash(
             f'✅ Posted to LinkedIn! <a href="{post_url}" target="_blank" style="font-weight:700;">View post →</a>',
             "success",
         )
     else:
+        record_admin_audit("admin", "LINKEDIN_POST_FAILED", False, str(result.get("message", "Unknown error"))[:255])
         flash(f"❌ LinkedIn post failed: {result.get('message', 'Unknown error')}", "error")
 
+    return redirect(url_for("marketing_admin.social_studio"))
+
+
+@marketing_admin_bp.route("/linkedin/toggle-auto", methods=["POST"])
+def linkedin_toggle_auto():
+    """Toggle automated 8:00 AM daily LinkedIn posting on or off."""
+    require_admin_auth, record_admin_audit, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from services.marketing_settings import get_setting_bool, set_marketing_setting
+    curr = get_setting_bool("LINKEDIN_AUTO_POST_ENABLED", False)
+    new_val = "false" if curr else "true"
+    set_marketing_setting("LINKEDIN_AUTO_POST_ENABLED", new_val)
+    status_label = "enabled" if new_val == "true" else "disabled"
+    flash(f"Automated 8:00 AM LinkedIn posting is now {status_label}.", "success")
+    record_admin_audit("admin", "LINKEDIN_AUTO_TOGGLE", True, f"Set LINKEDIN_AUTO_POST_ENABLED={new_val}")
+    return redirect(url_for("marketing_admin.social_studio"))
+
+
+@marketing_admin_bp.route("/linkedin/auto-post-now", methods=["POST"])
+def linkedin_auto_post_now():
+    """Manually trigger today's automated LinkedIn daily deal post immediately."""
+    require_admin_auth, record_admin_audit, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from services.linkedin_auto_service import send_daily_deal_linkedin
+    result = send_daily_deal_linkedin(force=True)
+    if result.get("status") == "success":
+        post_url = result.get("url", "https://linkedin.com/feed")
+        flash(
+            f'✅ Daily deal posted to LinkedIn! <a href="{post_url}" target="_blank" style="font-weight:700;">View post →</a>',
+            "success",
+        )
+        record_admin_audit("admin", "LINKEDIN_AUTO_POST_NOW", True, f"URN: {result.get('post_urn')}")
+    else:
+        err = result.get("reason", "Unknown error")
+        flash(f"❌ Automated LinkedIn post failed: {err}", "error")
+        record_admin_audit("admin", "LINKEDIN_AUTO_POST_NOW_FAILED", False, str(err)[:255])
     return redirect(url_for("marketing_admin.social_studio"))
 
 

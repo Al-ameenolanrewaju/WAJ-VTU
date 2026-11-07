@@ -290,15 +290,27 @@ def start_daily_push_background_worker(app):
             try:
                 with app.app_context():
                     from services.marketing_settings import get_marketing_setting, get_setting_bool
-                    if get_setting_bool("DAILY_PUSH_ENABLED", True):
-                        now_lagos = datetime.now(LAGOS_TZ)
-                        # Broadcast daily deal push starting at 8:00 AM Lagos time
-                        if 8 <= now_lagos.hour <= 21:
-                            today_str = str(now_lagos.date())
+                    now_lagos = datetime.now(LAGOS_TZ)
+                    if 8 <= now_lagos.hour <= 21:
+                        today_str = str(now_lagos.date())
+                        # 1. Broadcast daily deal push
+                        if get_setting_bool("DAILY_PUSH_ENABLED", True):
                             already_sent = get_marketing_setting(f"DAILY_PUSH_SENT_{today_str}")
                             if already_sent != "true":
                                 logger.info(f"[push_worker] Triggering automated daily deal push for {today_str}...")
                                 send_daily_deal_push(force=False)
+
+                        # 2. Automated LinkedIn daily deal post
+                        if get_setting_bool("LINKEDIN_AUTO_POST_ENABLED", False):
+                            li_already_sent = get_marketing_setting(f"LINKEDIN_POST_SENT_{today_str}")
+                            if li_already_sent != "true":
+                                logger.info(f"[push_worker] Triggering automated LinkedIn post for {today_str}...")
+                                try:
+                                    from services.linkedin_auto_service import send_daily_deal_linkedin
+                                    li_result = send_daily_deal_linkedin(force=False)
+                                    logger.info(f"[push_worker] LinkedIn auto-post result: {li_result.get('status')} - {li_result.get('reason', li_result.get('url', ''))}")
+                                except Exception as li_exc:
+                                    logger.error(f"[push_worker] LinkedIn auto-post failed: {li_exc}")
             except Exception as exc:
                 logger.error(f"[push_worker] Error in background worker: {exc}")
 

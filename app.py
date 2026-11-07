@@ -4279,6 +4279,15 @@ def cron_daily_deal_push():
     return jsonify(result), 200
 
 
+@app.route("/api/cron/daily-deal-linkedin", methods=["GET", "POST"])
+def cron_daily_deal_linkedin():
+    """Generates today's deal and posts it directly to LinkedIn. Idempotent unless force=1."""
+    from services.linkedin_auto_service import send_daily_deal_linkedin
+    force = request.args.get("force") in ("1", "true", "True")
+    result = send_daily_deal_linkedin(force=force)
+    return jsonify(result), 200
+
+
 @app.route("/api/cron/reengagement-scan", methods=["GET", "POST"])
 def cron_reengagement_scan():
     """Performs customer inactivity scan across 7, 14, and 30 day segments."""

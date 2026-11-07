@@ -36,6 +36,14 @@ DEFAULT_SETTINGS = {
         "value": "08:00",
         "description": "Time of day (HH:MM in Africa/Lagos) for automatic deal generation."
     },
+    "DAILY_PUSH_ENABLED": {
+        "value": "true",
+        "description": "Enable daily data deal push notification broadcast at 8:00 AM Lagos time."
+    },
+    "LINKEDIN_AUTO_POST_ENABLED": {
+        "value": "false",
+        "description": "Automatically post the daily data deal to LinkedIn at 8:00 AM Lagos time."
+    },
     "REENGAGEMENT_7_DAYS_ENABLED": {
         "value": "true",
         "description": "Enable 7-day inactivity segment re-engagement."
