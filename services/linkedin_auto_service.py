@@ -132,3 +132,4 @@ def send_daily_deal_linkedin(force: bool = False) -> dict:
         err_msg = result.get("message", "Unknown LinkedIn API error")
         logger.error("[linkedin_auto] LinkedIn post failed: %s", err_msg)
         return {"status": "error", "reason": err_msg}
+

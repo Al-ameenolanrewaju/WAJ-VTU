@@ -37,6 +37,11 @@ def client():
         with app.app_context():
             db.create_all()
             today = get_lagos_today()
+            backed_up = {
+                f"LINKEDIN_POST_SENT_{today}": get_marketing_setting(f"LINKEDIN_POST_SENT_{today}", ""),
+                "LINKEDIN_AUTO_POST_ENABLED": get_marketing_setting("LINKEDIN_AUTO_POST_ENABLED", "false"),
+                "LINKEDIN_TOKEN": get_marketing_setting("LINKEDIN_TOKEN", ""),
+            }
             set_marketing_setting(f"LINKEDIN_POST_SENT_{today}", "")
             set_marketing_setting("LINKEDIN_AUTO_POST_ENABLED", "false")
             set_marketing_setting("LINKEDIN_TOKEN", "")
@@ -45,6 +50,9 @@ def client():
         yield client
         with app.app_context():
             db.session.rollback()
+            for k, v in backed_up.items():
+                set_marketing_setting(k, v)
+            db.session.commit()
 
 
 @pytest.fixture
@@ -136,6 +144,10 @@ def test_linkedin_auto_post_success_and_idempotency(client):
             assert res1["status"] == "success"
             assert res1["post_urn"] == "urn:li:ugcPost:test-post-789"
             assert mock_post.call_count == 1
+            # Verify flyer bytes were generated and attached
+            _, post_kwargs = mock_post.call_args
+            assert post_kwargs.get("image_bytes") is not None
+            assert len(post_kwargs["image_bytes"]) > 0
 
             # Verify sentinel is stored
             assert get_marketing_setting(f"LINKEDIN_POST_SENT_{today}") == "true"

@@ -1357,10 +1357,10 @@ def _build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net,
                 </label>
                 <textarea name="linkedin_text" id="linkedin-post-text" rows="6" style="width:100%; padding:12px; border-radius:8px; border:1px solid #d4d4d8; font-size:13px; font-family:monospace; line-height:1.5; resize:vertical; margin-bottom:12px;">{li_text}</textarea>
 
-                <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
-                    <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; cursor:pointer;">
-                        <input type="checkbox" name="attach_flyer" value="1" style="width:16px; height:16px;">
-                        Attach promo flyer image (1:1 square)
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px 14px;">
+                    <label style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:#15803d; cursor:pointer;">
+                        <input type="checkbox" name="attach_flyer" value="1" checked style="width:18px; height:18px; accent-color:#16a34a;">
+                        🖼️ Attach 1:1 branded promo flyer image with post (recommended)
                     </label>
                 </div>
 
@@ -1996,8 +1996,8 @@ def linkedin_post():
         flash("Post text cannot be empty.", "error")
         return redirect(url_for("marketing_admin.social_studio"))
 
-    # Optionally attach the promo flyer image
-    attach_flyer = request.form.get("attach_flyer") == "1"
+    # Attach promo flyer image by default (unless unchecked)
+    attach_flyer = request.form.get("attach_flyer", "1") in ("1", "true", "on")
     image_bytes = None
     if attach_flyer:
         try:
@@ -2009,9 +2009,9 @@ def linkedin_post():
                 network=network, plan_name=plan_name, price=price,
                 validity=validity, format="square",
             )
-            image_bytes = buf.read()
-        except Exception:
-            pass  # degrade to text-only
+            image_bytes = buf.getvalue()
+        except Exception as flyer_err:
+            logger.warning("Could not generate flyer for manual post: %s", flyer_err)
 
     result = post_to_linkedin(
         access_token=access_token,

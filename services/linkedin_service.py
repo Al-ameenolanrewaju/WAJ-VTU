@@ -170,21 +170,27 @@ def upload_image_to_linkedin(access_token: str, author_urn: str, image_bytes: by
         ]["uploadUrl"]
         asset_urn = reg_data["value"]["asset"]
     except (requests.RequestException, KeyError, TypeError) as exc:
-        logger.exception("Failed to register LinkedIn image upload: %s", exc)
+        body = exc.response.text if hasattr(exc, "response") and exc.response is not None else ""
+        logger.exception("Failed to register LinkedIn image upload: %s | response: %s", exc, body)
         return None
 
-    # Step 2: Upload the actual bytes
+    # Step 2: Upload the actual bytes to the pre-signed upload URL
     try:
+        # Pre-signed cloud storage URLs reject extra Authorization headers
+        put_headers = {"Content-Type": "image/png"}
+        if "api.linkedin.com" in upload_url:
+            put_headers["Authorization"] = f"Bearer {access_token}"
         up_resp = requests.put(
             upload_url,
             data=image_bytes,
-            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "image/png"},
+            headers=put_headers,
             timeout=30,
         )
         up_resp.raise_for_status()
         return asset_urn
     except requests.RequestException as exc:
-        logger.exception("Failed to upload image bytes to LinkedIn: %s", exc)
+        body = exc.response.text if hasattr(exc, "response") and exc.response is not None else ""
+        logger.exception("Failed to upload image bytes to LinkedIn: %s | response: %s", exc, body)
         return None
 
 
