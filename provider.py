@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import uuid
 import hashlib
 import re
@@ -65,19 +66,35 @@ def _provider_request(endpoint: str, params: dict):
     return response.json()
 
 
+_SWIFTBILLS_GET_CACHE = {}
+
 def _swiftbills_request(endpoint: str, method: str = "GET", payload: dict | None = None):
-    """Make an authenticated SwiftBills request."""
+    """Make an authenticated SwiftBills request, with TTL caching for idempotent catalog endpoints."""
+    clean_endpoint = endpoint.lstrip('/')
+    is_cacheable_get = (method.upper() == "GET" and any(
+        clean_endpoint.startswith(p) for p in ("data_plans", "get-networks", "get-cable-plan", "get-bill", "get-exam")
+    ))
+
+    if is_cacheable_get:
+        cached = _SWIFTBILLS_GET_CACHE.get(clean_endpoint)
+        if cached and time.time() < cached["expires"]:
+            return cached["data"]
+
     headers = {
         "Authorization": f"Token {SWIFTBILLS_API_KEY}",
         "Content-Type": "application/json",
     }
-    url = f"{SWIFTBILLS_BASE_URL}/{endpoint.lstrip('/')}"
+    url = f"{SWIFTBILLS_BASE_URL}/{clean_endpoint}"
     if method.upper() == "POST":
         response = requests.post(url, json=payload or {}, headers=headers, timeout=45)
     else:
         response = requests.get(url, headers=headers, timeout=45)
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+
+    if is_cacheable_get and data:
+        _SWIFTBILLS_GET_CACHE[clean_endpoint] = {"data": data, "expires": time.time() + 300}
+    return data
 
 
 def _swiftbills_network_id(network: str, service: str = "data"):

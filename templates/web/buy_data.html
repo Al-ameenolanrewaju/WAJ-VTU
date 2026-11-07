@@ -54,15 +54,9 @@
       </div>
     </div>
 
-    <!-- Hidden Network Switcher Form -->
-    <form method="GET" action="{{ url_for('web.buy_data') }}" id="network-switch-form" style="display: none;">
-      <input type="hidden" name="network" id="network-switch-input" value="{{ network }}">
-      <input type="hidden" name="phone" id="network-switch-phone" value="">
-    </form>
-
-    {% if plans %}
+    <!-- MAIN PURCHASE FORM (Zero Page Reloads) -->
     <form method="POST" action="{{ url_for('web.buy_data') }}" id="data-purchase-form">
-      <input type="hidden" name="network" value="{{ network }}">
+      <input type="hidden" name="network" id="network-input" value="{{ network }}">
       <input type="hidden" name="amount" id="data-amount" required>
 
       <!-- 2. RECIPIENT PHONE NUMBER WITH SMART AUTO-DETECT -->
@@ -86,8 +80,8 @@
 
       <input name="phone" id="phone-input" type="tel" placeholder="e.g. 08012345678" value="{{ phone_prefill or (user.phone if user and user.phone and user.phone != 'Not linked' else '') }}" oninput="handlePhoneInput(this.value)" required style="font-size: 16px; font-weight: 600; letter-spacing: 0.5px;">
 
-      <!-- 3. DATA PLAN SELECTOR -->
-      <label for="plan-select" style="margin-bottom: 6px;">Select {{ network }} Data Plan</label>
+      <!-- 3. DATA PLAN SELECTOR (Instantly updated client-side) -->
+      <label for="plan-select" id="plan-select-label" style="margin-bottom: 6px;">Select {{ network }} Data Plan</label>
       <select name="plan_code" id="plan-select" required onchange="handlePlanSelect(this)" style="font-size: 14px; font-weight: 600; padding: 13px 14px;">
         <option value="" disabled selected>— Choose your bundle —</option>
         {% for plan in plans %}
@@ -129,28 +123,62 @@
         ⚡ Buy {{ network }} Data Now
       </button>
     </form>
-    {% else %}
-    <div style="text-align: center; padding: 30px 10px;">
-      <p style="color: #71717a; margin-bottom: 14px;">No data plans are available for {{ network }} right now.</p>
-      <button type="button" onclick="switchNetwork('MTN')" style="background: #FFC400; color: #09090b; border: none; font-weight: 700; padding: 10px 20px; border-radius: 8px; cursor: pointer;">
-        View MTN Plans
-      </button>
-    </div>
-    {% endif %}
   </div>
 </main>
 
 <script>
   const userBalance = {{ user.wallet_balance|float }};
-  const currentNetwork = "{{ network }}";
+  const allPlans = {{ (all_plans or {})|tojson }};
+  let currentNetwork = "{{ network }}";
 
   function switchNetwork(net) {
-    if (net === currentNetwork) return;
-    const phoneVal = document.getElementById('phone-input') ? document.getElementById('phone-input').value : '';
-    document.getElementById('network-switch-input').value = net;
-    document.getElementById('network-switch-phone').value = phoneVal;
+    if (!net) return;
+    currentNetwork = net;
+
+    // 1. Update hidden network input
+    const netInput = document.getElementById('network-input');
+    if (netInput) netInput.value = net;
+
+    // 2. Update active styling on carrier avatars
+    document.querySelectorAll('.carrier-item').forEach(item => {
+      if (item.getAttribute('data-network') === net) {
+        item.classList.add('active');
+      } else {
+        item.classList.remove('active');
+      }
+    });
+
+    // 3. Update labels & submit button
+    const planLabel = document.getElementById('plan-select-label');
+    if (planLabel) planLabel.textContent = `Select ${net} Data Plan`;
+
+    const submitBtn = document.getElementById('submit-btn');
+    if (submitBtn && !submitBtn.disabled) {
+      submitBtn.textContent = `⚡ Buy ${net} Data Now`;
+    }
+
+    // 4. Instantly repopulate dropdown without reloading the page
+    const planSelect = document.getElementById('plan-select');
+    if (planSelect) {
+      const netPlans = allPlans[net] || [];
+      if (netPlans.length > 0) {
+        let optionsHtml = '<option value="" disabled selected>— Choose your bundle —</option>';
+        netPlans.forEach(p => {
+          const formattedPrice = Number(p.amount).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+          optionsHtml += `<option value="${p.code}" data-amount="${p.amount}">${p.name}  •  ₦${formattedPrice}</option>`;
+        });
+        planSelect.innerHTML = optionsHtml;
+      } else {
+        planSelect.innerHTML = `<option value="" disabled selected>No plans available for ${net} right now</option>`;
+      }
+    }
+
+    // 5. Reset plan selection & balance calculation
+    const amountInput = document.getElementById('data-amount');
+    if (amountInput) amountInput.value = '';
+    updateBalanceCalculation(0);
+
     if (navigator.vibrate) navigator.vibrate(15);
-    document.getElementById('network-switch-form').submit();
   }
 
   function detectNetworkFromPhone(phone) {
@@ -179,15 +207,11 @@
     if (detected) {
       if (badge) {
         badge.style.display = 'inline-block';
-        badge.textContent = `📶 Detected: ${detected}`;
+        badge.textContent = `📶 Auto-detected: ${detected}`;
       }
-      // If detected network differs from current and user typed a full prefix, suggest/auto switch
-      if (detected !== currentNetwork && phone.replace(/\D/g, '').length >= 4) {
-        // Only auto-switch once if freshly typed
-        if (!sessionStorage.getItem('waj_switched_for_' + phone.slice(0, 4))) {
-          sessionStorage.setItem('waj_switched_for_' + phone.slice(0, 4), '1');
-          switchNetwork(detected);
-        }
+      // Instant switch with ZERO page reload
+      if (detected !== currentNetwork) {
+        switchNetwork(detected);
       }
     } else {
       if (badge) badge.style.display = 'none';
@@ -255,10 +279,9 @@
       const badge = document.getElementById('detected-net-badge');
       if (detected && badge) {
         badge.style.display = 'inline-block';
-        badge.textContent = `📶 Line: ${detected}`;
+        badge.textContent = `📶 Auto-detected: ${detected}`;
       }
     }
   });
 </script>
 {% endblock %}
-

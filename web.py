@@ -430,22 +430,31 @@ def buy_data():
     from app import get_markup
 
     if request.method == "GET":
-        network = request.args.get("network", "MTN")
+        network = request.args.get("network", "MTN").upper()
+        if network not in ("MTN", "AIRTEL", "GLO", "9MOBILE"):
+            network = "MTN"
         phone_prefill = (request.args.get("phone") or "").strip()
-        raw_plans = fetch_data_variations(network)
-        plans = []
-        for plan in raw_plans:
-            base_amount = Decimal(str(plan.get("variation_amount", "0")))
-            plans.append({
-                "name": plan.get("name", "Data plan"),
-                "code": plan.get("variation_code"),
-                "amount": base_amount + get_markup(f"DATA_{network}", base_amount),
-            })
+        all_plans = {}
+        for net in ("MTN", "AIRTEL", "GLO", "9MOBILE"):
+            raw_plans = fetch_data_variations(net)
+            plans_list = []
+            for plan in raw_plans:
+                base_amount = Decimal(str(plan.get("variation_amount", "0")))
+                final_amt = base_amount + get_markup(f"DATA_{net}", base_amount)
+                plans_list.append({
+                    "name": plan.get("name", "Data plan"),
+                    "code": plan.get("variation_code"),
+                    "amount": float(final_amt),
+                })
+            all_plans[net] = plans_list
+
+        plans = all_plans.get(network, [])
         return render_template(
             "web/buy_data.html",
             user=user,
             network=network,
             plans=plans,
+            all_plans=all_plans,
             phone_prefill=phone_prefill,
             saved_services=saved_services_for(user),
         )
