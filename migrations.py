@@ -61,6 +61,9 @@ def run_migrations():
             if "referred_by_id" not in user_cols:
                 print("[migration] Adding referred_by_id column to users")
                 db.session.execute(text('ALTER TABLE "users" ADD COLUMN "referred_by_id" INTEGER'))
+            if "push_notifications_enabled" not in user_cols:
+                print("[migration] Adding push_notifications_enabled column to users")
+                db.session.execute(text('ALTER TABLE "users" ADD COLUMN "push_notifications_enabled" BOOLEAN NOT NULL DEFAULT TRUE'))
             db.session.commit()
 
             # 3. Create unique index on referral_code

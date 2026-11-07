@@ -320,6 +320,12 @@ def api_push_status():
     from models import PushSubscription
     user_id = session.get("user_id")
     endpoint = request.args.get("endpoint")
+    user_pref = True
+    if user_id:
+        u = db.session.get(User, user_id)
+        if u is not None:
+            user_pref = getattr(u, "push_notifications_enabled", True)
+
     is_sub = False
     if endpoint:
         sub = PushSubscription.query.filter_by(endpoint=endpoint.strip()).first()
@@ -327,7 +333,35 @@ def api_push_status():
     elif user_id:
         sub = PushSubscription.query.filter_by(user_id=user_id).first()
         is_sub = sub is not None
-    return jsonify({"subscribed": is_sub})
+
+    return jsonify({
+        "subscribed": is_sub and user_pref,
+        "device_subscribed": is_sub,
+        "user_preference_enabled": user_pref,
+    })
+
+
+@app.route("/api/push/toggle-preference", methods=["POST"])
+def api_push_toggle_preference():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"status": "error", "message": "Login required"}), 401
+
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"status": "error", "message": "User not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    if "enabled" in data:
+        user.push_notifications_enabled = bool(data["enabled"])
+    else:
+        user.push_notifications_enabled = not user.push_notifications_enabled
+
+    db.session.commit()
+    return jsonify({
+        "status": "success",
+        "push_notifications_enabled": user.push_notifications_enabled
+    })
 
 
 @app.route("/sitemap.xml")
@@ -398,6 +432,7 @@ def ensure_database_schema():
             "password_hash": "VARCHAR(255)",
             "referral_code": "VARCHAR(30)",
             "referred_by_id": "INTEGER",
+            "push_notifications_enabled": "BOOLEAN NOT NULL DEFAULT TRUE",
         },
         "transactions": {
             "meta_data": json_type,

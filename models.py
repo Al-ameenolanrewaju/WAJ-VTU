@@ -1,5 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, text
 from datetime import datetime, timezone
 import os
 
@@ -39,6 +39,9 @@ class User(db.Model):
     paystack_customer_code = db.Column(db.String(100), nullable=True)
     dva_account_number = db.Column(db.String(20), nullable=True)
     dva_bank_name = db.Column(db.String(50), nullable=True)
+
+    # Notification & Marketing Preferences (default ON)
+    push_notifications_enabled = db.Column(db.Boolean, default=True, server_default=text("true"), nullable=False)
 
     # Concurrency control to prevent balance race conditions
     version_id = db.Column(db.Integer, nullable=False, default=1)

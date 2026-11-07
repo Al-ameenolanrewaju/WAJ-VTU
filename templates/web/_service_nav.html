@@ -371,16 +371,35 @@
   async function syncSettingsPushUI() {
     var btn = document.getElementById('settings-push-btn');
     if (!btn) return;
-    if (typeof isPushSubscribed !== 'function') return;
-    var isSub = await isPushSubscribed();
-    if (isSub) {
-      btn.textContent = 'Active (Tap to Disable)';
-      btn.style.background = '#10b981';
-      btn.style.color = '#ffffff';
-    } else {
-      btn.textContent = 'Turn On';
-      btn.style.background = '#FFDD00';
-      btn.style.color = '#090909';
+    try {
+      const resp = await fetch('/api/push/status');
+      const data = await resp.json();
+      if (data.user_preference_enabled && data.device_subscribed) {
+        btn.textContent = 'Active (Tap to Disable)';
+        btn.style.background = '#10b981';
+        btn.style.color = '#ffffff';
+      } else if (!data.user_preference_enabled) {
+        btn.textContent = 'Disabled (Tap to Enable)';
+        btn.style.background = '#ef4444';
+        btn.style.color = '#ffffff';
+      } else {
+        btn.textContent = 'Activate on This Device';
+        btn.style.background = '#FFDD00';
+        btn.style.color = '#090909';
+      }
+    } catch (e) {
+      if (typeof isPushSubscribed === 'function') {
+        var isSub = await isPushSubscribed();
+        if (isSub) {
+          btn.textContent = 'Active (Tap to Disable)';
+          btn.style.background = '#10b981';
+          btn.style.color = '#ffffff';
+        } else {
+          btn.textContent = 'Turn On';
+          btn.style.background = '#FFDD00';
+          btn.style.color = '#090909';
+        }
+      }
     }
   }
 
@@ -390,18 +409,33 @@
     btn.disabled = true;
     btn.textContent = 'Updating...';
 
-    if (typeof isPushSubscribed === 'function') {
-      var isSub = await isPushSubscribed();
-      if (isSub) {
+    try {
+      const resp = await fetch('/api/push/status');
+      const data = await resp.json();
+
+      if (data.user_preference_enabled && data.device_subscribed) {
+        await fetch('/api/push/toggle-preference', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({enabled: false})
+        });
         if (typeof unsubscribeUserFromPush === 'function') {
           await unsubscribeUserFromPush();
         }
       } else {
+        await fetch('/api/push/toggle-preference', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({enabled: true})
+        });
         if (typeof subscribeUserToPush === 'function') {
           await subscribeUserToPush();
         }
       }
+    } catch (err) {
+      console.warn('Error toggling push preference:', err);
     }
+
     btn.disabled = false;
     await syncSettingsPushUI();
 

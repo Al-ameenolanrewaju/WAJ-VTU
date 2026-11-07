@@ -167,6 +167,11 @@ def broadcast_push(title, body, url=None, icon=None):
     failed = 0
 
     for sub in subscriptions:
+        if sub.user_id:
+            from models import User
+            u = db.session.get(User, sub.user_id)
+            if u and not getattr(u, "push_notifications_enabled", True):
+                continue
         ok, _ = send_single_push(sub, payload)
         if ok:
             sent += 1
