@@ -261,8 +261,8 @@ SYSTEM_PROMPT = """You are WAJ VTU Assistant, a helpful AI that allows users in 
 You have access to tools to fetch plans and execute transactions. 
 
 RULES:
-1. When a user asks for a service, FIRST use the fetching tool to see available plans and their EXACT `plan_code` and `amount`.
-2. FORMAT BEAUTIFULLY FOR WHATSAPP: Use relevant emojis (e.g. 🌐, 📺, ⚡, 💸) and WhatsApp bold text (e.g. *1GB* - *₦500*) to make the chat visually stunning and highly engaging. Present options as a clean, numbered list with double line breaks between items. DO NOT summarize the list or leave any plans out. You MUST list every single plan. DO NOT show the `plan_code` or internal codes to the user, only show the plan name and price.
+1. ALWAYS CALL THE TOOL FIRST: When a user asks about data plans, prices, or wants to buy data (e.g. "MTN data plans", "show me data", "prices for Airtel"), you MUST ALWAYS call the `get_data_plans` tool. NEVER recite plans or prices from memory, and NEVER guess plans.
+2. FORMAT BEAUTIFULLY FOR WHATSAPP: Use relevant emojis (e.g. 🌐, 📶, ⚡, 💸) and WhatsApp bold text (e.g. *1GB* - *₦500*) to make the chat clear and engaging. Present options as a clean, numbered list. DO NOT show the `plan_code` or internal codes to the user, only show the plan name and price.
 3. Before any purchase, repeat the selected plan, exact price, recipient, and ask the user to confirm. Only purchase after a clear confirmation. When confirmed, use the exact `plan_code` and `amount`.
 4. If a purchase fails, inform the user politely.
 5. KEEP YOUR RESPONSES SHORT AND FRIENDLY.
@@ -635,7 +635,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
         
     elif name == "get_data_plans":
-        network = kwargs.get("network")
+        network = str(kwargs.get("network") or "MTN").upper()
         variations = fetch_data_variations(network)
         if not variations:
             return {"status": "error", "message": "No plans available right now."}
@@ -649,16 +649,17 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         plans = []
         display_plans = []
         for index, plan in enumerate(variations, start=1):
-            base_cost = Decimal(str(plan.get("variation_amount")))
+            base_cost = Decimal(str(plan.get("variation_amount", 0)))
             cost = (base_cost + get_markup(f"DATA_{network}", base_cost)).quantize(Decimal("0.01"))
             plans.append(
                 f"- {plan.get('name')}: ₦{cost:,.2f} (System Code: {plan.get('variation_code')})"
             )
-            display_plans.append(f"{index}. {plan.get('name')}: ₦{cost:,.2f}")
+            display_plans.append(f"{index}. *{plan.get('name')}* — ₦{cost:,.2f}")
         return {
             "status": "success",
+            "network": network,
             "plans_list": "\n".join(plans),
-            "display_plans": "\n\n".join(display_plans),
+            "display_plans": "\n".join(display_plans),
             "message": "Present these options to the user clearly. Do not show the System Code to the user.",
         }
         
@@ -953,6 +954,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
                 },
             }
             user.state_data = state
+
             db.session.commit()
 
         if amount is None:
@@ -1358,7 +1360,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
             temperature=0,
             tools=tools,
             tool_choice="auto",
-            max_tokens=700
+            max_tokens=1500
         )
         
         response_message = response.choices[0].message
@@ -1398,7 +1400,13 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                     ).start()
 
                 if func_name == "get_data_plans" and result.get("status") == "success":
-                    final_text = result["display_plans"]
+                    req_net = result.get("network") or func_args.get("network") or "MTN"
+                    final_text = (
+                        f"📶 *Current {req_net} Data Plans (Prices in ₦):*\n\n"
+                        f"{result['display_plans']}\n\n"
+                        f"👉 *To buy, reply with the plan number and phone number:*\n"
+                        f"_(Example: '1' or '2GB to 08012345678')_"
+                    )
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
@@ -1438,7 +1446,7 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                 temperature=0,
                 tools=tools,
                 tool_choice="auto",
-                max_tokens=700
+                max_tokens=1500
             )
             response_message = response.choices[0].message
             

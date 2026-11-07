@@ -332,10 +332,52 @@ def _fetch_swiftbills_data_variations(network: str):
         return []
 
 
+def _parse_plan_size_mb(name: str) -> float:
+    """Extract numeric megabytes from a plan name for intelligent sorting."""
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(TB|GB|MB)", name, re.IGNORECASE)
+    if not match:
+        return 999999.0
+    val, unit = float(match.group(1)), match.group(2).upper()
+    if unit == "TB":
+        return val * 1024 * 1024
+    if unit == "GB":
+        return val * 1024
+    return val
+
+
+def _data_plan_sort_key(plan: dict):
+    """Sort key prioritizing standard monthly mobile plans by size and price."""
+    name = str(plan.get("name", "")).upper()
+    size_mb = _parse_plan_size_mb(name)
+    price = float(plan.get("variation_amount", 0) or 0)
+
+    days_match = re.search(r"\((\d+)\s*days?\)", name, re.IGNORECASE)
+    days = int(days_match.group(1)) if days_match else 30
+
+    # Tier:
+    # 0 = Standard 30-day mobile plans (SME, Data Share, Corporate)
+    # 1 = Other 30-day mobile plans (Direct Gifting)
+    # 2 = 7-day to 14-day weekly plans
+    # 3 = 1-day to 3-day daily plans
+    # 4 = Broadband, Router, 100GB+, or 365-day enterprise plans
+    if "BROADBAND" in name or size_mb >= 100 * 1024 or days >= 90:
+        tier = 4
+    elif days == 30 and any(t in name for t in ["SME", "DATA SHARE", "CORPORATE"]):
+        tier = 0
+    elif days == 30:
+        tier = 1
+    elif 3 <= days <= 14:
+        tier = 2
+    else:
+        tier = 3
+
+    return (tier, size_mb, price)
+
+
 def fetch_data_variations(network: str):
     """Fetch data plans from SwiftBills only; ClubKonnect is disabled for non-recharge services."""
     if MOCK_MODE:
-        return _fetch_clubkonnect_data_variations(network)
+        return sorted(_fetch_clubkonnect_data_variations(network), key=_data_plan_sort_key)
 
     provider_plans = _fetch_swiftbills_data_variations(network)
     if not provider_plans:
@@ -352,7 +394,8 @@ def fetch_data_variations(network: str):
         if current is None or float(plan.get("variation_amount", 0)) < float(current.get("variation_amount", 0)):
             lowest_by_key[key] = plan
 
-    return list(lowest_by_key.values()) + unmatched
+    combined = list(lowest_by_key.values()) + unmatched
+    return sorted(combined, key=_data_plan_sort_key)
 
 
 def process_data_purchase(
