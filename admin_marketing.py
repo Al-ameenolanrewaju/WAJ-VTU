@@ -874,7 +874,106 @@ def push_dashboard():
         </div>
     </div>
 
-    <!-- Subscriber Metric Cards -->
+    <!-- Device Activation & Live Test Card -->
+    <div class="card" style="margin-bottom:20px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:18px 22px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
+            <div style="flex:1; min-width:260px;">
+                <div style="font-weight:700; font-size:14px; color:#1e3a8a; margin-bottom:4px;">📱 Test Push Notifications On This Current Device</div>
+                <div style="font-size:12px; color:#3b82f6; line-height:1.4;">Click to subscribe this browser. The subscriber count below will immediately increase to 1, and you can test receiving broadcasts.</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <button type="button" id="admin-test-sub-btn" onclick="subscribeCurrentAdminDevice()" style="background:#2563eb; color:#ffffff; font-weight:700; border:none; padding:10px 20px; border-radius:8px; font-size:13px; cursor:pointer;">
+                    🔔 Subscribe This Device
+                </button>
+                <span id="admin-sub-status" style="font-size:12px; font-weight:600; color:#1e40af;"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    async function subscribeCurrentAdminDevice() {{
+        const btn = document.getElementById('admin-test-sub-btn');
+        const status = document.getElementById('admin-sub-status');
+        btn.disabled = true;
+        btn.textContent = 'Enabling...';
+        status.style.color = '#1e40af';
+        status.textContent = 'Requesting browser permission...';
+
+        try {{
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {{
+                throw new Error('This browser does not support Web Push notifications.');
+            }}
+
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') {{
+                throw new Error('Permission ' + perm + '. Click the lock icon 🔒 next to the website address to Allow notifications.');
+            }}
+
+            status.textContent = 'Registering service worker...';
+            const reg = await navigator.serviceWorker.register('/service-worker.js', {{ scope: '/' }});
+            await navigator.serviceWorker.ready;
+
+            status.textContent = 'Fetching VAPID key...';
+            const keyResp = await fetch('/api/push/vapid-public-key');
+            const keyData = await keyResp.json();
+            const vapidPublicKey = keyData.publicKey;
+            if (!vapidPublicKey) throw new Error('VAPID public key could not be retrieved from server.');
+
+            status.textContent = 'Creating device subscription...';
+            const padding = '='.repeat((4 - (vapidPublicKey.length % 4)) % 4);
+            const base64 = (vapidPublicKey + padding).split('-').join('+').split('_').join('/');
+            const rawData = window.atob(base64);
+            const keyArr = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) keyArr[i] = rawData.charCodeAt(i);
+
+            const sub = await reg.pushManager.subscribe({{
+                userVisibleOnly: true,
+                applicationServerKey: keyArr
+            }});
+
+            const rawJson = sub.toJSON ? sub.toJSON() : {{}};
+            const p256dhKey = sub.getKey ? sub.getKey('p256dh') : null;
+            const authKey = sub.getKey ? sub.getKey('auth') : null;
+
+            function bufToBase64(b) {{
+                let bin = '';
+                const bytes = new Uint8Array(b);
+                for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+                return window.btoa(bin).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+            }}
+
+            const payload = {{
+                endpoint: sub.endpoint,
+                keys: {{
+                    p256dh: (rawJson.keys && rawJson.keys.p256dh) || (p256dhKey ? bufToBase64(p256dhKey) : ''),
+                    auth: (rawJson.keys && rawJson.keys.auth) || (authKey ? bufToBase64(authKey) : '')
+                }}
+            }};
+
+            status.textContent = 'Saving subscription on server...';
+            const postResp = await fetch('/api/push/subscribe', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify(payload)
+            }});
+
+            const resJson = await postResp.json();
+            if (!postResp.ok) throw new Error(resJson.message || 'Server returned error');
+
+            status.style.color = '#16a34a';
+            status.textContent = '✅ Subscribed successfully! Refreshing...';
+            btn.textContent = 'Subscribed! 🔔';
+            setTimeout(() => {{ window.location.reload(); }}, 1200);
+        }} catch (err) {{
+            btn.disabled = false;
+            btn.textContent = 'Retry Subscribe';
+            status.style.color = '#dc2626';
+            status.textContent = '❌ ' + (err.message || err);
+        }}
+    }}
+    </script>
+
+        <!-- Subscriber Metric Cards -->
     <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom:24px;">
         <div class="card">
             <h3>🔔 Total Subscribers</h3>
