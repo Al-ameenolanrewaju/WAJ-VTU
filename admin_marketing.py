@@ -1262,7 +1262,7 @@ def download_deal_poster(deal_id=None):
     return send_file(buf, mimetype="image/png", as_attachment=True, download_name=f"waj-vtu-{clean_net}-{fmt}-deal.png")
 
 
-def _build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net, flyer_plan, flyer_price, flyer_val, pack):
+def _build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net, flyer_plan, flyer_price, flyer_val, pack, li_member_name=""):
     """Build the LinkedIn direct-posting card HTML for the Social Studio."""
     if not li_configured:
         return f"""
@@ -1334,10 +1334,11 @@ def _build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net,
         </div>"""
 
         status_badge = '<span style="font-size:11px; background:#dcfce7; color:#15803d; padding:4px 10px; border-radius:6px; font-weight:700;">✓ CONNECTED</span>'
-        urn_display = f'<span style="font-size:11px; color:#52525b; font-family:monospace;">{li_author_urn}</span>' if li_author_urn else ""
+        name_display = f'<strong style="font-size:13px; color:#0f172a;">{escape(li_member_name)}</strong>' if li_member_name else ""
+        urn_display = f'<span style="font-size:11px; color:#64748b; font-family:monospace;">({li_author_urn})</span>' if li_author_urn else ""
         connect_action = f"""
             <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
-                {status_badge} {urn_display}
+                {status_badge} {name_display} {urn_display}
                 <form method="POST" action="/admin/marketing/linkedin/disconnect" style="margin:0;">
                     <button type="submit" style="background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; font-size:12px; font-weight:600; padding:5px 12px; border-radius:6px; cursor:pointer;">
                         Disconnect
@@ -1426,6 +1427,7 @@ def social_studio():
         _li_token_data = {}
     li_connected = li_token_valid(_li_token_data)
     li_author_urn = _li_token_data.get("author_urn", "") if li_connected else ""
+    li_member_name = _li_token_data.get("member_name", "") if li_connected else ""
 
     campaign_type = request.args.get("campaign_type", "DAILY_DEAL").upper()
     deal_id = request.args.get("deal_id", type=int)
@@ -1787,7 +1789,7 @@ def social_studio():
             </div>
 
             <!-- 6. LINKEDIN — DIRECT API POSTING -->
-            {_build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net, flyer_plan, flyer_price, flyer_val, pack)}
+            {_build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net, flyer_plan, flyer_price, flyer_val, pack, li_member_name=li_member_name)}
 
             <!-- 7. UTM ATTRIBUTION EXPLAINER -->
             <div class="card" style="background:#fafaf9; border:1px solid #e4e4e7; border-radius:14px; padding:20px;">
@@ -1916,19 +1918,22 @@ def linkedin_callback():
         flash("Failed to exchange LinkedIn authorization code for token. Check server logs.", "error")
         return redirect(url_for("marketing_admin.social_studio"))
 
-    # Enrich token data with expiry timestamp and profile URN
+    # Enrich token data with expiry timestamp, profile URN, and member name
     token_data["expires_at"] = int(time.time()) + int(token_data.get("expires_in", 5183944))
     access_token = token_data["access_token"]
-    author_urn = get_profile_urn(access_token)
+    id_token = token_data.get("id_token")
+    author_urn, member_name = get_profile_urn(access_token, id_token=id_token)
     if author_urn:
         token_data["author_urn"] = author_urn
+    if member_name:
+        token_data["member_name"] = member_name
 
     set_marketing_setting("LINKEDIN_TOKEN", json.dumps(token_data))
     # Clear the state nonce now that it's been used
     set_marketing_setting("LINKEDIN_OAUTH_STATE", "")
 
     flash(
-        f"LinkedIn connected successfully! Author URN: {author_urn or 'unknown'}. "
+        f"LinkedIn connected successfully for {member_name or 'profile'}! "
         "You can now post directly from the Social Studio.",
         "success",
     )

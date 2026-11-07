@@ -29,6 +29,7 @@ LINKEDIN_AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 LINKEDIN_UGC_POSTS_URL = "https://api.linkedin.com/v2/ugcPosts"
 LINKEDIN_PROFILE_URL = "https://api.linkedin.com/v2/me"
+LINKEDIN_USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
 LINKEDIN_ASSETS_URL = "https://api.linkedin.com/v2/assets?action=registerUpload"
 
 # Requested scopes — covers text + image posts on personal feed
@@ -77,26 +78,62 @@ def exchange_code_for_token(code: str) -> dict:
         return None
 
 
-def get_profile_urn(access_token: str) -> str | None:
+def get_profile_urn(access_token: str, id_token: str = None) -> tuple[str | None, str | None]:
     """
-    Fetch the authenticated LinkedIn member's URN  (e.g. 'urn:li:person:ABCDE').
-    Required as the author field when posting.
+    Fetch the authenticated LinkedIn member's URN (e.g. 'urn:li:person:ABCDE') and display name.
+    1. First tries OpenID Connect /v2/userinfo (the modern LinkedIn standard for openid+profile scopes).
+    2. Then tries decoding the JWT id_token if provided.
+    3. Falls back to legacy /v2/me.
     """
+    # 1. Try modern OpenID Connect /v2/userinfo
+    try:
+        resp = requests.get(
+            LINKEDIN_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            sub = data.get("sub")
+            name = data.get("name") or f"{data.get('given_name', '')} {data.get('family_name', '')}".strip()
+            if sub:
+                return f"urn:li:person:{sub}", name
+    except Exception as exc:
+        logger.debug("OpenID Connect userinfo request failed: %s", exc)
+
+    # 2. Try parsing id_token JWT
+    if id_token and "." in str(id_token):
+        try:
+            import base64
+            import json as json_mod
+            parts = str(id_token).split(".")
+            if len(parts) >= 2:
+                payload = parts[1]
+                payload += "=" * (-len(payload) % 4)
+                jwt_data = json_mod.loads(base64.b64decode(payload))
+                sub = jwt_data.get("sub")
+                name = jwt_data.get("name")
+                if sub:
+                    return f"urn:li:person:{sub}", name
+        except Exception as jwt_err:
+            logger.debug("Failed parsing id_token: %s", jwt_err)
+
+    # 3. Fallback to legacy /v2/me
     try:
         resp = requests.get(
             LINKEDIN_PROFILE_URL,
             headers={"Authorization": f"Bearer {access_token}", "X-Restli-Protocol-Version": "2.0.0"},
             timeout=10,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        member_id = data.get("id")
-        if member_id:
-            return f"urn:li:person:{member_id}"
-        return None
-    except requests.RequestException as exc:
-        logger.exception("Failed to fetch LinkedIn profile: %s", exc)
-        return None
+        if resp.status_code == 200:
+            data = resp.json()
+            member_id = data.get("id")
+            if member_id:
+                return f"urn:li:person:{member_id}", None
+    except Exception as exc:
+        logger.debug("Legacy /v2/me request failed: %s", exc)
+
+    return None, None
 
 
 def upload_image_to_linkedin(access_token: str, author_urn: str, image_bytes: bytes) -> str | None:
