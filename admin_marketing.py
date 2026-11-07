@@ -1231,6 +1231,103 @@ def download_deal_poster(deal_id=None):
     return send_file(buf, mimetype="image/png", as_attachment=True, download_name=f"waj-vtu-{clean_net}-{fmt}-deal.png")
 
 
+def _build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net, flyer_plan, flyer_price, flyer_val, pack):
+    """Build the LinkedIn direct-posting card HTML for the Social Studio."""
+    if not li_configured:
+        return f"""
+        <div class="card" style="background:#f0f9ff; border:1.5px dashed #0a66c2; border-radius:14px; padding:22px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:22px;">💼</span>
+                    <div>
+                        <h4 style="font-size:16px; font-weight:800; color:#09090b; margin:0;">LinkedIn — Direct API Posting</h4>
+                        <span style="font-size:12px; color:#0a66c2; font-weight:600;">Post directly to your LinkedIn profile from here</span>
+                    </div>
+                </div>
+                <span style="font-size:11px; background:#dbeafe; color:#1d4ed8; padding:4px 10px; border-radius:6px; font-weight:700;">NOT CONFIGURED</span>
+            </div>
+            <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 16px; font-size:13px; color:#92400e; margin-bottom:14px;">
+                ⚙️ <strong>Setup required:</strong> Add these 3 variables to your <code>.env</code> file, then restart the app:
+                <ul style="margin:8px 0 0 16px; font-size:12px; font-family:monospace; line-height:2;">
+                    <li>LINKEDIN_CLIENT_ID=<em>your_app_client_id</em></li>
+                    <li>LINKEDIN_CLIENT_SECRET=<em>your_app_client_secret</em></li>
+                    <li>LINKEDIN_REDIRECT_URI=https://your-domain.com/admin/marketing/linkedin/callback</li>
+                </ul>
+            </div>
+            <a href="https://www.linkedin.com/developers/apps" target="_blank" style="display:inline-flex; align-items:center; gap:6px; background:#0a66c2; color:#ffffff; font-weight:700; font-size:13px; padding:10px 18px; border-radius:8px; text-decoration:none;">
+                🔗 Create a LinkedIn App →
+            </a>
+        </div>"""
+
+    li_text = pack.get("linkedin", {}).get("text", pack.get("facebook", {}).get("text", ""))
+    if li_connected:
+        status_badge = '<span style="font-size:11px; background:#dcfce7; color:#15803d; padding:4px 10px; border-radius:6px; font-weight:700;">✓ CONNECTED</span>'
+        urn_display = f'<span style="font-size:11px; color:#52525b; font-family:monospace;">{li_author_urn}</span>' if li_author_urn else ""
+        connect_action = f"""
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                {status_badge} {urn_display}
+                <form method="POST" action="/admin/marketing/linkedin/disconnect" style="margin:0;">
+                    <button type="submit" style="background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; font-size:12px; font-weight:600; padding:5px 12px; border-radius:6px; cursor:pointer;">
+                        Disconnect
+                    </button>
+                </form>
+            </div>"""
+        post_form = f"""
+            <form method="POST" action="/admin/marketing/linkedin/post">
+                <input type="hidden" name="flyer_network" value="{flyer_net}">
+                <input type="hidden" name="flyer_plan" value="{flyer_plan}">
+                <input type="hidden" name="flyer_price" value="{flyer_price}">
+                <input type="hidden" name="flyer_validity" value="{flyer_val}">
+
+                <label style="font-size:12px; font-weight:700; color:#52525b; display:block; margin-bottom:6px;">
+                    Post Text <span style="font-weight:400; color:#71717a;">(editable — LinkedIn supports up to 3,000 chars)</span>
+                </label>
+                <textarea name="linkedin_text" id="linkedin-post-text" rows="6" style="width:100%; padding:12px; border-radius:8px; border:1px solid #d4d4d8; font-size:13px; font-family:monospace; line-height:1.5; resize:vertical; margin-bottom:12px;">{li_text}</textarea>
+
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+                    <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; cursor:pointer;">
+                        <input type="checkbox" name="attach_flyer" value="1" style="width:16px; height:16px;">
+                        Attach promo flyer image (1:1 square)
+                    </label>
+                </div>
+
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                    <button type="submit" style="background:#0a66c2; color:#ffffff; font-weight:800; font-size:13px; padding:12px 22px; border-radius:8px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:7px;">
+                        💼 Post to LinkedIn Now
+                    </button>
+                    <button type="button" onclick="copyStudioText('linkedin-post-text', this)" style="background:#f4f4f5; color:#18181b; font-weight:700; font-size:13px; padding:12px 18px; border-radius:8px; border:1px solid #d4d4d8; cursor:pointer;">
+                        📋 Copy Text
+                    </button>
+                </div>
+            </form>"""
+    else:
+        status_badge = '<span style="font-size:11px; background:#fef3c7; color:#92400e; padding:4px 10px; border-radius:6px; font-weight:700;">NOT CONNECTED</span>'
+        connect_action = f"""
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                {status_badge}
+                <a href="/admin/marketing/linkedin/connect" style="display:inline-flex; align-items:center; gap:6px; background:#0a66c2; color:#ffffff; font-weight:700; font-size:13px; padding:9px 18px; border-radius:8px; text-decoration:none;">
+                    🔗 Connect LinkedIn Account
+                </a>
+            </div>"""
+        post_form = '<div style="background:#f4f4f5; border-radius:8px; padding:16px; font-size:13px; color:#52525b; text-align:center;">Connect your LinkedIn account above to post directly.</div>'
+
+    return f"""
+    <div class="card" style="background:#ffffff; border:1.5px solid #0a66c2; border-radius:14px; padding:22px; box-shadow:0 1px 3px rgba(10,102,194,0.08);">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:22px;">💼</span>
+                <div>
+                    <h4 style="font-size:16px; font-weight:800; color:#09090b; margin:0;">LinkedIn — Direct API Posting</h4>
+                    <span style="font-size:12px; color:#0a66c2; font-weight:600;">Posts directly to your LinkedIn profile feed</span>
+                </div>
+            </div>
+            <span style="font-size:11px; background:#dbeafe; color:#1d4ed8; padding:4px 8px; border-radius:6px; font-weight:700;">UTM: linkedin</span>
+        </div>
+        {connect_action}
+        {post_form}
+    </div>"""
+
+
 # ----------------------------------------------------------------------
 # 8. SOCIAL MEDIA CAMPAIGN STUDIO
 # ----------------------------------------------------------------------
@@ -1243,7 +1340,19 @@ def social_studio():
 
     from services.deal_service import get_lagos_today, generate_daily_deal
     from services.social_campaign_service import generate_social_pack
-    import urllib.parse
+    from services.linkedin_service import is_configured as li_is_configured, is_token_valid as li_token_valid
+    from services.marketing_settings import get_marketing_setting
+    import urllib.parse, json
+
+    # --- LinkedIn connection status ---
+    li_configured = li_is_configured()
+    _li_token_json = get_marketing_setting("LINKEDIN_TOKEN", "")
+    try:
+        _li_token_data = json.loads(_li_token_json) if _li_token_json else {}
+    except (ValueError, TypeError):
+        _li_token_data = {}
+    li_connected = li_token_valid(_li_token_data)
+    li_author_urn = _li_token_data.get("author_urn", "") if li_connected else ""
 
     campaign_type = request.args.get("campaign_type", "DAILY_DEAL").upper()
     deal_id = request.args.get("deal_id", type=int)
@@ -1604,7 +1713,10 @@ def social_studio():
                 </div>
             </div>
 
-            <!-- 6. UTM ATTRIBUTION EXPLAINER -->
+            <!-- 6. LINKEDIN — DIRECT API POSTING -->
+            {_build_linkedin_panel(li_configured, li_connected, li_author_urn, flyer_net, flyer_plan, flyer_price, flyer_val, pack)}
+
+            <!-- 7. UTM ATTRIBUTION EXPLAINER -->
             <div class="card" style="background:#fafaf9; border:1px solid #e4e4e7; border-radius:14px; padding:20px;">
                 <h4 style="font-size:14px; font-weight:800; color:#09090b; margin:0 0 8px 0;">🎯 Automatic Traffic Attribution & UTM Parameters</h4>
                 <p style="font-size:12px; color:#52525b; margin:0 0 12px 0;">
@@ -1631,6 +1743,10 @@ def social_studio():
                     <div style="background:#ffffff; border:1px solid #e4e4e7; border-radius:6px; padding:8px;">
                         <strong>Facebook:</strong><br>
                         <span style="color:#2563eb;">?utm_source=facebook</span>
+                    </div>
+                    <div style="background:#ffffff; border:1px solid #e4e4e7; border-radius:6px; padding:8px;">
+                        <strong>LinkedIn:</strong><br>
+                        <span style="color:#0a66c2;">?utm_source=linkedin</span>
                     </div>
                 </div>
             </div>
@@ -1661,6 +1777,182 @@ def social_studio():
     </script>
     """
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=body, active_page="marketing")
+
+
+# -------------------------------------------------------------------------
+# LINKEDIN OAUTH + DIRECT POSTING
+# -------------------------------------------------------------------------
+
+@marketing_admin_bp.route("/linkedin/connect")
+def linkedin_connect():
+    """Redirect admin to LinkedIn OAuth consent screen."""
+    require_admin_auth, _, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from services.linkedin_service import get_authorization_url, is_configured
+    import secrets
+
+    if not is_configured():
+        flash(
+            "LinkedIn credentials not configured. Add LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, "
+            "and LINKEDIN_REDIRECT_URI to your .env file.",
+            "error",
+        )
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    state = secrets.token_urlsafe(16)
+    # Store state in a short-lived marketing setting to verify on callback
+    from services.marketing_settings import set_marketing_setting
+    set_marketing_setting("LINKEDIN_OAUTH_STATE", state)
+
+    return redirect(get_authorization_url(state))
+
+
+@marketing_admin_bp.route("/linkedin/callback")
+def linkedin_callback():
+    """Handle LinkedIn OAuth callback — exchange code for token and store it."""
+    require_admin_auth, _, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from services.linkedin_service import exchange_code_for_token, get_profile_urn, is_configured
+    from services.marketing_settings import get_marketing_setting, set_marketing_setting
+    import time, json
+
+    error = request.args.get("error")
+    if error:
+        flash(f"LinkedIn OAuth denied: {request.args.get('error_description', error)}", "error")
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    state_received = request.args.get("state", "")
+    state_expected = get_marketing_setting("LINKEDIN_OAUTH_STATE", "")
+    if not state_received or state_received != state_expected:
+        flash("LinkedIn OAuth state mismatch — possible CSRF. Please try connecting again.", "error")
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    code = request.args.get("code", "")
+    if not code:
+        flash("LinkedIn did not return an authorization code.", "error")
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    token_data = exchange_code_for_token(code)
+    if not token_data or not token_data.get("access_token"):
+        flash("Failed to exchange LinkedIn authorization code for token. Check server logs.", "error")
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    # Enrich token data with expiry timestamp and profile URN
+    token_data["expires_at"] = int(time.time()) + int(token_data.get("expires_in", 5183944))
+    access_token = token_data["access_token"]
+    author_urn = get_profile_urn(access_token)
+    if author_urn:
+        token_data["author_urn"] = author_urn
+
+    set_marketing_setting("LINKEDIN_TOKEN", json.dumps(token_data))
+    # Clear the state nonce now that it's been used
+    set_marketing_setting("LINKEDIN_OAUTH_STATE", "")
+
+    flash(
+        f"LinkedIn connected successfully! Author URN: {author_urn or 'unknown'}. "
+        "You can now post directly from the Social Studio.",
+        "success",
+    )
+    return redirect(url_for("marketing_admin.social_studio"))
+
+
+@marketing_admin_bp.route("/linkedin/disconnect", methods=["POST"])
+def linkedin_disconnect():
+    """Revoke/clear the stored LinkedIn token."""
+    require_admin_auth, _, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from services.marketing_settings import set_marketing_setting
+    set_marketing_setting("LINKEDIN_TOKEN", "")
+    flash("LinkedIn account disconnected.", "success")
+    return redirect(url_for("marketing_admin.social_studio"))
+
+
+@marketing_admin_bp.route("/linkedin/post", methods=["POST"])
+def linkedin_post():
+    """Post a campaign directly to LinkedIn — called from the Social Studio."""
+    require_admin_auth, record_admin_audit, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from services.linkedin_service import post_to_linkedin, is_token_valid
+    from services.marketing_settings import get_marketing_setting
+    from services.poster_service import generate_status_poster
+    import json
+
+    token_json = get_marketing_setting("LINKEDIN_TOKEN", "")
+    if not token_json:
+        flash("LinkedIn account is not connected. Connect it first from the Social Studio.", "error")
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    try:
+        token_data = json.loads(token_json)
+    except (ValueError, TypeError):
+        flash("LinkedIn token data is corrupt. Please reconnect.", "error")
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    if not is_token_valid(token_data):
+        flash(
+            "LinkedIn access token has expired. Please reconnect your account.",
+            "error",
+        )
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    access_token = token_data["access_token"]
+    author_urn = token_data.get("author_urn")
+    if not author_urn:
+        flash("LinkedIn author URN not found. Please reconnect your account.", "error")
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    post_text = request.form.get("linkedin_text", "").strip()
+    if not post_text:
+        flash("Post text cannot be empty.", "error")
+        return redirect(url_for("marketing_admin.social_studio"))
+
+    # Optionally attach the promo flyer image
+    attach_flyer = request.form.get("attach_flyer") == "1"
+    image_bytes = None
+    if attach_flyer:
+        try:
+            network = request.form.get("flyer_network", "MTN")
+            plan_name = request.form.get("flyer_plan", "Data Bundle")
+            price = request.form.get("flyer_price", "")
+            validity = request.form.get("flyer_validity", "30 Days")
+            buf = generate_status_poster(
+                network=network, plan_name=plan_name, price=price,
+                validity=validity, format="square",
+            )
+            image_bytes = buf.read()
+        except Exception:
+            pass  # degrade to text-only
+
+    result = post_to_linkedin(
+        access_token=access_token,
+        author_urn=author_urn,
+        text=post_text,
+        image_bytes=image_bytes,
+    )
+
+    if result.get("status") == "success":
+        post_url = result.get("url", "https://linkedin.com/feed")
+        record_admin_audit("LINKEDIN_POST", f"Posted campaign to LinkedIn: {result.get('post_urn','')}")
+        flash(
+            f'✅ Posted to LinkedIn! <a href="{post_url}" target="_blank" style="font-weight:700;">View post →</a>',
+            "success",
+        )
+    else:
+        flash(f"❌ LinkedIn post failed: {result.get('message', 'Unknown error')}", "error")
+
+    return redirect(url_for("marketing_admin.social_studio"))
 
 
 @marketing_admin_bp.route("/social/flyer")

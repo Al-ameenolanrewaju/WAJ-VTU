@@ -279,6 +279,68 @@ def generate_social_pack(
     tw_share_url = f"https://x.com/intent/post?text={urllib.parse.quote(tw_text)}"
     fb_share_url = f"https://www.facebook.com/sharer/sharer.php?u={urllib.parse.quote(fb_url)}"
 
+    # LinkedIn UTM URL
+    li_url = build_utm_url(base_url, source="linkedin", medium="social", campaign=campaign_slug)
+
+    # -------------------------------------------------------------
+    # 6. LinkedIn Copy (Professional, slightly formal, story-driven)
+    #    LinkedIn allows up to 3,000 characters. No link-in-bio
+    #    restriction — the URL can go inline in the post text.
+    # -------------------------------------------------------------
+    if campaign_key == "DAILY_DEAL":
+        li_text = (
+            f"💡 Today's Data Deal for Nigerians — {now_str}\n\n"
+            f"If you're looking for a reliable, affordable way to stay connected, here's today's offer on WAJ VTU:\n\n"
+            f"📦 {network} {data_size}\n"
+            f"💰 Price: {price_str} only\n"
+            f"⏳ Validity: {validity}\n"
+            f"⚡ Delivery: Automated in under 10 seconds\n\n"
+            f"WAJ VTU is a fully automated Nigerian VTU platform offering wholesale data, airtime, "
+            f"electricity tokens, and cable TV subscriptions at the best rates — 24/7, no waiting.\n\n"
+            f"🔗 Order here: {li_url}\n\n"
+            f"#WAJVTUNigeria #CheapData #NigeriaInternet #VTU #{network}Data"
+        )
+    elif campaign_key == "WEEKEND_PROMO":
+        li_text = (
+            f"🌟 Weekend Data Offer — Don't Get Cut Off!\n\n"
+            f"As we head into the weekend, here's a reminder that WAJ VTU offers the cheapest data "
+            f"bundles across MTN, Airtel, Glo, and 9mobile — with instant automated delivery.\n\n"
+            f"No delays. No admin approval. Just top up and browse.\n\n"
+            f"🔗 Top up now: {li_url}\n\n"
+            f"#WAJVTUNigeria #CheapData #WeekendVibes"
+        )
+    elif campaign_key == "REFERRAL_EARN":
+        li_text = (
+            f"💼 Passive Income Opportunity for Nigerians\n\n"
+            f"Did you know you can earn real cash just by referring friends and family to WAJ VTU?\n\n"
+            f"Here's how it works:\n"
+            f"1️⃣ Share your unique referral link\n"
+            f"2️⃣ Your referred contacts sign up and make a purchase\n"
+            f"3️⃣ You earn instant wallet cashback — withdrawable to any Nigerian bank\n\n"
+            f"No investment required. No risk. Pure passive income from your phone.\n\n"
+            f"🔗 Get your referral link: {li_url}\n\n"
+            f"#PassiveIncome #NigeriaHustle #WAJVTUNigeria"
+        )
+    elif campaign_key == "PAYDAY_FLASH":
+        li_text = (
+            f"💼 Payday Data Bonanza — Stack Up Your Data for the Month!\n\n"
+            f"Salary dropped? Here's the smart move: buy your month's high-speed data at wholesale "
+            f"distributor rates on WAJ VTU before prices change.\n\n"
+            f"✅ MTN, Airtel, Glo, 9mobile — all networks supported\n"
+            f"✅ SME, Corporate Gifting & Direct bundles available\n"
+            f"✅ Automated instant delivery — 24/7\n\n"
+            f"🔗 Top up now: {li_url}\n\n"
+            f"#PaydayDeal #WAJVTUNigeria #CheapDataNigeria"
+        )
+    else:
+        li_text = (
+            f"📣 {tagline}\n\n"
+            f"WAJ VTU is a trusted Nigerian VTU platform delivering data, airtime, electricity tokens, "
+            f"and cable TV subscriptions instantly at the best wholesale rates.\n\n"
+            f"🔗 Visit us: {li_url}\n\n"
+            f"#WAJVTUNigeria #CheapData #VTU"
+        )
+
     return {
         "campaign_type": campaign_key,
         "campaign_slug": campaign_slug,
@@ -314,5 +376,9 @@ def generate_social_pack(
             "text": fb_text,
             "share_url": fb_share_url,
             "tracked_url": fb_url,
+        },
+        "linkedin": {
+            "text": li_text,
+            "tracked_url": li_url,
         },
     }
