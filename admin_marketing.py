@@ -992,7 +992,24 @@ def push_dashboard():
         </div>
     </div>
 
-    <!-- Broadcast Composer Form -->
+
+    <!-- Automated Daily Deal Push Engine -->
+    <div class="card" style="margin-bottom:28px; background:#ffffff; border-radius:14px; padding:22px 24px; border-left:4px solid #10b981; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+        <div style="flex:1; min-width:280px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                <span style="font-size:18px;">⚡</span>
+                <h3 style="font-size:16px; font-weight:700; color:#090909; margin:0;">Automated Daily Deal Push Broadcast</h3>
+            </div>
+            <p style="font-size:13px; color:#64748b; margin:0; line-height:1.4;">The automated background engine generates today's hottest data deal and broadcasts it to all active subscriber devices every morning. You can also trigger today's broadcast manually right now.</p>
+        </div>
+        <form method="POST" action="/admin/marketing/push/daily-deal" style="margin:0;">
+            <button type="submit" onclick="return confirm('Auto-generate today\'s deal and broadcast to all active devices now?');" style="background:#10b981; color:#ffffff; font-weight:700; padding:12px 22px; border-radius:8px; font-size:13px; border:none; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:6px;">
+                <span>🚀</span> Send Today's Deal Now
+            </button>
+        </form>
+    </div>
+
+        <!-- Broadcast Composer Form -->
     <div class="card" style="margin-bottom:28px; background:#ffffff; border-radius:14px; padding:24px; border-left:4px solid #ffc400;">
         <h3 style="font-size:17px; font-weight:700; margin-bottom:6px; color:#090909;">🚀 Send Instant Push Broadcast</h3>
         <p style="font-size:13px; color:#64748b; margin-bottom:18px;">Sends an immediate notification to all <strong>{total_subscribers:,}</strong> subscribed devices.</p>
@@ -1057,4 +1074,22 @@ def push_broadcast_route():
     result = broadcast_push(title=title, body=body_text, url=target_url)
     record_admin_audit("admin", f"Broadcast Push: {title[:40]}", success=True)
     flash(f"Push notification sent to {result['sent']} devices ({result['failed']} failed).", "success")
+    return redirect(url_for("marketing_admin.push_dashboard"))
+
+@marketing_admin_bp.route("/push/daily-deal", methods=["POST"])
+def push_daily_deal_route():
+    require_admin_auth, record_admin_audit, _, _ = _get_app_helpers()
+    auth_err = require_admin_auth()
+    if auth_err:
+        return auth_err
+
+    from services.push_service import send_daily_deal_push
+    from flask import flash, redirect, url_for
+
+    res = send_daily_deal_push(force=True)
+    if res.get("status") == "success":
+        record_admin_audit("admin", f"Manual Trigger Daily Deal Push: {res.get('title')}", success=True)
+        flash(f"Daily deal broadcasted to {res.get('sent', 0)} devices: {res.get('title')}", "success")
+    else:
+        flash(f"Daily push skipped or error: {res.get('reason', 'Unknown error')}", "error")
     return redirect(url_for("marketing_admin.push_dashboard"))

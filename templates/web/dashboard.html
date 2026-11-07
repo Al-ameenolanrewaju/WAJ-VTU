@@ -73,6 +73,32 @@
     </div>
   </section>
 
+
+  <!-- SECTION 1.5: PUSH NOTIFICATION OPT-IN BANNER (NON-SUBSCRIBERS) -->
+  <div id="dash-push-alert-banner" style="display: none; background: linear-gradient(135deg, #18181b 0%, #09090b 100%); border: 1px solid #27272a; border-radius: 16px; padding: 18px 22px; margin-bottom: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+      <div style="display: flex; align-items: center; gap: 14px; flex: 1; min-width: 260px;">
+        <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 196, 0, 0.15); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;">
+          🔔
+        </div>
+        <div>
+          <h4 style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: #ffffff; margin-bottom: 3px;">
+            Never Miss a Data Price Crash!
+          </h4>
+          <p style="font-size: 13px; color: #a1a1aa; line-height: 1.4; margin: 0;">
+            Turn on instant push alerts on this device to get daily deals and flash sales from MTN, Airtel, and Glo.
+          </p>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <button type="button" id="dash-push-optin-btn" onclick="activatePushFromDashboard()" style="background: #FFDD00; color: #09090b; font-weight: 700; border: none; padding: 10px 20px; border-radius: 8px; font-size: 13px; cursor: pointer; transition: transform 0.15s ease, background 0.15s ease;">
+          ⚡ Turn On Deal Alerts
+        </button>
+        <button type="button" onclick="dismissDashboardPushBanner()" style="background: transparent; border: none; color: #71717a; font-size: 20px; cursor: pointer; padding: 4px 8px; line-height: 1;" title="Dismiss">&times;</button>
+      </div>
+    </div>
+  </div>
+
   <!-- SECTION 2: WALLET -->
   <section class="dash-section dash-wallet-section">
     <div class="prominent-wallet-card">
@@ -319,4 +345,64 @@
   </section>
   {% endif %}
 </main>
+
+<script>
+  async function updateDashboardPushBannerState() {
+    const banner = document.getElementById('dash-push-alert-banner');
+    if (!banner) return;
+    if (sessionStorage.getItem('dismissed_dash_push_banner')) {
+      banner.style.display = 'none';
+      return;
+    }
+    if (typeof isPushSubscribed === 'function') {
+      const isSub = await isPushSubscribed();
+      if (isSub) {
+        banner.style.display = 'none';
+      } else {
+        banner.style.display = 'block';
+      }
+    } else {
+      if ('Notification' in window && Notification.permission !== 'granted') {
+        banner.style.display = 'block';
+      }
+    }
+  }
+
+  async function activatePushFromDashboard() {
+    const btn = document.getElementById('dash-push-optin-btn');
+    const banner = document.getElementById('dash-push-alert-banner');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Activating...';
+    }
+    if (typeof subscribeUserToPush === 'function') {
+      const ok = await subscribeUserToPush();
+      if (ok) {
+        if (btn) {
+          btn.textContent = 'Alerts Activated! ✅';
+          btn.style.background = '#10b981';
+          btn.style.color = '#ffffff';
+        }
+        setTimeout(() => {
+          if (banner) banner.style.display = 'none';
+        }, 1800);
+      } else {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Retry Alerts 🔔';
+        }
+      }
+    }
+  }
+
+  function dismissDashboardPushBanner() {
+    const banner = document.getElementById('dash-push-alert-banner');
+    if (banner) banner.style.display = 'none';
+    sessionStorage.setItem('dismissed_dash_push_banner', '1');
+  }
+
+  window.addEventListener('load', () => {
+    setTimeout(updateDashboardPushBannerState, 600);
+  });
+</script>
 {% endblock %}

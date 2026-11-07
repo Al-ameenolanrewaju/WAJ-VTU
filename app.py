@@ -129,6 +129,11 @@ def _register_marketing_blueprint():
     from admin_marketing import marketing_admin_bp
     app.register_blueprint(marketing_admin_bp)
 _register_marketing_blueprint()
+try:
+    from services.push_service import start_daily_push_background_worker
+    start_daily_push_background_worker(app)
+except Exception as _push_init_exc:
+    app.logger.warning(f"Could not initialize daily push background worker: {_push_init_exc}")
 
 
 @app.context_processor
@@ -305,8 +310,24 @@ def api_push_unsubscribe():
     from services.push_service import remove_subscription
     sub_data = request.get_json(silent=True) or {}
     endpoint = sub_data.get("endpoint")
-    remove_subscription(endpoint)
+    user_id = session.get("user_id")
+    remove_subscription(endpoint=endpoint, user_id=user_id if not endpoint else None)
     return jsonify({"status": "success", "message": "Unsubscribed"})
+
+
+@app.route("/api/push/status", methods=["GET"])
+def api_push_status():
+    from models import PushSubscription
+    user_id = session.get("user_id")
+    endpoint = request.args.get("endpoint")
+    is_sub = False
+    if endpoint:
+        sub = PushSubscription.query.filter_by(endpoint=endpoint.strip()).first()
+        is_sub = sub is not None
+    elif user_id:
+        sub = PushSubscription.query.filter_by(user_id=user_id).first()
+        is_sub = sub is not None
+    return jsonify({"subscribed": is_sub})
 
 
 @app.route("/sitemap.xml")
@@ -4139,6 +4160,15 @@ def cron_daily_deal():
         "plan": deal.plan_name if deal else None,
         "price": str(deal.price) if deal else None,
     }), 200
+
+
+@app.route("/api/cron/daily-deal-push", methods=["GET", "POST"])
+def cron_daily_deal_push():
+    """Generates today's deal and broadcasts it via Web Push to all active subscribers."""
+    from services.push_service import send_daily_deal_push
+    force = request.args.get("force") in ("1", "true", "True")
+    result = send_daily_deal_push(force=force)
+    return jsonify(result), 200
 
 
 @app.route("/api/cron/reengagement-scan", methods=["GET", "POST"])

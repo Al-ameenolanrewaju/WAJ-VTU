@@ -80,14 +80,23 @@ def save_subscription(sub_data, user_id=None, user_agent=None):
         return None, str(exc)
 
 
-def remove_subscription(endpoint):
+def remove_subscription(endpoint=None, user_id=None):
     """Removes a subscription when user opts out or unregisters."""
-    if not endpoint:
+    if not endpoint and not user_id:
         return False
     try:
-        sub = PushSubscription.query.filter_by(endpoint=endpoint.strip()).first()
-        if sub:
-            db.session.delete(sub)
+        deleted = False
+        if endpoint:
+            sub = PushSubscription.query.filter_by(endpoint=endpoint.strip()).first()
+            if sub:
+                db.session.delete(sub)
+                deleted = True
+        if user_id:
+            subs = PushSubscription.query.filter_by(user_id=user_id).all()
+            for s in subs:
+                db.session.delete(s)
+                deleted = True
+        if deleted:
             db.session.commit()
             return True
         return False
@@ -170,3 +179,114 @@ def broadcast_push(title, body, url=None, icon=None):
         "failed": failed,
     }
 
+
+
+def send_daily_deal_push(force=False):
+    """
+    Auto-generates today's deal of the day and broadcasts it via Web Push
+    to all active subscribers. Idempotent: runs at most once per calendar day (Lagos time)
+    unless force=True.
+    """
+    from services.deal_service import generate_daily_deal, get_lagos_today
+    from services.marketing_settings import get_marketing_setting, set_marketing_setting
+    from models import MarketingCampaign
+
+    today_str = str(get_lagos_today())
+    setting_key = f"DAILY_PUSH_SENT_{today_str}"
+
+    if not force:
+        already_sent = get_marketing_setting(setting_key)
+        if already_sent == "true":
+            logger.info(f"[push_service] Daily push already sent for {today_str}. Skipping.")
+            return {"status": "skipped", "reason": f"Already sent today ({today_str})"}
+
+    deal, _ = generate_daily_deal(target_date=get_lagos_today())
+    if not deal:
+        logger.warning("[push_service] Could not generate daily deal for push.")
+        return {"status": "error", "reason": "No daily deal could be generated"}
+
+    try:
+        price_val = float(deal.price or 0)
+    except (ValueError, TypeError):
+        price_val = 0.0
+
+    title = f"🔥 {deal.network} {deal.plan_name} for ₦{price_val:,.0f}!"
+    body = deal.caption or f"Massive price crash on {deal.network} data! Top up instantly on WAJ VTU."
+    target_url = f"/buy/data?utm_source=web_push&utm_campaign=daily_deal_{today_str}"
+
+    result = broadcast_push(title=title, body=body, url=target_url)
+
+    # Mark as sent for today
+    set_marketing_setting(setting_key, "true")
+
+    # Record in marketing campaign for audit & analytics
+    try:
+        camp = MarketingCampaign(
+            title=title[:100],
+            segment="PUSH_SUBSCRIBERS",
+            channel="WEB_PUSH",
+            template_body=body,
+            status="COMPLETED",
+            total_recipients=result["total"],
+            sent_count=result["sent"],
+            failed_count=result["failed"],
+            scheduled_at=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
+        )
+        db.session.add(camp)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        logger.warning(f"[push_service] Could not log MarketingCampaign for push: {exc}")
+
+    return {
+        "status": "success",
+        "date": today_str,
+        "title": title,
+        "body": body,
+        "sent": result["sent"],
+        "failed": result["failed"],
+        "total": result["total"],
+    }
+
+
+_push_worker_started = False
+
+def start_daily_push_background_worker(app):
+    """
+    Starts a background daemon thread that periodically checks if today's
+    daily deal push notification should be broadcasted.
+    """
+    global _push_worker_started
+    if _push_worker_started:
+        return
+    _push_worker_started = True
+
+    import time
+    import threading
+    from zoneinfo import ZoneInfo
+    LAGOS_TZ = ZoneInfo("Africa/Lagos")
+
+    def worker():
+        time.sleep(30)  # Wait 30 seconds after server startup
+        while True:
+            try:
+                with app.app_context():
+                    from services.marketing_settings import get_marketing_setting, get_setting_bool
+                    if get_setting_bool("DAILY_PUSH_ENABLED", True):
+                        now_lagos = datetime.now(LAGOS_TZ)
+                        # Broadcast daily deal push between 9:00 AM and 9:00 PM Lagos time
+                        if 9 <= now_lagos.hour <= 21:
+                            today_str = str(now_lagos.date())
+                            already_sent = get_marketing_setting(f"DAILY_PUSH_SENT_{today_str}")
+                            if already_sent != "true":
+                                logger.info(f"[push_worker] Triggering automated daily deal push for {today_str}...")
+                                send_daily_deal_push(force=False)
+            except Exception as exc:
+                logger.error(f"[push_worker] Error in background worker: {exc}")
+
+            time.sleep(1200)  # Check every 20 minutes
+
+    thread = threading.Thread(target=worker, daemon=True, name="DailyDealPushWorker")
+    thread.start()
+    logger.info("[push_service] Automated daily deal push background worker started.")

@@ -276,6 +276,15 @@
       <div class="settings-list">
         <div class="settings-item">
           <div>
+            <strong>🔔 Deal &amp; Price Drop Push Alerts</strong>
+            <small id="settings-push-subtext">Instant alerts on this device when networks drop prices</small>
+          </div>
+          <button type="button" id="settings-push-btn" onclick="togglePushFromSettings();" style="border: none; border-radius: 20px; padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s; background: #27272a; color: #a1a1aa;">
+            Checking...
+          </button>
+        </div>
+        <div class="settings-item">
+          <div>
             <strong>WhatsApp Notifications</strong>
             <small>Receive transaction alerts and receipts on WhatsApp</small>
           </div>
@@ -359,12 +368,55 @@
     }
   }
 
+  async function syncSettingsPushUI() {
+    var btn = document.getElementById('settings-push-btn');
+    if (!btn) return;
+    if (typeof isPushSubscribed !== 'function') return;
+    var isSub = await isPushSubscribed();
+    if (isSub) {
+      btn.textContent = 'Active (Tap to Disable)';
+      btn.style.background = '#10b981';
+      btn.style.color = '#ffffff';
+    } else {
+      btn.textContent = 'Turn On';
+      btn.style.background = '#FFDD00';
+      btn.style.color = '#090909';
+    }
+  }
+
+  async function togglePushFromSettings() {
+    var btn = document.getElementById('settings-push-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = 'Updating...';
+
+    if (typeof isPushSubscribed === 'function') {
+      var isSub = await isPushSubscribed();
+      if (isSub) {
+        if (typeof unsubscribeUserFromPush === 'function') {
+          await unsubscribeUserFromPush();
+        }
+      } else {
+        if (typeof subscribeUserToPush === 'function') {
+          await subscribeUserToPush();
+        }
+      }
+    }
+    btn.disabled = false;
+    await syncSettingsPushUI();
+
+    if (typeof updateDashboardPushBannerState === 'function') {
+      updateDashboardPushBannerState();
+    }
+  }
+
   function openSettingsModal() {
     closeMoreSheet();
     var m = document.getElementById('user-settings-modal');
     if (m) {
       m.style.display = 'flex';
       document.body.style.overflow = 'hidden';
+      syncSettingsPushUI();
     }
   }
 

@@ -39,7 +39,7 @@ window.addEventListener('appinstalled', () => {
 // --- WEB PUSH NOTIFICATIONS ---
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const base64 = (base64String + padding).split('-').join('+').split('_').join('/');
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -54,7 +54,7 @@ function arrayBufferToBase64(buffer) {
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return window.btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
 
 async function getOrRegisterServiceWorker() {
@@ -141,6 +141,53 @@ async function subscribeUserToPush() {
     return false;
   }
 }
+
+async function unsubscribeUserFromPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return false;
+  }
+  try {
+    const reg = await getOrRegisterServiceWorker();
+    if (!reg) return false;
+
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      const endpoint = sub.endpoint;
+      await sub.unsubscribe();
+      await fetch('/api/push/unsubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: endpoint }),
+      });
+    }
+    return true;
+  } catch (err) {
+    console.warn('[push] Unsubscribe error:', err);
+    return false;
+  }
+}
+
+async function isPushSubscribed() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    return false;
+  }
+  if (Notification.permission !== 'granted') {
+    return false;
+  }
+  try {
+    const reg = await getOrRegisterServiceWorker();
+    if (!reg) return false;
+    const sub = await reg.pushManager.getSubscription();
+    return !!sub;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Make functions globally available
+window.subscribeUserToPush = subscribeUserToPush;
+window.unsubscribeUserFromPush = unsubscribeUserFromPush;
+window.isPushSubscribed = isPushSubscribed;
 
 function initPushNotificationPrompt() {
   if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
