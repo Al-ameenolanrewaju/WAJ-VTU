@@ -38,8 +38,9 @@ window.addEventListener('appinstalled', () => {
 
 // --- WEB PUSH NOTIFICATIONS ---
 function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).split('-').join('+').split('_').join('/');
+  const str = (base64String || '').trim();
+  const padding = '='.repeat((4 - (str.length % 4)) % 4);
+  const base64 = (str + padding).replace(/\-/g, '+').replace(/_/g, '/');
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -49,66 +50,141 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 function arrayBufferToBase64(buffer) {
+  if (!buffer) return '';
   let binary = '';
   const bytes = new Uint8Array(buffer);
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return window.btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return 'denied';
+  if (Notification.permission === 'granted') return 'granted';
+  try {
+    const res = await Notification.requestPermission();
+    if (res) return res;
+  } catch (e) {}
+  return new Promise((resolve) => {
+    try {
+      Notification.requestPermission((p) => resolve(p || Notification.permission));
+    } catch (err) {
+      resolve(Notification.permission || 'denied');
+    }
+  });
+}
+
+function checkPushSupport() {
+  const isHttps = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (!isHttps) {
+    return { supported: false, reason: 'Push alerts require a secure connection (HTTPS).' };
+  }
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  if (isIOS && !isStandalone) {
+    return {
+      supported: false,
+      reason: 'On iPhone/iPad, tap the Share button (⎋) in Safari and select "Add to Home Screen" to enable push notifications.'
+    };
+  }
+  const ua = navigator.userAgent || '';
+  const isInApp = /FBAN|FBAV|Instagram|WhatsApp|Twitter|Line|Snapchat/i.test(ua);
+  if (isInApp) {
+    return {
+      supported: false,
+      reason: 'In-app browsers do not support push alerts. Tap the menu (⋮) and select "Open in Chrome" or "Open in Safari".'
+    };
+  }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    return { supported: false, reason: 'Your current browser does not support Web Push notifications.' };
+  }
+  return { supported: true, reason: '' };
 }
 
 async function getOrRegisterServiceWorker() {
   if (!('serviceWorker' in navigator)) return null;
   try {
-    let reg = await navigator.serviceWorker.getRegistration('/');
+    let reg = await navigator.serviceWorker.getRegistration();
     if (!reg) {
       reg = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
     }
     await navigator.serviceWorker.ready;
     return reg;
   } catch (err) {
+    console.warn('[push] Service worker registration error:', err);
     try {
-      const reg = await navigator.serviceWorker.register('/static/service-worker.js');
-      await navigator.serviceWorker.ready;
-      return reg;
+      return await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
     } catch (e) {
       return null;
     }
   }
 }
 
-async function subscribeUserToPush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+async function subscribeUserToPush(interactive = false) {
+  const check = checkPushSupport();
+  if (!check.supported) {
+    if (interactive && window.Swal) {
+      Swal.fire({
+        icon: 'info',
+        title: 'Push Notifications',
+        text: check.reason,
+        confirmButtonText: 'Got It',
+        confirmButtonColor: '#FFC400',
+        color: '#090909'
+      });
+    } else if (interactive) {
+      alert(check.reason);
+    }
     return false;
   }
+
   try {
-    const permission = await Notification.requestPermission();
+    const permission = await requestNotificationPermission();
     if (permission !== 'granted') {
+      if (interactive) {
+        const msg = permission === 'denied'
+          ? 'Notifications are blocked in your browser. Click the lock icon 🔒 next to the web address to Allow notifications.'
+          : 'Notification permission was not granted.';
+        if (window.Swal) {
+          Swal.fire({
+            icon: 'warning',
+            title: 'Permission Required',
+            text: msg,
+            confirmButtonText: 'OK',
+            confirmButtonColor: '#FFC400',
+            color: '#090909'
+          });
+        } else {
+          alert(msg);
+        }
+      }
       return false;
     }
 
     const reg = await getOrRegisterServiceWorker();
-    if (!reg) return false;
+    if (!reg) {
+      throw new Error('Service worker could not be registered.');
+    }
 
     let sub = await reg.pushManager.getSubscription();
 
+    let vapidPublicKey = '';
+    const keyMeta = document.querySelector('meta[name="vapid-public-key"]');
+    if (keyMeta && keyMeta.content) {
+      vapidPublicKey = keyMeta.content.trim();
+    }
+    if (!vapidPublicKey) {
+      const keyResp = await fetch('/api/push/vapid-public-key');
+      const keyData = await keyResp.json();
+      vapidPublicKey = (keyData.publicKey || '').trim();
+    }
+
+    if (!vapidPublicKey) {
+      throw new Error('VAPID public key could not be retrieved from server.');
+    }
+
     if (!sub) {
-      let vapidPublicKey = '';
-      const keyMeta = document.querySelector('meta[name="vapid-public-key"]');
-      if (keyMeta && keyMeta.content) {
-        vapidPublicKey = keyMeta.content.trim();
-      }
-      if (!vapidPublicKey) {
-        const keyResp = await fetch('/api/push/vapid-public-key');
-        const keyData = await keyResp.json();
-        vapidPublicKey = keyData.publicKey;
-      }
-
-      if (!vapidPublicKey) {
-        console.warn('[push] VAPID public key not found');
-        return false;
-      }
-
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
@@ -119,11 +195,18 @@ async function subscribeUserToPush() {
     const p256dhKey = sub.getKey ? sub.getKey('p256dh') : null;
     const authKey = sub.getKey ? sub.getKey('auth') : null;
 
+    const p256dh = (rawJson.keys && rawJson.keys.p256dh) || (p256dhKey ? arrayBufferToBase64(p256dhKey) : '');
+    const auth = (rawJson.keys && rawJson.keys.auth) || (authKey ? arrayBufferToBase64(authKey) : '');
+
+    if (!sub.endpoint || !p256dh || !auth) {
+      throw new Error('Push credentials could not be generated by browser.');
+    }
+
     const payload = {
       endpoint: sub.endpoint,
       keys: {
-        p256dh: (rawJson.keys && rawJson.keys.p256dh) || (p256dhKey ? arrayBufferToBase64(p256dhKey) : ''),
-        auth: (rawJson.keys && rawJson.keys.auth) || (authKey ? arrayBufferToBase64(authKey) : ''),
+        p256dh: p256dh,
+        auth: auth,
       }
     };
 
@@ -134,10 +217,38 @@ async function subscribeUserToPush() {
     });
 
     const resJson = await resp.json().catch(() => ({}));
-    console.log('[push] Subscription status:', resJson);
-    return resp.ok;
+    if (!resp.ok) {
+      throw new Error(resJson.message || 'Server subscription failed.');
+    }
+
+    if (interactive && window.Swal) {
+      Swal.fire({
+        icon: 'success',
+        title: 'Push Alerts Active! 🔔',
+        text: 'You will now receive instant alerts on this device whenever data prices crash or flash deals drop.',
+        confirmButtonText: 'Great!',
+        confirmButtonColor: '#FFC400',
+        color: '#090909'
+      });
+    }
+    return true;
   } catch (err) {
     console.warn('[push] Push subscription error:', err);
+    if (interactive) {
+      const errText = err.message || 'Could not subscribe to push alerts.';
+      if (window.Swal) {
+        Swal.fire({
+          icon: 'error',
+          title: 'Subscription Failed',
+          text: errText,
+          confirmButtonText: 'Close',
+          confirmButtonColor: '#FFC400',
+          color: '#090909'
+        });
+      } else {
+        alert(errText);
+      }
+    }
     return false;
   }
 }
@@ -200,7 +311,7 @@ function initPushNotificationPrompt() {
 
       const banner = document.createElement('div');
       banner.id = 'push-notification-banner';
-      banner.style.cssText = 'position:fixed; bottom:24px; left:20px; right:20px; max-width:400px; margin:0 auto; background:#09090b; color:#ffffff; padding:16px 18px; border-radius:12px; border:1px solid #27272a; box-shadow:0 12px 30px rgba(0,0,0,0.4); z-index:99999; display:flex; flex-direction:column; gap:10px; font-family:Inter,sans-serif;';
+      banner.style.cssText = 'position:fixed; bottom:76px; left:16px; right:16px; max-width:420px; margin:0 auto; background:#09090b; color:#ffffff; padding:16px 18px; border-radius:12px; border:1px solid #27272a; box-shadow:0 12px 30px rgba(0,0,0,0.5); z-index:99999; display:flex; flex-direction:column; gap:10px; font-family:Inter,sans-serif;';
       banner.innerHTML = `
         <div style="display:flex; align-items:flex-start; gap:12px;">
           <span style="font-size:24px;">🔔</span>
@@ -221,12 +332,13 @@ function initPushNotificationPrompt() {
         enableBtn.addEventListener('click', async () => {
           enableBtn.disabled = true;
           enableBtn.textContent = 'Enabling...';
-          const success = await subscribeUserToPush();
+          const success = await subscribeUserToPush(true);
           if (success) {
             enableBtn.textContent = 'Alerts Active! 🔔';
             setTimeout(() => banner.remove(), 1200);
           } else {
-            banner.remove();
+            enableBtn.disabled = false;
+            enableBtn.textContent = 'Turn On Alerts';
           }
         });
       }
@@ -245,7 +357,7 @@ function initPushNotificationPrompt() {
 window.addEventListener('load', () => {
   if ('Notification' in window && Notification.permission === 'granted') {
     // Automatically keep push subscription in sync if user already allowed
-    subscribeUserToPush().catch(() => {});
+    subscribeUserToPush(false).catch(() => {});
   } else {
     initPushNotificationPrompt();
   }

@@ -72,6 +72,13 @@ def save_subscription(sub_data, user_id=None, user_agent=None):
                 sub.user_id = user_id
             if user_agent:
                 sub.user_agent = user_agent[:250]
+
+        if user_id:
+            from models import User
+            u = db.session.get(User, user_id)
+            if u and not getattr(u, "push_notifications_enabled", True):
+                u.push_notifications_enabled = True
+
         db.session.commit()
         return sub, "Subscribed successfully."
     except Exception as exc:

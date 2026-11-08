@@ -570,7 +570,7 @@
       btn.textContent = 'Activating...';
     }
     if (typeof subscribeUserToPush === 'function') {
-      const ok = await subscribeUserToPush();
+      const ok = await subscribeUserToPush(true);
       if (ok) {
         if (btn) {
           btn.textContent = 'Alerts Activated! ✅';
