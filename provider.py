@@ -732,7 +732,13 @@ def verify_meter(disco: str, meter_no: str, meter_type: str):
         if disco_id is None:
             return {"valid": False, "message": "SwiftBills electricity configuration is missing"}
         response = _swiftbills_request(
-            f"bill/bill-validation?meter_number={meter_no}&meter_type={meter_type.lower()}&disconumber={disco_id}"
+            "bill/bill-validation",
+            method="POST",
+            payload={
+                "disco": disco_id,
+                "meter_number": str(meter_no).strip(),
+                "meter_type": str(meter_type).strip().lower(),
+            },
         )
         return {
             "valid": _is_success(response) or bool(response.get("name")),

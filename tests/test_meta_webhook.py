@@ -1,7 +1,9 @@
 import os
+import json
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 import requests
@@ -1566,6 +1568,125 @@ def test_chat_agent_admin_whatsapp_reply_and_resolve_commands(monkeypatch):
         tkt_check_resolved = SupportTicket.query.filter_by(ticket_code=tkt.ticket_code).first()
         assert tkt_check_resolved.status == "RESOLVED"
         assert tkt_check_resolved.resolved_at is not None
+
+
+def test_direct_electricity_payment_sends_token_to_whatsapp(monkeypatch):
+    import app as app_module
+    import chat_agent
+    import provider
+
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"234{uuid.uuid4().hex[:10]}",
+            phone=f"234{uuid.uuid4().hex[:10]}",
+            wallet_balance=Decimal("1000.00"),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+        monkeypatch.setattr(
+            provider,
+            "process_electricity_payment",
+            lambda *args: {
+                "status": "SUCCESS",
+                "reference": "ELEC-DIRECT-TOKEN",
+                "token": "1234-5678-9012",
+            },
+        )
+        monkeypatch.setattr(app_module, "get_markup", lambda *args: Decimal("0.00"))
+
+        tool_call = SimpleNamespace(
+            id="electricity-call",
+            function=SimpleNamespace(
+                name="pay_electricity",
+                arguments=json.dumps({
+                    "disco": "IBEDC",
+                    "meter_number": "12345678901",
+                    "meter_type": "PREPAID",
+                    "amount": 500,
+                    "confirm": True,
+                }),
+            ),
+        )
+        message = SimpleNamespace(
+            tool_calls=[tool_call],
+            model_dump=lambda **kwargs: {"role": "assistant", "tool_calls": []},
+        )
+        groq_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(
+                    create=lambda **kwargs: SimpleNamespace(
+                        choices=[SimpleNamespace(message=message)]
+                    )
+                )
+            )
+        )
+        monkeypatch.setattr(chat_agent, "get_groq_client", lambda: groq_client)
+
+        sent = []
+        monkeypatch.setattr(
+            app_module,
+            "send_whatsapp_message",
+            lambda recipient, text: sent.append((recipient, text)) or True,
+        )
+
+        chat_agent.handle_chat_message(
+            app_module.app, app_module.db, user, "Pay electricity", "123456", user.phone
+        )
+
+        assert any("Token: 1234-5678-9012" in text for _, text in sent)
+
+
+def test_pending_electricity_confirmation_sends_token_to_whatsapp(monkeypatch):
+    import app as app_module
+    import chat_agent
+    import provider
+
+    with app_module.app.app_context():
+        user = app_module.User(
+            whatsapp_id=f"234{uuid.uuid4().hex[:10]}",
+            phone=f"234{uuid.uuid4().hex[:10]}",
+            wallet_balance=Decimal("1000.00"),
+            state_data={
+                "pending_confirmation": {
+                    "tool_name": "pay_electricity",
+                    "kwargs": {
+                        "disco": "IBEDC",
+                        "meter_number": "12345678901",
+                        "meter_type": "PREPAID",
+                        "amount": "500.00",
+                    },
+                }
+            },
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+
+        monkeypatch.setattr(
+            provider,
+            "process_electricity_payment",
+            lambda *args: {
+                "status": "SUCCESS",
+                "reference": "ELEC-PENDING-TOKEN",
+                "token": "9876-5432-1098",
+            },
+        )
+        monkeypatch.setattr(app_module, "get_markup", lambda *args: Decimal("0.00"))
+        monkeypatch.setattr(chat_agent, "get_groq_client", lambda: None)
+
+        sent = []
+        monkeypatch.setattr(
+            app_module,
+            "send_whatsapp_message",
+            lambda recipient, text: sent.append((recipient, text)) or True,
+        )
+
+        chat_agent.handle_chat_message(
+            app_module.app, app_module.db, user, "YES", "123456", user.phone
+        )
+
+        assert any("Token: 9876-5432-1098" in text for _, text in sent)
+        assert user.state_data.get("pending_confirmation") is None
 
 
 

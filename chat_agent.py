@@ -983,7 +983,16 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
                 tx.provider_name = str(result.get("provider") or tx.provider_name or "unknown").lower()[:30]
                 tx.provider_reference = (result.get("provider_reference") or tx.provider_reference or result.get("reference") or "")[:100]
                 db.session.commit()
-            return {"status": "success", "reference": result['reference'], "token": result.get("token"), "message": "Payment successful"}
+            token = result.get("token")
+            message = "Electricity payment successful."
+            if token is not None and str(token).strip().lower() not in {"", "n/a", "none", "null"}:
+                message += f"\nToken: {str(token).strip()}"
+            return {
+                "status": "success",
+                "reference": result["reference"],
+                "token": token,
+                "message": message,
+            }
         else:
             return {"status": "error", "message": result.get("reason", "Payment failed")}
 
@@ -1426,6 +1435,15 @@ def handle_chat_message(app, db, user, text, chat_id, provider_phone):
                     "name": func_name,
                     "content": json.dumps(result)
                 })
+
+                if func_name == "pay_electricity" and result.get("status") == "success":
+                    final_text = result.get("message", "Electricity payment successful.")
+                    messages.append({"role": "assistant", "content": final_text})
+                    send_whatsapp_message(chat_id, final_text)
+                    history.extend(messages[turn_start + 1:])
+                    user.state_data = {"messages": history}
+                    db.session.commit()
+                    return
 
                 follow_up_names.update({
                     "get_data_plans": {"buy_data"},
