@@ -8,8 +8,21 @@
     <form method="POST" action="{{ url_for('web.electricity_page') }}">
       <label>Distribution company</label>
       <select name="disco">
-        {% for d in ["EKEDC", "IKEDC", "AEDC", "PHEDC", "KEDCO", "JED", "IBEDC", "EEDC"] %}
-        <option value="{{ d }}">{{ d }}</option>
+        {% for code, label in [
+          ("IE", "Ikeja Electric"),
+          ("EKEDC", "Eko Electric"),
+          ("KEDCO", "Kano Electric"),
+          ("PHEDC", "Port Harcourt Electric"),
+          ("JED", "Jos Electric"),
+          ("IBEDC", "Ibadan Electric"),
+          ("KEDC", "Kaduna Electric"),
+          ("AEDC", "Abuja Electric"),
+          ("ENUGU", "Enugu Electric"),
+          ("BENIN", "Benin Electric"),
+          ("YOLA", "Yola Electric"),
+          ("ABEDC", "Aba Electric")
+        ] %}
+        <option value="{{ code }}">{{ label }}</option>
         {% endfor %}
       </select>
       <label>Meter type</label><select name="meter_type">
