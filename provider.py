@@ -709,114 +709,106 @@ def process_cable_tv(
 # --- ELECTRICITY SERVICES ---
 
 
+# SwiftBills distributor abbreviations and compatibility aliases for older WAJ values.
+_SWIFTBILLS_DISCO_ALIASES = {
+    "IKEDC": "IE",
+    "IKEJA ELECTRIC": "IE",
+    "IE": "IE",
+    "EKO ELECTRIC": "EKEDC",
+    "EKEDC": "EKEDC",
+    "KANO ELECTRIC": "KEDCO",
+    "KEDCO": "KEDCO",
+    "PORT HARCOURT ELECTRIC": "PHEDC",
+    "PHEDC": "PHEDC",
+    "JOS ELECTRIC": "JED",
+    "JED": "JED",
+    "IBADAN ELECTRIC": "IBEDC",
+    "IBEDC": "IBEDC",
+    "KADUNA ELECTRIC": "KEDC",
+    "KEDC": "KEDC",
+    "ABUJA ELECTRIC": "AEDC",
+    "AEDC": "AEDC",
+    "ENUGU ELECTRIC": "ENUGU",
+    "EEDC": "ENUGU",
+    "ENUGU": "ENUGU",
+    "BENIN ELECTRIC": "BENIN",
+    "BENIN": "BENIN",
+    "YOLA ELECTRIC": "YOLA",
+    "YOLA": "YOLA",
+    "ABA ELECTRIC": "ABEDC",
+    "ABEDC": "ABEDC",
+}
+
+
 def _swiftbills_disco_id(disco: str):
+    """Resolve a WAJ distributor label/code against SwiftBills' live get-bill catalog."""
     bills = _swiftbills_request("get-bill")
     if not isinstance(bills, list):
         return None
+
     target = str(disco or "").strip().upper()
+    target_abb = _SWIFTBILLS_DISCO_ALIASES.get(target, target)
     for item in bills:
         if not isinstance(item, dict):
             continue
         abb = str(item.get("abb", "")).strip().upper()
         name = str(item.get("name", "")).strip().upper()
-        disco_field = str(item.get("disco", "")).strip().upper()
-        if target in {abb, name, disco_field} or (abb and abb == target) or (target and target in name):
+        if target_abb == abb or target == name:
             return item.get("id")
     return None
 
 
 def verify_meter(disco: str, meter_no: str, meter_type: str):
-    """Verifies electricity meter account details using SwiftBills only."""
+    """Verify a meter using SwiftBills' documented GET bill-validation contract."""
     if MOCK_MODE:
         return {"valid": True, "customer_name": "Test Meter User", "message": "Success"}
     if not SWIFTBILLS_API_KEY:
         return {"valid": False, "message": "SwiftBills credentials are missing"}
+
     try:
         disco_id = _swiftbills_disco_id(disco)
         if disco_id is None:
             return {"valid": False, "message": "SwiftBills electricity configuration is missing"}
+
         try:
-            disco_val = int(disco_id)
+            disco_value = int(disco_id)
         except (TypeError, ValueError):
-            disco_val = disco_id
+            return {"valid": False, "message": "SwiftBills returned an invalid electricity provider ID"}
 
-        clean_meter = str(meter_no).strip()
-        clean_type = str(meter_type).strip().lower()
+        clean_meter = str(meter_no or "").strip()
+        clean_type = str(meter_type or "").strip().lower()
+        if not clean_meter:
+            return {"valid": False, "message": "Enter your meter number."}
+        if clean_type not in {"prepaid", "postpaid"}:
+            return {"valid": False, "message": "Meter type must be prepaid or postpaid."}
 
-        # Try GET query parameters first (SwiftBills standard for validation endpoints)
-        response = None
-        valid = False
-        name = ""
-        is_invalid_name = True
-        last_error = None
+        # SwiftBills documents GET with these exact query parameter names.
+        query = urlencode({
+            "meter_number": clean_meter,
+            "meter_type": clean_type,
+            "disco": disco_value,
+        })
+        response = _swiftbills_request(f"bill/bill-validation?{query}")
+        if not isinstance(response, dict):
+            return {"valid": False, "message": "SwiftBills returned an unexpected meter verification response."}
 
-        try:
-            get_url = f"bill/bill-validation?meter_number={clean_meter}&meter_type={clean_type}&disconumber={disco_val}&disco={disco_val}"
-            get_resp = _swiftbills_request(get_url)
-            logger.info("SwiftBills meter verification GET response: %s", get_resp)
-            raw_name = get_resp.get("name") or get_resp.get("customer_name") or ""
-            parsed_name = str(raw_name).strip()
-            get_invalid = parsed_name.lower() in {
-                "", "unable to verify", "invalid_meterno", "invalid_meter", "invalid meter", "n/a", "na", "none", "null"
-            }
-            if (_is_success(get_resp) or bool(parsed_name)) and not get_invalid:
-                response = get_resp
-                name = parsed_name
-                is_invalid_name = False
-                valid = True
-            else:
-                response = get_resp
-                name = parsed_name
-                is_invalid_name = get_invalid
-        except Exception as get_err:
-            last_error = get_err
-            logger.warning("SwiftBills meter verification GET failed: %s", get_err)
-
-        # Fallback to POST if GET did not return a valid customer
-        if not valid:
-            try:
-                post_resp = _swiftbills_request(
-                    "bill/bill-validation",
-                    method="POST",
-                    payload={
-                        "disco": disco_val,
-                        "disconumber": disco_val,
-                        "meter_number": clean_meter,
-                        "meter_type": clean_type,
-                    },
-                )
-                logger.info("SwiftBills meter verification POST response: %s", post_resp)
-                raw_name = post_resp.get("name") or post_resp.get("customer_name") or ""
-                parsed_name = str(raw_name).strip()
-                post_invalid = parsed_name.lower() in {
-                    "", "unable to verify", "invalid_meterno", "invalid_meter", "invalid meter", "n/a", "na", "none", "null"
-                }
-                if (_is_success(post_resp) or bool(parsed_name)) and not post_invalid:
-                    response = post_resp
-                    name = parsed_name
-                    is_invalid_name = False
-                    valid = True
-                elif response is None:
-                    response = post_resp
-                    name = parsed_name
-                    is_invalid_name = post_invalid
-            except Exception as post_err:
-                last_error = post_err
-                logger.warning("SwiftBills meter verification POST failed: %s", post_err)
-
-        if response is None:
-            err_message = str(last_error) if last_error else "Meter verification failed to connect to SwiftBills"
-            return {"valid": False, "message": err_message}
+        raw_name = response.get("name") or response.get("customer_name") or ""
+        customer_name = str(raw_name).strip()
+        invalid_names = {
+            "", "unable to verify", "invalid_meterno", "invalid_meter",
+            "invalid meter", "n/a", "na", "none", "null",
+        }
+        valid = _is_success(response) and customer_name.lower() not in invalid_names
 
         return {
             "valid": valid,
-            "customer_name": "" if is_invalid_name else name,
-            "message": response.get("message", "Meter verification failed" if not valid else "Success"),
+            "customer_name": customer_name if valid else "",
+            "message": response.get("message") or ("Meter verified successfully." if valid else "Meter verification failed."),
             "data": response,
         }
     except Exception as exc:
         logger.error("SwiftBills meter verification failed: %s", exc)
-        return {"valid": False, "message": str(exc)}
+        return {"valid": False, "message": _swiftbills_error_message(exc)}
 
 
 def process_electricity_payment(
@@ -848,8 +840,16 @@ def process_electricity_payment(
                 "status": "SUCCESS",
                 "reference": ref,
                 "provider": "swiftbills",
-                "provider_reference": response.get("reference", response.get("request_id", ref)),
-                "token": response.get("token", "N/A"),
+                "provider_reference": (
+                    response.get("request-id")
+                    or response.get("request_id")
+                    or response.get("reference")
+                    or ref
+                ),
+                "token": (
+                    None if str(response.get("token", "")).strip().lower() in {"", "none", "null", "n/a"}
+                    else response.get("token")
+                ),
                 "reason": "",
                 "data": response,
             }
