@@ -731,19 +731,29 @@ def verify_meter(disco: str, meter_no: str, meter_type: str):
         disco_id = _swiftbills_disco_id(disco)
         if disco_id is None:
             return {"valid": False, "message": "SwiftBills electricity configuration is missing"}
+        try:
+            disco_val = int(disco_id)
+        except (TypeError, ValueError):
+            disco_val = disco_id
         response = _swiftbills_request(
             "bill/bill-validation",
             method="POST",
             payload={
-                "disco": disco_id,
+                "disco": disco_val,
                 "meter_number": str(meter_no).strip(),
                 "meter_type": str(meter_type).strip().lower(),
             },
         )
+        raw_name = response.get("name") or response.get("customer_name") or ""
+        name = str(raw_name).strip()
+        is_invalid_name = name.lower() in {
+            "", "unable to verify", "invalid_meterno", "invalid_meter", "invalid meter", "n/a", "na", "none", "null"
+        }
+        valid = (_is_success(response) or bool(name)) and not is_invalid_name
         return {
-            "valid": _is_success(response) or bool(response.get("name")),
-            "customer_name": response.get("name", ""),
-            "message": response.get("message", "Meter verification failed"),
+            "valid": valid,
+            "customer_name": "" if is_invalid_name else name,
+            "message": response.get("message", "Meter verification failed" if not valid else "Success"),
             "data": response,
         }
     except Exception as exc:

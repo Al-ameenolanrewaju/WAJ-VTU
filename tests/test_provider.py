@@ -37,7 +37,7 @@ def test_verify_meter_posts_resolved_swiftbills_disco_and_meter_details(
             "bill/bill-validation",
             "POST",
             {
-                "disco": "6",
+                "disco": 6,
                 "meter_number": "12345678901",
                 "meter_type": expected_meter_type,
             },
@@ -64,6 +64,28 @@ def test_verify_meter_returns_invalid_meter_response(monkeypatch):
 
     assert result["valid"] is False
     assert result["message"] == "Invalid meter number"
+
+
+def test_verify_meter_rejects_placeholder_customer_names(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "test-key")
+    monkeypatch.setattr(
+        provider,
+        "_swiftbills_request",
+        lambda endpoint, method="GET", payload=None: (
+            [{"id": "6", "abb": "IBEDC"}]
+            if endpoint == "get-bill"
+            else {"status": "success", "name": "Unable to verify", "message": "Unable to verify"}
+        ),
+    )
+
+    result = provider.verify_meter("IBEDC", "12345678901", "PREPAID")
+
+    assert result["valid"] is False
+    assert result["customer_name"] == ""
+    assert result["message"] == "Unable to verify"
 
 
 def test_verify_meter_requires_swiftbills_credentials(monkeypatch):
