@@ -34,13 +34,9 @@ def test_verify_meter_posts_resolved_swiftbills_disco_and_meter_details(
     assert requests == [
         ("get-bill", "GET", None),
         (
-            "bill/bill-validation",
-            "POST",
-            {
-                "disco": 6,
-                "meter_number": "12345678901",
-                "meter_type": expected_meter_type,
-            },
+            f"bill/bill-validation?meter_number=12345678901&meter_type={expected_meter_type}&disconumber=6&disco=6",
+            "GET",
+            None,
         ),
     ]
 
@@ -86,6 +82,36 @@ def test_verify_meter_rejects_placeholder_customer_names(monkeypatch):
     assert result["valid"] is False
     assert result["customer_name"] == ""
     assert result["message"] == "Unable to verify"
+
+
+def test_verify_meter_falls_back_to_post_when_get_fails(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "test-key")
+    call_log = []
+
+    def mock_request(endpoint, method="GET", payload=None):
+        call_log.append((endpoint, method, payload))
+        if endpoint == "get-bill":
+            return [{"id": "6", "abb": "IBEDC"}]
+        if method == "GET":
+            return {"status": "failed", "message": "Unable to verify"}
+        return {
+            "status": "success",
+            "name": "Fallback Customer",
+            "message": "verified",
+        }
+
+    monkeypatch.setattr(provider, "_swiftbills_request", mock_request)
+
+    result = provider.verify_meter("IBEDC", "12345678901", "PREPAID")
+
+    assert result["valid"] is True
+    assert result["customer_name"] == "Fallback Customer"
+    assert len(call_log) == 3
+    assert call_log[1][1] == "GET"
+    assert call_log[2][1] == "POST"
 
 
 def test_verify_meter_requires_swiftbills_credentials(monkeypatch):

@@ -713,10 +713,14 @@ def _swiftbills_disco_id(disco: str):
     bills = _swiftbills_request("get-bill")
     if not isinstance(bills, list):
         return None
+    target = str(disco or "").strip().upper()
     for item in bills:
         if not isinstance(item, dict):
             continue
-        if str(item.get("abb", "")).strip().upper() == disco.upper():
+        abb = str(item.get("abb", "")).strip().upper()
+        name = str(item.get("name", "")).strip().upper()
+        disco_field = str(item.get("disco", "")).strip().upper()
+        if target in {abb, name, disco_field} or (abb and abb == target) or (target and target in name):
             return item.get("id")
     return None
 
@@ -735,21 +739,75 @@ def verify_meter(disco: str, meter_no: str, meter_type: str):
             disco_val = int(disco_id)
         except (TypeError, ValueError):
             disco_val = disco_id
-        response = _swiftbills_request(
-            "bill/bill-validation",
-            method="POST",
-            payload={
-                "disco": disco_val,
-                "meter_number": str(meter_no).strip(),
-                "meter_type": str(meter_type).strip().lower(),
-            },
-        )
-        raw_name = response.get("name") or response.get("customer_name") or ""
-        name = str(raw_name).strip()
-        is_invalid_name = name.lower() in {
-            "", "unable to verify", "invalid_meterno", "invalid_meter", "invalid meter", "n/a", "na", "none", "null"
-        }
-        valid = (_is_success(response) or bool(name)) and not is_invalid_name
+
+        clean_meter = str(meter_no).strip()
+        clean_type = str(meter_type).strip().lower()
+
+        # Try GET query parameters first (SwiftBills standard for validation endpoints)
+        response = None
+        valid = False
+        name = ""
+        is_invalid_name = True
+        last_error = None
+
+        try:
+            get_url = f"bill/bill-validation?meter_number={clean_meter}&meter_type={clean_type}&disconumber={disco_val}&disco={disco_val}"
+            get_resp = _swiftbills_request(get_url)
+            logger.info("SwiftBills meter verification GET response: %s", get_resp)
+            raw_name = get_resp.get("name") or get_resp.get("customer_name") or ""
+            parsed_name = str(raw_name).strip()
+            get_invalid = parsed_name.lower() in {
+                "", "unable to verify", "invalid_meterno", "invalid_meter", "invalid meter", "n/a", "na", "none", "null"
+            }
+            if (_is_success(get_resp) or bool(parsed_name)) and not get_invalid:
+                response = get_resp
+                name = parsed_name
+                is_invalid_name = False
+                valid = True
+            else:
+                response = get_resp
+                name = parsed_name
+                is_invalid_name = get_invalid
+        except Exception as get_err:
+            last_error = get_err
+            logger.warning("SwiftBills meter verification GET failed: %s", get_err)
+
+        # Fallback to POST if GET did not return a valid customer
+        if not valid:
+            try:
+                post_resp = _swiftbills_request(
+                    "bill/bill-validation",
+                    method="POST",
+                    payload={
+                        "disco": disco_val,
+                        "disconumber": disco_val,
+                        "meter_number": clean_meter,
+                        "meter_type": clean_type,
+                    },
+                )
+                logger.info("SwiftBills meter verification POST response: %s", post_resp)
+                raw_name = post_resp.get("name") or post_resp.get("customer_name") or ""
+                parsed_name = str(raw_name).strip()
+                post_invalid = parsed_name.lower() in {
+                    "", "unable to verify", "invalid_meterno", "invalid_meter", "invalid meter", "n/a", "na", "none", "null"
+                }
+                if (_is_success(post_resp) or bool(parsed_name)) and not post_invalid:
+                    response = post_resp
+                    name = parsed_name
+                    is_invalid_name = False
+                    valid = True
+                elif response is None:
+                    response = post_resp
+                    name = parsed_name
+                    is_invalid_name = post_invalid
+            except Exception as post_err:
+                last_error = post_err
+                logger.warning("SwiftBills meter verification POST failed: %s", post_err)
+
+        if response is None:
+            err_message = str(last_error) if last_error else "Meter verification failed to connect to SwiftBills"
+            return {"valid": False, "message": err_message}
+
         return {
             "valid": valid,
             "customer_name": "" if is_invalid_name else name,
