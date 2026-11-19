@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 
 @pytest.mark.parametrize(
@@ -115,3 +116,73 @@ def test_verify_meter_reports_provider_api_exception(monkeypatch):
     result = provider.verify_meter("IBEDC", "12345678901", "PREPAID")
 
     assert result == {"valid": False, "message": "SwiftBills unavailable"}
+
+
+def test_electricity_payment_sends_documented_payload_and_trims_meter(monkeypatch):
+    import provider
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "test-key")
+    requests_made = []
+
+    def fake_swiftbills_request(endpoint, method="GET", payload=None):
+        requests_made.append((endpoint, method, payload))
+        if endpoint == "get-bill":
+            return [{"id": "6", "abb": "IBEDC"}]
+        return {
+            "status": "success",
+            "token": "1234-5678-9012",
+        }
+
+    monkeypatch.setattr(provider, "_swiftbills_request", fake_swiftbills_request)
+
+    result = provider.process_electricity_payment(
+        "IBEDC", " 12345678901 ", " PREPAID ", 500, " 2348000000001 "
+    )
+
+    assert result["status"] == "SUCCESS"
+    assert result["token"] == "1234-5678-9012"
+    assert requests_made == [
+        ("get-bill", "GET", None),
+        (
+            "bill",
+            "POST",
+            {
+                "disco": 6,
+                "meter_type": "prepaid",
+                "meter_number": "12345678901",
+                "amount": "500",
+                "phone": "2348000000001",
+            },
+        ),
+    ]
+
+
+def test_electricity_payment_returns_swiftbills_error_body(monkeypatch):
+    import provider
+
+    class ErrorResponse:
+        text = '{"message":"Invalid meter number"}'
+
+        def json(self):
+            return {"message": "Invalid meter number"}
+
+    monkeypatch.setattr(provider, "MOCK_MODE", False)
+    monkeypatch.setattr(provider, "SWIFTBILLS_API_KEY", "test-key")
+
+    def raise_api_error(endpoint, method="GET", payload=None):
+        if endpoint == "get-bill":
+            return [{"id": "6", "abb": "IBEDC"}]
+        raise requests.HTTPError(
+            "400 Client Error: Bad Request",
+            response=ErrorResponse(),
+        )
+
+    monkeypatch.setattr(provider, "_swiftbills_request", raise_api_error)
+
+    result = provider.process_electricity_payment(
+        "IBEDC", "12345678901", "PREPAID", 500
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["reason"] == "Invalid meter number"

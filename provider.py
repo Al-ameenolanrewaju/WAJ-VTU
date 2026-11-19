@@ -769,11 +769,10 @@ def process_electricity_payment(
             method="POST",
             payload={
                 "disco": int(disco_id),
-                "meter_type": meter_type.lower(),
-                "meter_number": meter_no,
+                "meter_type": str(meter_type).strip().lower(),
+                "meter_number": str(meter_no).strip(),
                 "amount": str(amount),
-                "phone": phone,
-                "request-id": ref,
+                "phone": str(phone).strip(),
             },
         )
         if _is_success(response):
@@ -788,8 +787,9 @@ def process_electricity_payment(
             }
         return _failure(ref, response.get("message", "SwiftBills electricity payment failed"), provider="swiftbills")
     except Exception as exc:
-        logger.error("SwiftBills electricity payment failed: %s", exc)
-        return _failure(ref, str(exc), provider="swiftbills")
+        error = _swiftbills_error_message(exc)
+        logger.error("SwiftBills electricity payment failed: %s", error)
+        return _failure(ref, error, provider="swiftbills")
 
 
 # --- BETTING & EDUCATION SERVICES ---
