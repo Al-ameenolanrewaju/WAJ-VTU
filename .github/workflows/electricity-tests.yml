@@ -1,0 +1,31 @@
+name: Electricity provider tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "provider.py"
+      - "tests/test_provider.py"
+      - ".github/workflows/electricity-tests.yml"
+  push:
+    branches:
+      - "fix/swiftbills-electricity-api-contract"
+
+permissions:
+  contents: read
+
+jobs:
+  provider-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest requests python-dotenv
+      - name: Run electricity provider tests
+        run: python -m pytest -q tests/test_provider.py
