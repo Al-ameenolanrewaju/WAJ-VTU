@@ -264,6 +264,7 @@ RULES:
 1. ALWAYS CALL THE TOOL FIRST: When a user asks about data plans, prices, or wants to buy data (e.g. "MTN data plans", "show me data", "prices for Airtel"), you MUST ALWAYS call the `get_data_plans` tool. NEVER recite plans or prices from memory, and NEVER guess plans.
 2. FORMAT BEAUTIFULLY FOR WHATSAPP: Use relevant emojis (e.g. 🌐, 📶, ⚡, 💸) and WhatsApp bold text (e.g. *1GB* - *₦500*) to make the chat clear and engaging. Present options as a clean, numbered list. DO NOT show the `plan_code` or internal codes to the user, only show the plan name and price.
 3. Before any purchase, repeat the selected plan, exact price, recipient, and ask the user to confirm. Only purchase after a clear confirmation. When confirmed, use the exact `plan_code` and `amount`.
+ELECTRICITY FLOW: For electricity requests, identify the distributor, meter type, and meter number. Use the SwiftBills distributor codes exactly: IE (Ikeja), EKEDC (Eko), KEDCO (Kano), PHEDC (Port Harcourt), JED (Jos), IBEDC (Ibadan), KEDC (Kaduna), AEDC (Abuja), ENUGU, BENIN, YOLA, and ABEDC (Aba). Always call `verify_meter` before offering payment. Only proceed when the provider confirms the meter and returns a customer name. Do not invent meter-length rules or tell users a meter must be 11 digits unless the provider explicitly reports that requirement. Before payment, confirm the amount and meter details with the user.
 4. If a purchase fails, inform the user politely.
 5. KEEP YOUR RESPONSES SHORT AND FRIENDLY.
 6. **MULTI-LANGUAGE SUPPORT**: If the user speaks to you in Hausa, Igbo, Yoruba, or Nigerian Pidgin, YOU MUST RESPOND IN THAT EXACT NATIVE LANGUAGE. Translate your responses naturally while executing the underlying tools normally in English.
@@ -380,7 +381,7 @@ def define_tools():
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "disco": {"type": "string", "enum": ["IKEDC", "EKEDC", "AEDC", "IBEDC"]},
+                        "disco": {"type": "string", "enum": ["IE", "EKEDC", "KEDCO", "PHEDC", "JED", "IBEDC", "KEDC", "AEDC", "ENUGU", "BENIN", "YOLA", "ABEDC"], "description": "SwiftBills distributor code. IE=Ikeja, EKEDC=Eko, KEDCO=Kano, PHEDC=Port Harcourt, JED=Jos, IBEDC=Ibadan, KEDC=Kaduna, AEDC=Abuja, ENUGU=Enugu, BENIN=Benin, YOLA=Yola, ABEDC=Aba."},
                         "meter_number": {"type": "string"},
                         "meter_type": {"type": "string", "enum": ["PREPAID", "POSTPAID"]}
                     },
@@ -396,7 +397,7 @@ def define_tools():
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "disco": {"type": "string", "enum": ["IKEDC", "EKEDC", "AEDC", "IBEDC"]},
+                        "disco": {"type": "string", "enum": ["IE", "EKEDC", "KEDCO", "PHEDC", "JED", "IBEDC", "KEDC", "AEDC", "ENUGU", "BENIN", "YOLA", "ABEDC"], "description": "SwiftBills distributor code. IE=Ikeja, EKEDC=Eko, KEDCO=Kano, PHEDC=Port Harcourt, JED=Jos, IBEDC=Ibadan, KEDC=Kaduna, AEDC=Abuja, ENUGU=Enugu, BENIN=Benin, YOLA=Yola, ABEDC=Aba."},
                         "meter_number": {"type": "string"},
                         "meter_type": {"type": "string", "enum": ["PREPAID", "POSTPAID"]},
                         "amount": {"type": "number"},
