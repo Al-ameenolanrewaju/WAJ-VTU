@@ -25,8 +25,6 @@ MOCK_MODE = os.getenv("MOCK_MODE", "False").lower() == "true"
 
 NETWORK_CODES = {"MTN": "01", "GLO": "02", "9MOBILE": "03", "AIRTEL": "04"}
 NETWORK_NAMES = {"01": "MTN", "02": "Glo", "03": "m_9mobile", "04": "Airtel"}
-DISCO_CODES = {"IKEDC": "01", "EKEDC": "02", "AEDC": "03", "IBEDC": "04"}
-METER_TYPE_CODES = {"PREPAID": "01", "POSTPAID": "02"}
 
 
 def generate_ref(prefix: str) -> str:
