@@ -3659,6 +3659,7 @@ def admin_pricing():
             {
                 "name": p.get("name", "Data Plan"),
                 "code": str(p.get("variation_code", "")),
+                "plan_id": str(p.get("plan_id") or str(p.get("variation_code", "")).split(":")[-1]),
                 "cost": Decimal(str(p.get("variation_amount", 0))),
             }
             for p in raw_plans
@@ -3672,6 +3673,7 @@ def admin_pricing():
             {
                 "name": p.get("name", "Cable Plan"),
                 "code": str(p.get("code", "")),
+                "plan_id": str(p.get("plan_id") or str(p.get("code", "")).split(":")[-1]),
                 "cost": Decimal(str(p.get("amount", 0))),
             }
             for p in raw_plans
@@ -3684,6 +3686,7 @@ def admin_pricing():
             {
                 "name": p.get("name", "Exam PIN"),
                 "code": str(p.get("code", "")),
+                "plan_id": str(p.get("plan_id") or str(p.get("code", "")).split(":")[-1]),
                 "cost": Decimal(str(p.get("amount", 0))),
             }
             for p in raw_plans
@@ -3784,6 +3787,7 @@ def admin_pricing():
     for item in plan_items:
         code = item["code"]
         name = item["name"]
+        plan_id = str(item.get("plan_id", ""))
         api_cost = item["cost"]
 
         h = hashlib.md5(code.encode("utf-8")).hexdigest()[:12]
@@ -3824,12 +3828,15 @@ def admin_pricing():
         checked_attr = "checked" if is_active else ""
 
         rows_html += f"""
-        <tr class="pricing-row" style="{row_opacity}" data-name="{escape(name.lower())}" data-code="{escape(code.lower())}">
+        <tr class="pricing-row" style="{row_opacity}" data-name="{escape(name.lower())}" data-code="{escape(code.lower())}" data-id="{escape(plan_id.lower())}">
             <td style="text-align:center; width:50px;">
                 <input type="hidden" name="plan_hashes" value="{h}">
                 <input type="hidden" name="code_{h}" value="{escape(code)}">
                 <input type="hidden" name="name_{h}" value="{escape(name)}">
                 <input type="checkbox" name="active_{h}" value="1" {checked_attr} style="width:18px; height:18px; cursor:pointer;" title="Toggle plan active/disabled">
+            </td>
+            <td style="text-align:center; width:80px;">
+                <span style="font-family:monospace; font-size:13px; font-weight:800; color:#1e293b; background:#f1f5f9; border:1px solid #cbd5e1; padding:3px 8px; border-radius:6px;">#{escape(plan_id)}</span>
             </td>
             <td>
                 <div style="font-weight:600; color:var(--admin-ink); margin-bottom:2px;">{escape(name)}</div>
@@ -3903,8 +3910,8 @@ def admin_pricing():
             </div>
         </div>
 
-        <div style="flex:1; max-width:320px; min-width:200px;">
-            <input type="text" id="pricingSearch" onkeyup="filterPricingTable()" placeholder="🔍 Search plans by name or size..." style="width:100%; padding:9px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:13px; outline:none;">
+        <div style="flex:1; max-width:360px; min-width:220px;">
+            <input type="text" id="pricingSearch" onkeyup="filterPricingTable()" placeholder="🔍 Search by SwiftBills Plan ID (e.g. 125) or name..." style="width:100%; padding:9px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:13px; outline:none;">
         </div>
     </div>
 
@@ -3919,6 +3926,7 @@ def admin_pricing():
                 <thead>
                     <tr style="background:#f8fafc; border-bottom:1px solid #e2e8f0; font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; letter-spacing:0.5px;">
                         <th style="padding:12px 14px; text-align:center;">Active</th>
+                        <th style="padding:12px 14px; text-align:center; width:80px;">ID</th>
                         <th style="padding:12px 16px;">Plan Details</th>
                         <th style="padding:12px 16px;">API Cost</th>
                         <th style="padding:12px 16px;">My Cost Price</th>
@@ -3927,7 +3935,7 @@ def admin_pricing():
                     </tr>
                 </thead>
                 <tbody id="pricingTableBody">
-                    {rows_html if rows_html else '<tr><td colspan="6" style="padding:30px; text-align:center; color:#64748b;">No plans found for this service. Check provider credentials.</td></tr>'}
+                    {rows_html if rows_html else '<tr><td colspan="7" style="padding:30px; text-align:center; color:#64748b;">No plans found for this service. Check provider credentials.</td></tr>'}
                 </tbody>
             </table>
         </div>
@@ -3935,6 +3943,7 @@ def admin_pricing():
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding:12px 0 40px;">
             <div style="color:#64748b; font-size:13px; max-width:650px;">
                 💡 <b>How it works:</b>
+                <br>• <b>ID</b> displays the SwiftBills plan ID (e.g. #125) for direct reference with reseller community price updates.
                 <br>• <b>API Cost</b> is displayed from SwiftBills for your reference.
                 <br>• Just type your actual <b>Cost Price</b> into the box.
                 <br>• The <b>Selling Price</b> and <b>Profit Margin</b> calculate automatically using your {default_markup_pct}% markup.
@@ -3988,7 +3997,8 @@ def admin_pricing():
         rows.forEach(function(row) {{
             var name = row.getAttribute('data-name') || '';
             var code = row.getAttribute('data-code') || '';
-            if (name.indexOf(q) > -1 || code.indexOf(q) > -1) {{
+            var id = row.getAttribute('data-id') || '';
+            if (name.indexOf(q) > -1 || code.indexOf(q) > -1 || id.indexOf(q) > -1) {{
                 row.style.display = '';
             }} else {{
                 row.style.display = 'none';

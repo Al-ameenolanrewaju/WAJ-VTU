@@ -321,6 +321,7 @@ def _fetch_swiftbills_data_variations(network: str):
                 "name": name,
                 "variation_code": f"swiftbills:{network_id}:{plan_id}",
                 "variation_amount": price,
+                "plan_id": str(plan_id),
                 "comparison_key": _data_plan_key(name, data_size, plan_type, days),
             })
         logger.info("Fetched %d %s data plans from SwiftBills", len(plans), network)
@@ -619,6 +620,7 @@ def _fetch_swiftbills_cable_plans(provider: str):
                 "code": f"swiftbills:{cable_id}:{item['id']}",
                 "amount": amount,
                 "discount_amount": 0,
+                "plan_id": str(item.get("id")),
                 "comparison_key": re.sub(r"[^a-z0-9]+", " ", name.lower()).strip(),
             })
         return plans
@@ -958,6 +960,7 @@ def _fetch_swiftbills_education_packages():
                 "name": name,
                 "code": f"swiftbills:{item['id']}",
                 "amount": amount,
+                "plan_id": str(item.get("id")),
                 "comparison_key": name.lower(),
             })
         return packages
