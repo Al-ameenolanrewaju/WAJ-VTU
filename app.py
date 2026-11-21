@@ -20,7 +20,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from models import (
     db, User, Transaction, InboundMessage, SavedService, ServiceMarkup, PaymentFeeTier, AdminAuditLog,
     Referral, ReferralReward, MarketingContent, MarketingCampaign, MarketingMessage, MarketingSetting,
-    SupportTicket, VisitorLog, PushSubscription, UserNotification, SocialTrafficClick
+    SupportTicket, VisitorLog, PushSubscription, UserNotification, SocialTrafficClick, PlanPriceOverride
 )
 from wallet_service import generate_payment_link, get_payment_fee_percentage
 
@@ -466,6 +466,13 @@ def ensure_database_schema():
         UserNotification.__table__.create(bind=db.engine)
     if "social_traffic_clicks" not in existing_tables:
         SocialTrafficClick.__table__.create(bind=db.engine)
+    if "plan_price_overrides" not in existing_tables:
+        PlanPriceOverride.__table__.create(bind=db.engine)
+    else:
+        columns = {col["name"] for col in inspector.get_columns("plan_price_overrides")}
+        if "custom_cost" not in columns:
+            db.session.execute(text("ALTER TABLE plan_price_overrides ADD COLUMN custom_cost NUMERIC(10, 2)"))
+            db.session.commit()
 
     marketing_table_map = {
         "referrals": Referral,
@@ -895,6 +902,48 @@ def get_markup(service_type, base_amount=Decimal("0.00")):
     total_amount = base_amount + raw_markup
     rounded_total = total_amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return (rounded_total - base_amount).quantize(Decimal("0.01"))
+
+
+def get_plan_overrides_map(service_type: str = None) -> dict:
+    """Returns a dict mapping (service_type, plan_code) -> PlanPriceOverride"""
+    try:
+        query = PlanPriceOverride.query
+        if service_type:
+            query = query.filter_by(service_type=service_type)
+        return {(row.service_type, str(row.plan_code)): row for row in query.all()}
+    except Exception:
+        return {}
+
+
+def resolve_plan_price(service_type: str, plan_code: str, base_api_amount: Decimal, overrides_map: dict = None):
+    """
+    Returns tuple: (selling_price: Decimal | None, cost_price: Decimal, is_active: bool, is_custom: bool)
+    - cost_price is custom_cost if set and > 0, else base_api_amount.
+    - selling_price is cost_price + get_markup(service_type, cost_price).
+    """
+    plan_code_str = str(plan_code)
+    if overrides_map is not None:
+        override = overrides_map.get((service_type, plan_code_str))
+    else:
+        try:
+            override = PlanPriceOverride.query.filter_by(service_type=service_type, plan_code=plan_code_str).first()
+        except Exception:
+            override = None
+
+    if override:
+        effective_cost = Decimal(str(override.custom_cost)).quantize(Decimal("0.01")) if (override.custom_cost is not None and override.custom_cost > 0) else base_api_amount
+
+        if not override.is_active:
+            return None, effective_cost, False, False
+
+        default_markup = get_markup(service_type, effective_cost)
+        selling_price = (effective_cost + default_markup).quantize(Decimal("0.01"))
+        return selling_price, effective_cost, True, (override.custom_cost is not None and override.custom_cost > 0)
+
+    default_markup = get_markup(service_type, base_api_amount)
+    selling_price = (base_api_amount + default_markup).quantize(Decimal("0.01"))
+    return selling_price, base_api_amount, True, False
+
 
 
 def set_user_session(user, state, data):
@@ -2558,7 +2607,7 @@ ADMIN_BASE_TEMPLATE = """
                         <span class="sidebar-icon">📒</span> Wallet Ledger
                     </a>
                     <a href="/admin/pricing" class="sidebar-link {{ 'active' if active_page == 'pricing' else '' }}">
-                        <span class="sidebar-icon">💵</span> Fees &amp; Markups
+                        <span class="sidebar-icon">🏷️</span> Plan Pricing Overrides
                     </a>
                 </div>
 
@@ -2569,7 +2618,7 @@ ADMIN_BASE_TEMPLATE = """
                         <span class="sidebar-icon">📱</span> WhatsApp Bot
                     </a>
                     <a href="/admin/settings" class="sidebar-link {{ 'active' if active_page == 'settings' else '' }}">
-                        <span class="sidebar-icon">⚙️</span> Settings &amp; Tasks
+                        <span class="sidebar-icon">⚙️</span> Default Markups &amp; Tasks
                     </a>
                     <a href="/admin/security" class="sidebar-link {{ 'active' if active_page == 'security' else '' }}">
                         <span class="sidebar-icon">🔐</span> Audit Logs
@@ -3580,9 +3629,376 @@ def admin_providers():
     return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="providers")
 
 
-@app.route("/admin/pricing")
-def admin_pricing_redirect():
-    return redirect(url_for("admin_settings"))
+@app.route("/admin/pricing", methods=["GET", "POST"])
+def admin_pricing():
+    auth_error = require_admin_auth()
+    if auth_error:
+        return auth_error
+
+    pricing_services = [
+        ("DATA_MTN", "MTN Data", "🟡"),
+        ("DATA_AIRTEL", "Airtel Data", "🔴"),
+        ("DATA_GLO", "Glo Data", "🟢"),
+        ("DATA_9MOBILE", "9mobile Data", "🟢"),
+        ("CABLE_DSTV", "DStv", "📺"),
+        ("CABLE_GOTV", "GOtv", "📺"),
+        ("CABLE_STARTIMES", "StarTimes", "📺"),
+        ("EDU", "Exam PINs", "🎓"),
+    ]
+    service_keys = [s[0] for s in pricing_services]
+    service = request.args.get("service", "DATA_MTN").upper()
+    if service not in service_keys:
+        service = "DATA_MTN"
+
+    if service.startswith("DATA_"):
+        network = service.split("_")[1]
+        db_service = service
+        markup_key = service
+        raw_plans = fetch_data_variations(network)
+        plan_items = [
+            {
+                "name": p.get("name", "Data Plan"),
+                "code": str(p.get("variation_code", "")),
+                "cost": Decimal(str(p.get("variation_amount", 0))),
+            }
+            for p in raw_plans
+        ]
+    elif service.startswith("CABLE_"):
+        provider_name = service.split("_")[1]
+        db_service = "CABLE"
+        markup_key = "CABLE"
+        raw_plans = fetch_cable_plans(provider_name)
+        plan_items = [
+            {
+                "name": p.get("name", "Cable Plan"),
+                "code": str(p.get("code", "")),
+                "cost": Decimal(str(p.get("amount", 0))),
+            }
+            for p in raw_plans
+        ]
+    else:  # EDU
+        db_service = "EDU"
+        markup_key = "EDU"
+        raw_plans = fetch_education_packages()
+        plan_items = [
+            {
+                "name": p.get("name", "Exam PIN"),
+                "code": str(p.get("code", "")),
+                "cost": Decimal(str(p.get("amount", 0))),
+            }
+            for p in raw_plans
+        ]
+
+    if request.method == "POST":
+        validate_csrf_token()
+        action = request.form.get("action", "save")
+        submitted_service = request.form.get("service", service)
+        submitted_db_service = request.form.get("db_service", db_service)
+
+        if action == "reset_all":
+            overrides = PlanPriceOverride.query.filter_by(service_type=submitted_db_service).all()
+            for ovr in overrides:
+                ovr.custom_cost = None
+                ovr.custom_price = None
+            db.session.commit()
+            record_admin_audit(ADMIN_USERNAME, "pricing_override_reset", True, f"Reset custom cost prices for {submitted_service} to auto API baseline")
+            return redirect(url_for("admin_pricing", service=submitted_service, reset=1))
+
+        hash_list = request.form.getlist("plan_hashes")
+        for h in hash_list:
+            p_code = request.form.get(f"code_{h}")
+            p_name = request.form.get(f"name_{h}")
+            cost_val = request.form.get(f"cost_{h}", "").strip()
+            is_active = f"active_{h}" in request.form
+
+            custom_cost = None
+            if cost_val:
+                try:
+                    c = Decimal(cost_val).quantize(Decimal("0.01"))
+                    if c > 0:
+                        custom_cost = c
+                except (InvalidOperation, ValueError):
+                    custom_cost = None
+
+            override = PlanPriceOverride.query.filter_by(service_type=submitted_db_service, plan_code=p_code).first()
+            if not override:
+                if custom_cost is not None or not is_active:
+                    override = PlanPriceOverride(
+                        service_type=submitted_db_service,
+                        plan_code=p_code,
+                        plan_name=p_name,
+                        custom_cost=custom_cost,
+                        custom_price=None,
+                        is_active=is_active,
+                    )
+                    db.session.add(override)
+            else:
+                override.plan_name = p_name
+                override.custom_cost = custom_cost
+                override.custom_price = None
+                override.is_active = is_active
+
+        db.session.commit()
+        record_admin_audit(ADMIN_USERNAME, "pricing_override_save", True, f"Saved custom cost prices for {submitted_service}")
+        return redirect(url_for("admin_pricing", service=submitted_service, saved=1))
+
+    csrf_token = get_csrf_token()
+    existing_overrides = {
+        row.plan_code: row
+        for row in PlanPriceOverride.query.filter_by(service_type=db_service).all()
+    }
+    markup_setting = ServiceMarkup.query.filter_by(service_type=markup_key).first()
+    default_markup_pct = Decimal(str(markup_setting.markup_amount)) if markup_setting else Decimal("0.00")
+
+    saved_banner = ""
+    if request.args.get("saved"):
+        saved_banner = '<div style="background:#dcfce7; border:1px solid #86efac; color:#166534; padding:12px 16px; border-radius:10px; margin-bottom:20px; font-weight:600;">✓ Plan cost prices updated successfully. Selling prices have been recalculated automatically.</div>'
+    elif request.args.get("reset"):
+        saved_banner = '<div style="background:#fef3c7; border:1px solid #fde047; color:#854d0e; padding:12px 16px; border-radius:10px; margin-bottom:20px; font-weight:600;">ℹ All manual cost prices for this tab have been reset to the SwiftBills API wholesale cost.</div>'
+
+    # Build navigation tabs
+    tab_html = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:24px;">'
+    for s_key, s_label, s_icon in pricing_services:
+        is_active = (s_key == service)
+        bg = "var(--admin-ink)" if is_active else "#ffffff"
+        fg = "var(--admin-amber)" if is_active else "var(--admin-ink)"
+        border = "var(--admin-ink)" if is_active else "var(--admin-border)"
+        tab_html += f"""
+        <a href="/admin/pricing?service={escape(s_key)}" style="
+            display:inline-flex; align-items:center; gap:8px; padding:10px 16px; border-radius:10px;
+            font-size:13px; font-weight:600; text-decoration:none; background:{bg}; color:{fg}; border:1px solid {border};
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: all 0.15s ease;
+        ">
+            <span>{s_icon}</span>
+            <span>{escape(s_label)}</span>
+        </a>
+        """
+    tab_html += '</div>'
+
+    # Build plan table rows
+    rows_html = ""
+    import hashlib
+    custom_cost_count = 0
+    disabled_count = 0
+
+    for item in plan_items:
+        code = item["code"]
+        name = item["name"]
+        api_cost = item["cost"]
+
+        h = hashlib.md5(code.encode("utf-8")).hexdigest()[:12]
+        ovr = existing_overrides.get(code)
+        custom_cost = ovr.custom_cost if (ovr and ovr.custom_cost is not None and ovr.custom_cost > 0) else None
+        is_active = ovr.is_active if ovr else True
+
+        effective_cost = custom_cost if custom_cost is not None else api_cost
+        auto_markup = (effective_cost * default_markup_pct / Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        selling_price = (effective_cost + auto_markup).quantize(Decimal("0.01"))
+
+        margin = selling_price - effective_cost
+        margin_pct = ((margin / effective_cost) * 100).quantize(Decimal("0.1")) if effective_cost > 0 else Decimal("0.0")
+
+        if margin > 0:
+            margin_text = f"+₦{margin:,.2f} ({margin_pct}%)"
+            margin_color = "#16a34a"
+            margin_bg = "#dcfce7"
+        else:
+            margin_text = "₦0.00 (0.0%)"
+            margin_color = "#64748b"
+            margin_bg = "#f1f5f9"
+
+        cost_input_val = f"{custom_cost:.2f}" if custom_cost is not None else ""
+
+        if custom_cost is not None:
+            custom_cost_count += 1
+            row_badge = '<span style="font-size:10px; font-weight:700; color:#7c3aed; background:#ede9fe; padding:2px 6px; border-radius:999px;">CUSTOM COST</span>'
+        else:
+            row_badge = '<span style="font-size:10px; font-weight:700; color:#64748b; background:#f1f5f9; padding:2px 6px; border-radius:999px;">API COST</span>'
+
+        if not is_active:
+            disabled_count += 1
+            row_opacity = "opacity:0.5;"
+        else:
+            row_opacity = ""
+
+        checked_attr = "checked" if is_active else ""
+
+        rows_html += f"""
+        <tr class="pricing-row" style="{row_opacity}" data-name="{escape(name.lower())}" data-code="{escape(code.lower())}">
+            <td style="text-align:center; width:50px;">
+                <input type="hidden" name="plan_hashes" value="{h}">
+                <input type="hidden" name="code_{h}" value="{escape(code)}">
+                <input type="hidden" name="name_{h}" value="{escape(name)}">
+                <input type="checkbox" name="active_{h}" value="1" {checked_attr} style="width:18px; height:18px; cursor:pointer;" title="Toggle plan active/disabled">
+            </td>
+            <td>
+                <div style="font-weight:600; color:var(--admin-ink); margin-bottom:2px;">{escape(name)}</div>
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                    <code style="font-size:11px; color:#64748b; background:#f1f5f9; padding:1px 5px; border-radius:4px;">{escape(code)}</code>
+                    {row_badge}
+                </div>
+            </td>
+            <td style="font-weight:600; color:#64748b; width:130px;">
+                <div style="font-size:13px; color:#1e293b;">₦{api_cost:,.2f}</div>
+                <small style="font-size:10px; color:#94a3b8;">SwiftBills API</small>
+            </td>
+            <td style="width:170px;">
+                <div style="position:relative;">
+                    <span style="position:absolute; left:9px; top:50%; transform:translateY(-50%); color:#94a3b8; font-weight:600; font-size:12px;">₦</span>
+                    <input type="number" step="0.01" min="0" name="cost_{h}" id="cost_{h}"
+                           value="{cost_input_val}"
+                           placeholder="API (₦{api_cost:,.2f})"
+                           data-api="{api_cost}"
+                           data-markup="{default_markup_pct}"
+                           oninput="updateRowMargin('{h}')"
+                           style="width:100%; padding:7px 7px 7px 22px; border:1px solid #cbd5e1; border-radius:8px; font-weight:600; font-size:13px; outline:none; transition:border 0.15s;"
+                           onfocus="this.style.borderColor='var(--admin-amber)';"
+                           onblur="this.style.borderColor='#cbd5e1';">
+                </div>
+            </td>
+            <td style="width:170px;">
+                <div id="selling_{h}" style="font-weight:700; color:var(--admin-ink); font-size:14px;">₦{selling_price:,.2f}</div>
+                <small style="color:#64748b; font-size:11px;">Cost + {default_markup_pct}% markup</small>
+            </td>
+            <td style="width:140px;">
+                <span id="margin_{h}" style="font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px; color:{margin_color}; background:{margin_bg};">
+                    {margin_text}
+                </span>
+            </td>
+        </tr>
+        """
+
+    content = f"""
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
+        <div>
+            <h1 style="font-size:24px; font-weight:700; margin-bottom:4px;">Plan Cost &amp; Auto-Pricing</h1>
+            <p style="color:var(--admin-muted); font-size:14px;">
+                Update your actual <b>Cost Price</b> below. Your configured markup (<b>{default_markup_pct}%</b>) is automatically added to it to determine customer selling prices.
+            </p>
+        </div>
+        <div style="display:flex; gap:10px;">
+            <a href="/admin/settings" class="btn" style="background:#ffffff; border:1px solid var(--admin-border); padding:8px 14px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none; color:var(--admin-ink);">
+                ⚙️ Change Markup % ({default_markup_pct}%)
+            </a>
+        </div>
+    </div>
+
+    {saved_banner}
+    {tab_html}
+
+    <!-- Summary & Filter Bar -->
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; background:#ffffff; padding:16px 20px; border-radius:12px; border:1px solid var(--admin-border); margin-bottom:20px; box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+        <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+            <div>
+                <span style="font-size:12px; color:#64748b; font-weight:600; text-transform:uppercase;">Catalog Size</span>
+                <div style="font-size:18px; font-weight:700;">{len(plan_items)} plans</div>
+            </div>
+            <div style="border-left:1px solid #e2e8f0; padding-left:20px;">
+                <span style="font-size:12px; color:#64748b; font-weight:600; text-transform:uppercase;">Custom Costs Set</span>
+                <div style="font-size:18px; font-weight:700; color:#7c3aed;">{custom_cost_count} plans</div>
+            </div>
+            <div style="border-left:1px solid #e2e8f0; padding-left:20px;">
+                <span style="font-size:12px; color:#64748b; font-weight:600; text-transform:uppercase;">Markup Added</span>
+                <div style="font-size:18px; font-weight:700; color:#16a34a;">+{default_markup_pct}%</div>
+            </div>
+        </div>
+
+        <div style="flex:1; max-width:320px; min-width:200px;">
+            <input type="text" id="pricingSearch" onkeyup="filterPricingTable()" placeholder="🔍 Search plans by name or size..." style="width:100%; padding:9px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:13px; outline:none;">
+        </div>
+    </div>
+
+    <!-- Pricing Form -->
+    <form method="POST" action="/admin/pricing">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
+        <input type="hidden" name="service" value="{escape(service)}">
+        <input type="hidden" name="db_service" value="{escape(db_service)}">
+
+        <div style="background:#ffffff; border-radius:12px; border:1px solid var(--admin-border); overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.03); margin-bottom:24px;">
+            <table style="width:100%; border-collapse:collapse; text-align:left;">
+                <thead>
+                    <tr style="background:#f8fafc; border-bottom:1px solid #e2e8f0; font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; letter-spacing:0.5px;">
+                        <th style="padding:12px 14px; text-align:center;">Active</th>
+                        <th style="padding:12px 16px;">Plan Details</th>
+                        <th style="padding:12px 16px;">API Cost</th>
+                        <th style="padding:12px 16px;">My Cost Price</th>
+                        <th style="padding:12px 16px;">Selling Price (Auto +{default_markup_pct}%)</th>
+                        <th style="padding:12px 16px;">Profit Margin</th>
+                    </tr>
+                </thead>
+                <tbody id="pricingTableBody">
+                    {rows_html if rows_html else '<tr><td colspan="6" style="padding:30px; text-align:center; color:#64748b;">No plans found for this service. Check provider credentials.</td></tr>'}
+                </tbody>
+            </table>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding:12px 0 40px;">
+            <div style="color:#64748b; font-size:13px; max-width:650px;">
+                💡 <b>How it works:</b>
+                <br>• <b>API Cost</b> is displayed from SwiftBills for your reference.
+                <br>• Just type your actual <b>Cost Price</b> into the box.
+                <br>• The <b>Selling Price</b> and <b>Profit Margin</b> calculate automatically using your {default_markup_pct}% markup.
+                <br>• Leaving a cost box empty automatically uses the API Cost.
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button type="submit" name="action" value="reset_all" onclick="return confirm('Reset all custom cost prices in this tab back to the SwiftBills API cost?');" style="padding:10px 18px; border-radius:8px; border:1px solid #cbd5e1; background:#ffffff; color:#64748b; font-weight:600; font-size:13px; cursor:pointer;">
+                    🔄 Reset Tab to API Cost
+                </button>
+                <button type="submit" name="action" value="save" style="padding:10px 22px; border-radius:8px; border:none; background:var(--admin-amber); color:var(--admin-ink); font-weight:700; font-size:14px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                    💾 Save Cost Prices
+                </button>
+            </div>
+        </div>
+    </form>
+
+    <script>
+    function updateRowMargin(hash) {{
+        var costInput = document.getElementById('cost_' + hash);
+        var sellingDiv = document.getElementById('selling_' + hash);
+        var badge = document.getElementById('margin_' + hash);
+        if (!costInput || !sellingDiv || !badge) return;
+
+        var apiCost = parseFloat(costInput.dataset.api) || 0;
+        var markupPct = parseFloat(costInput.dataset.markup) || 0;
+
+        var enteredCost = parseFloat(costInput.value);
+        var effectiveCost = (!isNaN(enteredCost) && enteredCost > 0) ? enteredCost : apiCost;
+
+        var rawMarkup = Math.round(effectiveCost * markupPct / 100);
+        var sellingPrice = effectiveCost + rawMarkup;
+        var margin = sellingPrice - effectiveCost;
+        var pct = effectiveCost > 0 ? ((margin / effectiveCost) * 100).toFixed(1) : "0.0";
+
+        sellingDiv.innerText = "₦" + sellingPrice.toLocaleString('en-US', {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+
+        if (margin > 0) {{
+            badge.innerText = "+₦" + margin.toFixed(2) + " (" + pct + "%)";
+            badge.style.color = "#16a34a";
+            badge.style.background = "#dcfce7";
+        }} else {{
+            badge.innerText = "₦0.00 (0.0%)";
+            badge.style.color = "#64748b";
+            badge.style.background = "#f1f5f9";
+        }}
+    }}
+
+    function filterPricingTable() {{
+        var q = document.getElementById('pricingSearch').value.toLowerCase().trim();
+        var rows = document.querySelectorAll('.pricing-row');
+        rows.forEach(function(row) {{
+            var name = row.getAttribute('data-name') || '';
+            var code = row.getAttribute('data-code') || '';
+            if (name.indexOf(q) > -1 || code.indexOf(q) > -1) {{
+                row.style.display = '';
+            }} else {{
+                row.style.display = 'none';
+            }}
+        }});
+    }}
+    </script>
+    """
+    return render_template_string(ADMIN_BASE_TEMPLATE, body_content=content, active_page="pricing")
+
 
 
 @app.route("/admin/support")

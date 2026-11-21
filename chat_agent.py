@@ -505,7 +505,7 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         verify_meter as provider_verify_meter, process_electricity_payment,
         fetch_education_packages
     )
-    from app import get_markup, settle_transaction
+    from app import get_markup, settle_transaction, resolve_plan_price, get_plan_overrides_map
     from models import Transaction, ScheduledTask
     
 
@@ -647,15 +647,21 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
             user.state_data = state
             db.session.commit()
 
+        overrides_map = get_plan_overrides_map(f"DATA_{network}")
         plans = []
         display_plans = []
-        for index, plan in enumerate(variations, start=1):
+        index = 1
+        for plan in variations:
             base_cost = Decimal(str(plan.get("variation_amount", 0)))
-            cost = (base_cost + get_markup(f"DATA_{network}", base_cost)).quantize(Decimal("0.01"))
+            p_code = str(plan.get("variation_code"))
+            cost, effective_cost, is_active, _ = resolve_plan_price(f"DATA_{network}", p_code, base_cost, overrides_map)
+            if not is_active:
+                continue
             plans.append(
                 f"- {plan.get('name')}: ₦{cost:,.2f} (System Code: {plan.get('variation_code')})"
             )
             display_plans.append(f"{index}. *{plan.get('name')}* — ₦{cost:,.2f}")
+            index += 1
         return {
             "status": "success",
             "network": network,
@@ -714,7 +720,9 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
 
         plan_code = str(selected_plan.get("variation_code") or plan_code)
         base_amount = Decimal(str(selected_plan.get("variation_amount", "0")))
-        charge_amount = (base_amount + get_markup(f"DATA_{network}", base_amount)).quantize(Decimal("0.01"))
+        charge_amount, effective_cost, is_active, _ = resolve_plan_price(f"DATA_{network}", plan_code, base_amount)
+        if not is_active:
+            return {"status": "error", "message": "This data plan is currently unavailable."}
         try:
             requested_amount = Decimal(str(requested_amount)).quantize(Decimal("0.01"))
         except Exception:
@@ -758,7 +766,11 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
                 provider_name=str(result.get("provider") or "unknown").lower()[:30],
                 provider_reference=(result.get("provider_reference") or result.get("reference") or "")[:100],
                 status='SUCCESS',
-                description=f"{network} {plan_code} to {phone}"
+                description=f"{network} {plan_code} to {phone}",
+                meta_data={
+                    "cost_price": str(effective_cost),
+                    "markup_amount": str(charge_amount - effective_cost),
+                }
             )
             db.session.add(tx)
             db.session.commit()
@@ -832,11 +844,15 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         plans_raw = fetch_cable_plans(provider)
         if not plans_raw:
             return {"status": "error", "message": "No plans available right now."}
-            
+
+        overrides_map = get_plan_overrides_map("CABLE")
         plans = []
         for plan in plans_raw:
             base_cost = Decimal(str(plan["amount"]))
-            cost = base_cost + get_markup("CABLE", base_cost)
+            p_code = str(plan.get("code"))
+            cost, effective_cost, is_active, _ = resolve_plan_price("CABLE", p_code, base_cost, overrides_map)
+            if not is_active:
+                continue
             plans.append(
                 f"- {plan.get('name')}: ₦{cost:,.2f} (System Code: {plan.get('code')})"
             )
@@ -879,7 +895,10 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
             api_discount_value = matched_plan.get("discount_amount", "0") if matched_plan else "0"
         api_cost = Decimal(str(api_cost_value))
         api_discount = Decimal(str(api_discount_value or "0"))
-        expected_amount = (api_cost + get_markup("CABLE", api_cost)).quantize(Decimal("0.01"))
+        expected_amount, effective_cost, is_active, _ = resolve_plan_price("CABLE", str(plan_code), api_cost)
+        api_cost = effective_cost
+        if not is_active:
+            return {"status": "error", "message": "This cable plan is currently unavailable."}
         if amount != expected_amount:
             return {"status": "error", "message": f"The cable plan price has changed. Current price is NGN {expected_amount:,.2f}. Please fetch the plans again."}
         
@@ -1092,10 +1111,14 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         if not packages:
             return {"status": "error", "message": "No packages available right now."}
 
+        overrides_map = get_plan_overrides_map("EDU")
         listed = []
         for pkg in packages:
             base_cost = Decimal(str(pkg["amount"]))
-            cost = base_cost + get_markup("EDU", base_cost)
+            p_code = str(pkg.get("code"))
+            cost, effective_cost, is_active, _ = resolve_plan_price("EDU", p_code, base_cost, overrides_map)
+            if not is_active:
+                continue
             listed.append(f"- {pkg.get('name')}: ₦{cost:,.2f} (System Code: {pkg.get('code')})")
         return {"status": "success", "plans_list": "\n".join(listed), "message": "Present these options to the user clearly. Do not show the System Code to the user."}
 
@@ -1116,8 +1139,12 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         )
         if not package:
             return {"status": "error", "message": "Select a valid education package."}
-        base_total = Decimal(str(package.get("amount", "0"))) * quantity
-        expected_amount = (base_total + get_markup("EDU", base_total)).quantize(Decimal("0.01"))
+        base_single = Decimal(str(package.get("amount", "0")))
+        expected_single, effective_cost, is_active, _ = resolve_plan_price("EDU", str(exam), base_single)
+        if not is_active:
+            return {"status": "error", "message": "This exam package is currently unavailable."}
+        expected_amount = (expected_single * quantity).quantize(Decimal("0.01"))
+        total_cost = (effective_cost * quantity).quantize(Decimal("0.01"))
         if amount != expected_amount:
             return {"status": "error", "message": f"The PIN price has changed. Current price is NGN {expected_amount:,.2f}. Please fetch the packages again."}
 
@@ -1129,7 +1156,18 @@ def execute_tool(app, db, user, provider_phone, name, kwargs):
         db.session.commit()
 
         result = process_education_pin(exam, quantity, provider_phone)
-        success = settle_transaction(user, result, charge_amount, "EDU", exam, f"{exam} PIN x{quantity}")
+        success = settle_transaction(
+            user,
+            result,
+            charge_amount,
+            "EDU",
+            exam,
+            f"{exam} PIN x{quantity}",
+            meta_data={
+                "cost_price": str(total_cost),
+                "markup_amount": str(charge_amount - total_cost),
+            }
+        )
         if success and result.get("status") == "SUCCESS":
             tx = Transaction.query.filter_by(reference=result["reference"]).first()
             if tx is not None:

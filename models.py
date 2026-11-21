@@ -401,3 +401,24 @@ class SocialTrafficClick(db.Model):
         return f"<SocialTrafficClick #{self.id}: {self.utm_source} -> {self.landing_path}>"
 
 
+class PlanPriceOverride(db.Model):
+    __tablename__ = 'plan_price_overrides'
+
+    id = db.Column(db.Integer, primary_key=True)
+    service_type = db.Column(db.String(30), nullable=False, index=True)
+    plan_code = db.Column(db.String(100), nullable=False, index=True)
+    plan_name = db.Column(db.String(255), nullable=True)
+    custom_cost = db.Column(db.Numeric(10, 2), nullable=True)
+    custom_price = db.Column(db.Numeric(10, 2), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('service_type', 'plan_code', name='uq_service_plan_override'),
+    )
+
+    def __repr__(self):
+        return f"<PlanPriceOverride {self.service_type}:{self.plan_code} cost=₦{self.custom_cost} sell=₦{self.custom_price}>"
+
+
+

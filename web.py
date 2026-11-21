@@ -427,7 +427,7 @@ def receipt_image(reference):
 @login_required
 def buy_data():
     user = current_user()
-    from app import get_markup
+    from app import get_markup, resolve_plan_price, get_plan_overrides_map
 
     if request.method == "GET":
         network = request.args.get("network", "MTN").upper()
@@ -435,15 +435,19 @@ def buy_data():
             network = "MTN"
         phone_prefill = (request.args.get("phone") or "").strip()
         all_plans = {}
+        overrides_map = get_plan_overrides_map()
         for net in ("MTN", "AIRTEL", "GLO", "9MOBILE"):
             raw_plans = fetch_data_variations(net)
             plans_list = []
             for plan in raw_plans:
                 base_amount = Decimal(str(plan.get("variation_amount", "0")))
-                final_amt = base_amount + get_markup(f"DATA_{net}", base_amount)
+                p_code = str(plan.get("variation_code"))
+                final_amt, effective_cost, is_active, _ = resolve_plan_price(f"DATA_{net}", p_code, base_amount, overrides_map)
+                if not is_active:
+                    continue
                 plans_list.append({
                     "name": plan.get("name", "Data plan"),
-                    "code": plan.get("variation_code"),
+                    "code": p_code,
                     "amount": float(final_amt),
                 })
             all_plans[net] = plans_list
@@ -473,10 +477,16 @@ def buy_data():
         return redirect(url_for("web.buy_data", network=network))
 
     base_amount = Decimal(str(selected_plan.get("variation_amount", "0")))
+    final_amt, effective_cost, is_active, _ = resolve_plan_price(f"DATA_{network}", plan_code, base_amount)
+    if not is_active:
+        flash("This data plan is currently unavailable.", "error")
+        return redirect(url_for("web.buy_data", network=network))
+
     payload = {
         "network": network,
         "plan_code": plan_code,
-        "amount": base_amount + get_markup(f"DATA_{network}", base_amount),
+        "amount": final_amt,
+        "cost_price": effective_cost,
         "phone": request.form.get("phone") or user.phone,
         "bypass": bypass,
         "ported_number": ported_number,
@@ -527,18 +537,23 @@ def buy_airtime():
 @login_required
 def cable_page():
     user = current_user()
-    from app import get_markup
+    from app import get_markup, resolve_plan_price, get_plan_overrides_map
 
     if request.method == "GET":
         provider = request.args.get("provider", "DSTV")
         cable_plans = []
+        overrides_map = get_plan_overrides_map("CABLE")
         for plan in fetch_cable_plans(provider):
             base_amount = Decimal(str(plan.get("amount", "0")))
+            p_code = str(plan.get("code"))
+            final_amt, effective_cost, is_active, _ = resolve_plan_price("CABLE", p_code, base_amount, overrides_map)
+            if not is_active:
+                continue
             cable_plans.append({
                 "name": plan.get("name", "TV plan"),
-                "code": plan.get("code"),
-                "amount": base_amount + get_markup("CABLE", base_amount),
-                "api_cost": base_amount,
+                "code": p_code,
+                "amount": final_amt,
+                "api_cost": effective_cost,
                 "api_discount_amount": Decimal(str(plan.get("discount_amount", "0"))),
             })
         return render_template(
@@ -559,12 +574,16 @@ def cable_page():
         flash("Select a valid TV plan.", "error")
         return redirect(url_for("web.cable_page", provider=provider))
     base_amount = Decimal(str(selected_plan.get("amount", "0")))
+    final_amt, effective_cost, is_active, _ = resolve_plan_price("CABLE", plan_code, base_amount)
+    if not is_active:
+        flash("This TV plan is currently unavailable.", "error")
+        return redirect(url_for("web.cable_page", provider=provider))
     payload = {
         "provider": provider,
         "smartcard": request.form.get("smartcard"),
         "plan_code": plan_code,
-        "amount": base_amount + get_markup("CABLE", base_amount),
-        "api_cost": base_amount,
+        "amount": final_amt,
+        "api_cost": effective_cost,
         "api_discount_amount": Decimal(str(selected_plan.get("discount_amount", "0"))),
         "confirm": True,
     }
@@ -656,16 +675,21 @@ def verify_betting_ajax():
 @login_required
 def education_page():
     user = current_user()
-    from app import get_markup
+    from app import get_markup, resolve_plan_price, get_plan_overrides_map
 
     if request.method == "GET":
         plans = []
+        overrides_map = get_plan_overrides_map("EDU")
         for package in fetch_education_packages():
             base_amount = Decimal(str(package.get("amount", "0")))
+            p_code = str(package.get("code"))
+            final_amt, effective_cost, is_active, _ = resolve_plan_price("EDU", p_code, base_amount, overrides_map)
+            if not is_active:
+                continue
             plans.append({
                 "name": package.get("name", "Exam PIN"),
-                "code": package.get("code"),
-                "amount": base_amount + get_markup("EDU", base_amount),
+                "code": p_code,
+                "amount": final_amt,
             })
         return render_template("web/buy_education.html", user=user, plans=plans)
 
@@ -681,11 +705,18 @@ def education_page():
         quantity = max(int(request.form.get("quantity", 1)), 1)
     except (TypeError, ValueError):
         quantity = 1
-    base_amount = Decimal(str(selected_package.get("amount", "0"))) * quantity
+    base_single = Decimal(str(selected_package.get("amount", "0")))
+    final_single, effective_cost, is_active, _ = resolve_plan_price("EDU", exam, base_single)
+    if not is_active:
+        flash("This exam package is currently unavailable.", "error")
+        return redirect(url_for("web.education_page"))
+    total_amount = final_single * quantity
+    total_cost = effective_cost * quantity
     payload = {
         "exam": exam,
         "quantity": quantity,
-        "amount": base_amount + get_markup("EDU", base_amount),
+        "amount": total_amount,
+        "cost_price": total_cost,
         "confirm": True,
     }
     result = execute_tool(app, db, user, user.phone, "buy_education_pin", payload)
