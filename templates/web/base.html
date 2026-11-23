@@ -2305,6 +2305,19 @@
     document.addEventListener('submit', function(e) {
       var form = e.target;
       if (!(form instanceof HTMLFormElement)) return;
+
+      // GET forms (such as service filters) use the same fast transition as links.
+      if (form.method.toUpperCase() === 'GET' &&
+          !form.hasAttribute('target') &&
+          form.getAttribute('enctype') !== 'multipart/form-data' &&
+          typeof window.navigateClientPage === 'function') {
+        e.preventDefault();
+        var getUrl = new URL(form.action || window.location.href, window.location.href);
+        getUrl.search = new URLSearchParams(new FormData(form)).toString();
+        window.navigateClientPage(getUrl.href);
+        return;
+      }
+
       var submitBtn = form.querySelector('button[type="submit"], button:not([type]), input[type="submit"]');
       if (form.hasAttribute('onsubmit')) return;
 
