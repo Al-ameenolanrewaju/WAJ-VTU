@@ -2148,6 +2148,38 @@
   }
   .install-button[hidden] { display: none; }
 
+  /* Fast client navigation and immediate interaction feedback */
+  html.waj-nav-loading::before {
+    content: "";
+    position: fixed;
+    z-index: 99999;
+    top: 0;
+    left: 0;
+    width: 34%;
+    height: 3px;
+    background: var(--amber);
+    box-shadow: 0 0 10px rgba(255,196,0,.45);
+    animation: waj-nav-progress .8s ease-in-out infinite alternate;
+  }
+  @keyframes waj-nav-progress { from { width: 12%; } to { width: 82%; } }
+  button, a, input[type="submit"] { -webkit-tap-highlight-color: transparent; }
+  button:active, a:active, input[type="submit"]:active { transform: scale(.985); }
+  button:disabled, input[type="submit"]:disabled { cursor: wait; opacity: .72; }
+  .waj-button-busy { position: relative; pointer-events: none; }
+  .waj-button-busy::after {
+    content: "";
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-left: 9px;
+    vertical-align: -2px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: waj-button-spin .65s linear infinite;
+  }
+  @keyframes waj-button-spin { to { transform: rotate(360deg); } }
+
   /* ------------------------------------------------------------- */
   /* RESPONSIVE BREAKPOINTS (320px, 375px, 390px, 414px, 768px, 1024px, 1440px) */
   /* ------------------------------------------------------------- */
@@ -2241,21 +2273,18 @@
   </div>
   <button class="install-button" type="button" data-install-app hidden>Install app</button>
   <script>
-    document.addEventListener('DOMContentLoaded', function() {
+    function wajShowFlashMessages() {
       var flashes = Array.from(document.querySelectorAll('.flash'));
       if (!flashes.length || !window.Swal) return;
-
       var alerts = flashes.map(function(flash) {
         var icon = flash.classList.contains('success') ? 'success' :
           (flash.classList.contains('error') ? 'error' : 'info');
         return { icon: icon, text: flash.textContent.trim() };
       });
-
       flashes.forEach(function(flash) { flash.remove(); });
       document.querySelectorAll('.flash-wrap').forEach(function(wrap) {
         if (!wrap.querySelector('.flash')) wrap.remove();
       });
-
       (async function() {
         for (var alert of alerts) {
           await Swal.fire({
@@ -2269,15 +2298,19 @@
           });
         }
       })();
-    });
+    }
+    document.addEventListener('DOMContentLoaded', wajShowFlashMessages);
+    document.addEventListener('waj:page-ready', wajShowFlashMessages);
 
     document.addEventListener('submit', function(e) {
       var form = e.target;
-      var submitBtn = form.querySelector('button[type="submit"]');
+      if (!(form instanceof HTMLFormElement)) return;
+      var submitBtn = form.querySelector('button[type="submit"], button:not([type]), input[type="submit"]');
       if (form.hasAttribute('onsubmit')) return;
-      
-      var isPurchase = form.action.includes('/buy/') || (submitBtn && submitBtn.textContent.toLowerCase().includes('buy'));
-      
+
+      var isPurchase = /\/buy\//.test(form.action || '') ||
+        (submitBtn && String(submitBtn.value || submitBtn.textContent || '').toLowerCase().includes('buy'));
+
       if (submitBtn) {
         if (submitBtn.dataset.submitting === "true") {
           e.preventDefault();
@@ -2285,8 +2318,10 @@
         }
         submitBtn.dataset.submitting = "true";
         submitBtn.disabled = true;
-        submitBtn.textContent = "Processing...";
-        
+        submitBtn.classList.add('waj-button-busy');
+        submitBtn.setAttribute('aria-busy', 'true');
+        if (submitBtn.tagName === 'BUTTON') submitBtn.dataset.originalLabel = submitBtn.textContent;
+        if (submitBtn.tagName === 'BUTTON') submitBtn.textContent = "Processing...";
         if (isPurchase) {
           var backdrop = document.createElement('div');
           backdrop.className = 'receipt-backdrop';
@@ -2308,6 +2343,105 @@
         }
       }
     });
-  </script>
+  
+    // Client-side GET navigation: swap page content without reloading shared assets.
+    (function() {
+      if (window.__wajClientNavigationBound) return;
+      window.__wajClientNavigationBound = true;
+      var pendingNavigation = false;
+      history.scrollRestoration = 'manual';
+
+      function isInternalPageLink(anchor, event) {
+        if (!anchor || event.defaultPrevented || event.button !== 0 ||
+            event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
+        if (anchor.hasAttribute('download') || anchor.hasAttribute('target') ||
+            anchor.hasAttribute('data-no-spa') || anchor.hasAttribute('onclick') ||
+            (anchor.getAttribute('rel') || '').split(/\\s+/).includes('external')) return false;
+        var raw = anchor.getAttribute('href');
+        if (!raw || raw[0] === '#' || /^(mailto:|tel:|javascript:)/i.test(raw)) return false;
+        var url;
+        try { url = new URL(raw, window.location.href); } catch (_) { return false; }
+        if (url.origin !== window.location.origin) return false;
+        if (url.pathname === window.location.pathname && url.search === window.location.search) return false;
+        if (url.pathname === window.location.pathname && url.hash) return false;
+        return true;
+      }
+
+      async function runPageScripts(root) {
+        var scripts = Array.from(root.querySelectorAll('script'));
+        for (var oldScript of scripts) {
+          var type = (oldScript.getAttribute('type') || '').trim().toLowerCase();
+          if (type && !['text/javascript', 'application/javascript', 'module'].includes(type)) continue;
+          var script = document.createElement('script');
+          Array.from(oldScript.attributes).forEach(function(attr) {
+            script.setAttribute(attr.name, attr.value);
+          });
+          script.textContent = oldScript.textContent;
+          if (script.src) {
+            await new Promise(function(resolve) {
+              script.onload = resolve;
+              script.onerror = resolve;
+              oldScript.replaceWith(script);
+            });
+          } else {
+            oldScript.replaceWith(script);
+          }
+        }
+      }
+
+      async function navigateClientPage(destination, options) {
+        options = options || {};
+        if (pendingNavigation) return;
+        var target = new URL(destination, window.location.href);
+        if (target.origin !== window.location.origin) {
+          window.location.assign(target.href);
+          return;
+        }
+        pendingNavigation = true;
+        document.documentElement.classList.add('waj-nav-loading');
+        try {
+          var response = await fetch(target.href, {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html' }
+          });
+          if (!response.ok || !/text\\/html/i.test(response.headers.get('content-type') || '')) {
+            throw new Error('Page navigation response was not HTML');
+          }
+          var html = await response.text();
+          var nextDocument = new DOMParser().parseFromString(html, 'text/html');
+          var nextApp = nextDocument.querySelector('.app');
+          var currentApp = document.querySelector('.app');
+          if (!nextApp || !currentApp) throw new Error('Page shell unavailable');
+
+          currentApp.replaceWith(nextApp);
+          document.title = nextDocument.title || document.title;
+          document.body.className = nextDocument.body.className;
+          if (response.url) target = new URL(response.url, target.href);
+          if (options.history !== false) history.pushState({ wajPage: true }, '', target.href);
+          await runPageScripts(nextApp);
+          document.dispatchEvent(new CustomEvent('waj:page-ready'));
+          window.scrollTo(0, 0);
+        } catch (error) {
+          console.warn('WAJ client navigation fallback:', error);
+          window.location.assign(target.href);
+        } finally {
+          pendingNavigation = false;
+          document.documentElement.classList.remove('waj-nav-loading');
+        }
+      }
+
+      window.navigateClientPage = navigateClientPage;
+      document.addEventListener('click', function(event) {
+        var anchor = event.target && event.target.closest ? event.target.closest('a') : null;
+        if (!isInternalPageLink(anchor, event)) return;
+        event.preventDefault();
+        navigateClientPage(anchor.href);
+      });
+      window.addEventListener('popstate', function() {
+        navigateClientPage(window.location.href, { history: false });
+      });
+    })();
+</script>
 </body>
 </html>
