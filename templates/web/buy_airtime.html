@@ -228,11 +228,13 @@
     }
   }
 
-  // Initial check on load
-  document.addEventListener('DOMContentLoaded', function() {
+  // Initial check on load and after client-side page navigation
+  function initAirtimePhoneDetection() {
     const p = document.getElementById('phone-input');
     if (p && p.value) handlePhoneChange(p.value);
-  });
+  }
+  document.addEventListener('DOMContentLoaded', initAirtimePhoneDetection);
+  document.addEventListener('waj:page-ready', initAirtimePhoneDetection);
 </script>
 {% endblock %}
 
