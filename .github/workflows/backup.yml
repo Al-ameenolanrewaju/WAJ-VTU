@@ -3,7 +3,10 @@ name: Daily Supabase Backup
 on:
   schedule:
     - cron: '0 0 * * *' # Runs at midnight UTC every day
-  workflow_dispatch: # Allows you to run it manually from the Actions tab
+  workflow_dispatch: # Allows manual runs from the Actions tab
+
+permissions:
+  contents: read
 
 jobs:
   backup:
@@ -11,31 +14,37 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Install PostgreSQL 17 client
         run: |
-          sudo apt-get install -y wget ca-certificates
-          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y wget ca-certificates gnupg
+          sudo install -d -m 0755 /etc/apt/keyrings
+          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor | sudo tee /etc/apt/keyrings/postgresql.gpg > /dev/null
+          sudo chmod 0644 /etc/apt/keyrings/postgresql.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
-      
+
       - name: Backup Supabase Database
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
+          set -euo pipefail
           if [ -z "$DATABASE_URL" ]; then
-            echo "DATABASE_URL secret is not set! Please add it in your repository settings."
+            echo "DATABASE_URL secret is not set! Please add it in repository settings."
             exit 1
           fi
-          
-          # Remove any accidental newlines or spaces from the secret
-          CLEAN_URL=$(echo "$DATABASE_URL" | tr -d '\n\r ')
-          /usr/lib/postgresql/17/bin/pg_dump "$CLEAN_URL" > backup.sql
-          
+
+          # Remove accidental newlines or spaces from the secret.
+          CLEAN_URL=$(printf '%s' "$DATABASE_URL" | tr -d '\n\r ')
+          /usr/lib/postgresql/17/bin/pg_dump --no-owner --no-acl "$CLEAN_URL" > backup.sql
+          test -s backup.sql
+
       - name: Upload Backup Artifact
         uses: actions/upload-artifact@v4
         with:
           name: supabase-database-backup
           path: backup.sql
-          retention-days: 30 # Keeps the last 30 days of backups
+          retention-days: 30
