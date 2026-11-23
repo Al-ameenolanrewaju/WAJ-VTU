@@ -2356,7 +2356,7 @@
             event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
         if (anchor.hasAttribute('download') || anchor.hasAttribute('target') ||
             anchor.hasAttribute('data-no-spa') || anchor.hasAttribute('onclick') ||
-            (anchor.getAttribute('rel') || '').split(/\\s+/).includes('external')) return false;
+            (anchor.getAttribute('rel') || '').split(/\s+/).includes('external')) return false;
         var raw = anchor.getAttribute('href');
         if (!raw || raw[0] === '#' || /^(mailto:|tel:|javascript:)/i.test(raw)) return false;
         var url;
@@ -2405,7 +2405,7 @@
             credentials: 'same-origin',
             headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html' }
           });
-          if (!response.ok || !/text\\/html/i.test(response.headers.get('content-type') || '')) {
+          if (!response.ok || !/text\/html/i.test(response.headers.get('content-type') || '')) {
             throw new Error('Page navigation response was not HTML');
           }
           var html = await response.text();
