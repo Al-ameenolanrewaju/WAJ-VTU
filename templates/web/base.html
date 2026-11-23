@@ -1,3 +1,12 @@
+{% if request.headers.get('X-Requested-With') == 'XMLHttpRequest' %}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>{{ self.title() }}</title></head>
+<body class="{{ self.body_class() }}">
+  <div class="app">{{ self.content() }}</div>
+</body>
+</html>
+{% else %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2459,3 +2468,5 @@
 </script>
 </body>
 </html>
+
+{% endif %}
