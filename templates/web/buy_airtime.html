@@ -228,11 +228,17 @@
     }
   }
 
-  // Initial check on load
-  document.addEventListener('DOMContentLoaded', function() {
+  // Initial check on load and after client-side page navigation
+  function initAirtimePhoneDetection() {
+    if (!document.getElementById('airtime-form') || typeof handlePhoneChange !== 'function') return;
     const p = document.getElementById('phone-input');
     if (p && p.value) handlePhoneChange(p.value);
-  });
+  }
+  document.addEventListener('DOMContentLoaded', initAirtimePhoneDetection);
+  if (!window.__wajAirtimePageReadyBound) {
+    window.__wajAirtimePageReadyBound = true;
+    document.addEventListener('waj:page-ready', initAirtimePhoneDetection);
+  }
 </script>
 {% endblock %}
 

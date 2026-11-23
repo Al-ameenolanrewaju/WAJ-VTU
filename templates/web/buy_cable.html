@@ -7,7 +7,7 @@
   <div class="form-card">
     <form method="GET" action="{{ url_for('web.cable_page') }}">
       <label>TV provider</label>
-      <select name="provider" onchange="this.form.submit()">
+      <select name="provider" onchange="this.form.requestSubmit()">
         {% for p in ["DSTV", "GOTV", "STARTIMES"] %}
         <option value="{{ p }}" {{ "selected" if p == provider }}>{{ p }}</option>
         {% endfor %}

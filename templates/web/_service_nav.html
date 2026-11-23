@@ -612,7 +612,8 @@
       await fetch(`/api/notifications/read/${id}`, { method: 'POST' });
     } catch (e) {}
     if (url && url !== '#' && url !== 'None') {
-      window.location.href = url;
+      if (typeof window.navigateClientPage === 'function') window.navigateClientPage(url);
+      else window.location.href = url;
     } else {
       loadUserNotifications();
     }
@@ -625,15 +626,22 @@
     } catch (e) {}
   }
 
-  document.addEventListener('click', function(e) {
-    const container = document.querySelector('.nav-notif-container');
-    const box = document.getElementById('nav-notif-box');
-    if (box && box.style.display === 'block' && container && !container.contains(e.target)) {
-      box.style.display = 'none';
-    }
-  });
+  if (!window.__wajNotificationDismissBound) {
+    window.__wajNotificationDismissBound = true;
+    document.addEventListener('click', function(e) {
+      const container = document.querySelector('.nav-notif-container');
+      const box = document.getElementById('nav-notif-box');
+      if (box && box.style.display === 'block' && container && !container.contains(e.target)) {
+        box.style.display = 'none';
+      }
+    });
+  }
 
-  window.addEventListener('load', () => {
-    loadUserNotifications();
-  });
+  if (!window.__wajNotificationPageReadyBound) {
+    window.__wajNotificationPageReadyBound = true;
+    document.addEventListener('waj:page-ready', () => {
+      if (typeof loadUserNotifications === 'function') loadUserNotifications();
+    });
+  }
+  window.addEventListener('load', () => loadUserNotifications(), { once: true });
 </script>

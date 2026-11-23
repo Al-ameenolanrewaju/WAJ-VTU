@@ -272,7 +272,8 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', function() {
+  function initDataPhoneDetection() {
+    if (!document.getElementById('data-purchase-form') || typeof detectNetworkFromPhone !== 'function') return;
     const p = document.getElementById('phone-input');
     if (p && p.value) {
       const detected = detectNetworkFromPhone(p.value);
@@ -282,6 +283,11 @@
         badge.textContent = `📶 Auto-detected: ${detected}`;
       }
     }
-  });
+  }
+  document.addEventListener('DOMContentLoaded', initDataPhoneDetection);
+  if (!window.__wajDataPageReadyBound) {
+    window.__wajDataPageReadyBound = true;
+    document.addEventListener('waj:page-ready', initDataPhoneDetection);
+  }
 </script>
 {% endblock %}
