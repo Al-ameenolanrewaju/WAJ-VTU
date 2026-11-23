@@ -2352,7 +2352,7 @@
       history.scrollRestoration = 'manual';
 
       function isInternalPageLink(anchor, event) {
-        if (!anchor || event.defaultPrevented || event.button !== 0 ||
+        if (pendingNavigation || !anchor || event.defaultPrevented || event.button !== 0 ||
             event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
         if (anchor.hasAttribute('download') || anchor.hasAttribute('target') ||
             anchor.hasAttribute('data-no-spa') || anchor.hasAttribute('onclick') ||
@@ -2417,6 +2417,7 @@
           currentApp.replaceWith(nextApp);
           document.title = nextDocument.title || document.title;
           document.body.className = nextDocument.body.className;
+          document.body.style.overflow = '';
           if (response.url) target = new URL(response.url, target.href);
           if (options.history !== false) history.pushState({ wajPage: true }, '', target.href);
           await runPageScripts(nextApp);
