@@ -167,7 +167,7 @@
   }
 
   {% if purchase_receipt %}
-  window.addEventListener('load', function() {
+  function showPendingPurchaseReceipt() {
     openInteractiveReceipt(null, {
       service: '{{ purchase_receipt.service }}',
       reference: '{{ purchase_receipt.reference }}',
@@ -181,7 +181,9 @@
     setTimeout(function() {
       if (typeof playSuccessChime === 'function') playSuccessChime();
     }, 400);
-  });
+  }
+  window.addEventListener('load', showPendingPurchaseReceipt, { once: true });
+  document.addEventListener('waj:page-ready', showPendingPurchaseReceipt);
   {% endif %}
 </script>
 
@@ -624,8 +626,10 @@
     }
   })();
 
-  window.addEventListener('load', () => {
-    setTimeout(updateDashboardPushBannerState, 600);
-  });
+  function initDashboardPushBanner() {
+    setTimeout(updateDashboardPushBannerState, 250);
+  }
+  window.addEventListener('load', initDashboardPushBanner, { once: true });
+  document.addEventListener('waj:page-ready', initDashboardPushBanner);
 </script>
 {% endblock %}
