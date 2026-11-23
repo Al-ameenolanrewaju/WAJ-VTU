@@ -637,6 +637,11 @@
     });
   }
 
+  if (!window.__wajNotificationPageReadyBound) {
+    window.__wajNotificationPageReadyBound = true;
+    document.addEventListener('waj:page-ready', () => {
+      if (typeof loadUserNotifications === 'function') loadUserNotifications();
+    });
+  }
   window.addEventListener('load', () => loadUserNotifications(), { once: true });
-  document.addEventListener('waj:page-ready', () => loadUserNotifications());
 </script>
