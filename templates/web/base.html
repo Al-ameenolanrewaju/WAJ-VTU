@@ -2366,12 +2366,22 @@
       }
     });
   
-    // Client-side GET navigation: swap page content without reloading shared assets.
+    // Client-side GET navigation with in-memory caching and hover prefetching
     (function() {
       if (window.__wajClientNavigationBound) return;
       window.__wajClientNavigationBound = true;
       var pendingNavigation = false;
       history.scrollRestoration = 'manual';
+
+      var pageCache = new Map();
+      var inFlightFetches = new Map();
+      var CACHE_TTL_MS = 60000;
+
+      function clearPageCache() {
+        pageCache.clear();
+        inFlightFetches.clear();
+      }
+      window.clearWajPageCache = clearPageCache;
 
       function isInternalPageLink(anchor, event) {
         if (pendingNavigation || !anchor || event.defaultPrevented || event.button !== 0 ||
@@ -2380,13 +2390,55 @@
             anchor.hasAttribute('data-no-spa') || anchor.hasAttribute('onclick') ||
             (anchor.getAttribute('rel') || '').split(/\s+/).includes('external')) return false;
         var raw = anchor.getAttribute('href');
-        if (!raw || raw[0] === '#' || /^(mailto:|tel:|javascript:)/i.test(raw)) return false;
+        if (!raw || raw[0] === '#' || /^(mailto|tel|javascript):/i.test(raw)) return false;
         var url;
         try { url = new URL(raw, window.location.href); } catch (_) { return false; }
         if (url.origin !== window.location.origin) return false;
         if (url.pathname === window.location.pathname && url.search === window.location.search) return false;
         if (url.pathname === window.location.pathname && url.hash) return false;
         return true;
+      }
+
+      function fetchPageHtml(urlStr) {
+        if (pageCache.has(urlStr)) {
+          var entry = pageCache.get(urlStr);
+          if (Date.now() - entry.time < CACHE_TTL_MS) {
+            return Promise.resolve(entry);
+          }
+          pageCache.delete(urlStr);
+        }
+        if (inFlightFetches.has(urlStr)) {
+          return inFlightFetches.get(urlStr);
+        }
+        var p = fetch(urlStr, {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html' }
+        }).then(function(response) {
+          inFlightFetches.delete(urlStr);
+          if (!response.ok || !/text\/html/i.test(response.headers.get('content-type') || '')) {
+            throw new Error('Page navigation response was not HTML');
+          }
+          return response.text().then(function(html) {
+            var item = { html: html, finalUrl: response.url || urlStr, time: Date.now() };
+            pageCache.set(urlStr, item);
+            return item;
+          });
+        }).catch(function(err) {
+          inFlightFetches.delete(urlStr);
+          throw err;
+        });
+        inFlightFetches.set(urlStr, p);
+        return p;
+      }
+
+      function prefetchPage(href) {
+        try {
+          var target = new URL(href, window.location.href);
+          if (target.origin !== window.location.origin) return;
+          if (target.pathname === window.location.pathname && target.search === window.location.search) return;
+          fetchPageHtml(target.href).catch(function() {});
+        } catch (_) {}
       }
 
       async function runPageScripts(root) {
@@ -2411,6 +2463,23 @@
         }
       }
 
+      async function applyPageHtml(html, finalUrl, options) {
+        var nextDocument = new DOMParser().parseFromString(html, 'text/html');
+        var nextApp = nextDocument.querySelector('.app');
+        var currentApp = document.querySelector('.app');
+        if (!nextApp || !currentApp) throw new Error('Page shell unavailable');
+
+        currentApp.replaceWith(nextApp);
+        document.title = nextDocument.title || document.title;
+        document.body.className = nextDocument.body.className;
+        document.body.style.overflow = '';
+        var finalTarget = new URL(finalUrl, window.location.href);
+        if (options.history !== false) history.pushState({ wajPage: true }, '', finalTarget.href);
+        await runPageScripts(nextApp);
+        document.dispatchEvent(new CustomEvent('waj:page-ready'));
+        window.scrollTo(0, 0);
+      }
+
       async function navigateClientPage(destination, options) {
         options = options || {};
         if (pendingNavigation) return;
@@ -2419,32 +2488,18 @@
           window.location.assign(target.href);
           return;
         }
+
+        var cached = pageCache.get(target.href);
+        if (cached && (Date.now() - cached.time < CACHE_TTL_MS)) {
+          applyPageHtml(cached.html, cached.finalUrl || target.href, options);
+          return;
+        }
+
         pendingNavigation = true;
         document.documentElement.classList.add('waj-nav-loading');
         try {
-          var response = await fetch(target.href, {
-            method: 'GET',
-            credentials: 'same-origin',
-            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html' }
-          });
-          if (!response.ok || !/text\/html/i.test(response.headers.get('content-type') || '')) {
-            throw new Error('Page navigation response was not HTML');
-          }
-          var html = await response.text();
-          var nextDocument = new DOMParser().parseFromString(html, 'text/html');
-          var nextApp = nextDocument.querySelector('.app');
-          var currentApp = document.querySelector('.app');
-          if (!nextApp || !currentApp) throw new Error('Page shell unavailable');
-
-          currentApp.replaceWith(nextApp);
-          document.title = nextDocument.title || document.title;
-          document.body.className = nextDocument.body.className;
-          document.body.style.overflow = '';
-          if (response.url) target = new URL(response.url, target.href);
-          if (options.history !== false) history.pushState({ wajPage: true }, '', target.href);
-          await runPageScripts(nextApp);
-          document.dispatchEvent(new CustomEvent('waj:page-ready'));
-          window.scrollTo(0, 0);
+          var result = await fetchPageHtml(target.href);
+          applyPageHtml(result.html, result.finalUrl || target.href, options);
         } catch (error) {
           console.warn('WAJ client navigation fallback:', error);
           window.location.assign(target.href);
@@ -2455,15 +2510,53 @@
       }
 
       window.navigateClientPage = navigateClientPage;
+
       document.addEventListener('click', function(event) {
         var anchor = event.target && event.target.closest ? event.target.closest('a') : null;
         if (!isInternalPageLink(anchor, event)) return;
         event.preventDefault();
         navigateClientPage(anchor.href);
       });
+
       window.addEventListener('popstate', function() {
         navigateClientPage(window.location.href, { history: false });
       });
+
+      document.addEventListener('pointerover', function(e) {
+        var anchor = e.target && e.target.closest ? e.target.closest('a') : null;
+        if (anchor && isInternalPageLink(anchor, e)) {
+          prefetchPage(anchor.href);
+        }
+      }, { passive: true });
+
+      document.addEventListener('touchstart', function(e) {
+        var anchor = e.target && e.target.closest ? e.target.closest('a') : null;
+        if (anchor && isInternalPageLink(anchor, e)) {
+          prefetchPage(anchor.href);
+        }
+      }, { passive: true });
+
+      document.addEventListener('submit', function(e) {
+        var form = e.target;
+        if (form && form.method && form.method.toUpperCase() === 'POST') {
+          clearPageCache();
+        }
+      }, { passive: true });
+
+      function prefetchCommonServices() {
+        var paths = ['/dashboard', '/buy/data', '/buy/airtime-page', '/buy/cable', '/buy/electricity'];
+        for (var i = 0; i < paths.length; i++) {
+          try {
+            var u = new URL(paths[i], window.location.origin).href;
+            if (u !== window.location.href) prefetchPage(u);
+          } catch (_) {}
+        }
+      }
+      if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(prefetchCommonServices, { timeout: 2000 });
+      } else {
+        setTimeout(prefetchCommonServices, 1200);
+      }
     })();
 </script>
 </body>

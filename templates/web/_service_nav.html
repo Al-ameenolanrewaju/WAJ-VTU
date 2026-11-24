@@ -637,11 +637,19 @@
     });
   }
 
+  let _wajNotifDebounce = null;
+  function scheduleLoadUserNotifications() {
+    clearTimeout(_wajNotifDebounce);
+    _wajNotifDebounce = setTimeout(() => {
+      if (typeof loadUserNotifications === 'function') loadUserNotifications();
+    }, 350);
+  }
+
   if (!window.__wajNotificationPageReadyBound) {
     window.__wajNotificationPageReadyBound = true;
     document.addEventListener('waj:page-ready', () => {
-      if (typeof loadUserNotifications === 'function') loadUserNotifications();
+      scheduleLoadUserNotifications();
     });
   }
-  window.addEventListener('load', () => loadUserNotifications(), { once: true });
+  window.addEventListener('load', () => scheduleLoadUserNotifications(), { once: true });
 </script>

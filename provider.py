@@ -4,6 +4,8 @@ import time
 import uuid
 import hashlib
 import re
+import json
+import threading
 import requests
 from urllib.parse import urlencode
 from dotenv import load_dotenv
@@ -65,9 +67,42 @@ def _provider_request(endpoint: str, params: dict):
 
 
 _SWIFTBILLS_GET_CACHE = {}
+_SWIFTBILLS_BACKGROUND_REFRESHING = set()
+_CATALOG_CACHE_LOCK = threading.Lock()
+_CATALOG_CACHE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "instance", "catalog_cache.json"
+)
+
+FRESH_CATALOG_TTL = 3600 * 2  # 2 hours fresh
+STALE_CATALOG_TTL = 86400 * 30  # 30 days stale
+
+
+def _load_catalog_cache():
+    global _SWIFTBILLS_GET_CACHE
+    try:
+        if os.path.exists(_CATALOG_CACHE_FILE):
+            with open(_CATALOG_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    _SWIFTBILLS_GET_CACHE.update(data)
+    except Exception as e:
+        logger.warning("Could not load catalog cache file: %s", e)
+
+
+def _save_catalog_cache():
+    try:
+        os.makedirs(os.path.dirname(_CATALOG_CACHE_FILE), exist_ok=True)
+        with open(_CATALOG_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_SWIFTBILLS_GET_CACHE, f)
+    except Exception as e:
+        logger.warning("Could not persist catalog cache file: %s", e)
+
+
+_load_catalog_cache()
+
 
 def _swiftbills_request(endpoint: str, method: str = "GET", payload: dict | None = None):
-    """Make an authenticated SwiftBills request, with TTL caching for idempotent catalog endpoints."""
+    """Make an authenticated SwiftBills request, with persistent stale-while-revalidate caching for catalog endpoints."""
     clean_endpoint = endpoint.lstrip('/')
     is_cacheable_get = (method.upper() == "GET" and any(
         clean_endpoint.startswith(p) for p in ("data_plans", "get-networks", "get-cable-plan", "get-bill", "get-exam")
@@ -75,8 +110,42 @@ def _swiftbills_request(endpoint: str, method: str = "GET", payload: dict | None
 
     if is_cacheable_get:
         cached = _SWIFTBILLS_GET_CACHE.get(clean_endpoint)
-        if cached and time.time() < cached["expires"]:
-            return cached["data"]
+        if cached and isinstance(cached, dict) and "data" in cached:
+            timestamp = cached.get("timestamp", 0)
+            now = time.time()
+            if now - timestamp < FRESH_CATALOG_TTL:
+                return cached["data"]
+            elif now - timestamp < STALE_CATALOG_TTL:
+                # Return stale data immediately so caller doesn't wait; refresh in background
+                if clean_endpoint not in _SWIFTBILLS_BACKGROUND_REFRESHING:
+                    def _async_refresh(ep=clean_endpoint):
+                        with _CATALOG_CACHE_LOCK:
+                            if ep in _SWIFTBILLS_BACKGROUND_REFRESHING:
+                                return
+                            _SWIFTBILLS_BACKGROUND_REFRESHING.add(ep)
+                        try:
+                            headers = {
+                                "Authorization": f"Token {SWIFTBILLS_API_KEY}",
+                                "Content-Type": "application/json",
+                            }
+                            url = f"{SWIFTBILLS_BASE_URL}/{ep}"
+                            res = requests.get(url, headers=headers, timeout=15)
+                            if res.ok:
+                                res_data = res.json()
+                                _SWIFTBILLS_GET_CACHE[ep] = {
+                                    "data": res_data,
+                                    "timestamp": time.time(),
+                                    "expires": time.time() + FRESH_CATALOG_TTL,
+                                }
+                                _save_catalog_cache()
+                        except Exception as exc:
+                            logger.warning("Background catalog refresh failed for %s: %s", ep, exc)
+                        finally:
+                            with _CATALOG_CACHE_LOCK:
+                                _SWIFTBILLS_BACKGROUND_REFRESHING.discard(ep)
+
+                    threading.Thread(target=_async_refresh, daemon=True).start()
+                return cached["data"]
 
     headers = {
         "Authorization": f"Token {SWIFTBILLS_API_KEY}",
@@ -86,12 +155,17 @@ def _swiftbills_request(endpoint: str, method: str = "GET", payload: dict | None
     if method.upper() == "POST":
         response = requests.post(url, json=payload or {}, headers=headers, timeout=45)
     else:
-        response = requests.get(url, headers=headers, timeout=45)
+        response = requests.get(url, headers=headers, timeout=15)
     response.raise_for_status()
     data = response.json()
 
     if is_cacheable_get and data:
-        _SWIFTBILLS_GET_CACHE[clean_endpoint] = {"data": data, "expires": time.time() + 300}
+        _SWIFTBILLS_GET_CACHE[clean_endpoint] = {
+            "data": data,
+            "timestamp": time.time(),
+            "expires": time.time() + FRESH_CATALOG_TTL,
+        }
+        _save_catalog_cache()
     return data
 
 

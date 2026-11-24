@@ -894,9 +894,21 @@ def get_or_create_user(phone_number):
     return user
 
 
-def get_markup(service_type, base_amount=Decimal("0.00")):
+def get_markups_map() -> dict:
+    """Returns a dict mapping service_type.upper() -> ServiceMarkup."""
+    try:
+        return {row.service_type.upper(): row for row in ServiceMarkup.query.all()}
+    except Exception:
+        return {}
+
+
+def get_markup(service_type, base_amount=Decimal("0.00"), markups_map=None):
     from decimal import ROUND_HALF_UP
-    markup = ServiceMarkup.query.filter_by(service_type=service_type.upper()).first()
+    st = (service_type or "").upper()
+    if markups_map is not None:
+        markup = markups_map.get(st)
+    else:
+        markup = ServiceMarkup.query.filter_by(service_type=st).first()
     percentage = Decimal(str(markup.markup_amount)) if markup else Decimal("0.00")
     raw_markup = base_amount * percentage / Decimal("100")
     total_amount = base_amount + raw_markup
@@ -915,7 +927,7 @@ def get_plan_overrides_map(service_type: str = None) -> dict:
         return {}
 
 
-def resolve_plan_price(service_type: str, plan_code: str, base_api_amount: Decimal, overrides_map: dict = None):
+def resolve_plan_price(service_type: str, plan_code: str, base_api_amount: Decimal, overrides_map: dict = None, markups_map: dict = None):
     """
     Returns tuple: (selling_price: Decimal | None, cost_price: Decimal, is_active: bool, is_custom: bool)
     - cost_price is custom_cost if set and > 0, else base_api_amount.
@@ -936,11 +948,17 @@ def resolve_plan_price(service_type: str, plan_code: str, base_api_amount: Decim
         if not override.is_active:
             return None, effective_cost, False, False
 
-        default_markup = get_markup(service_type, effective_cost)
+        if markups_map is not None:
+            default_markup = get_markup(service_type, effective_cost, markups_map=markups_map)
+        else:
+            default_markup = get_markup(service_type, effective_cost)
         selling_price = (effective_cost + default_markup).quantize(Decimal("0.01"))
         return selling_price, effective_cost, True, (override.custom_cost is not None and override.custom_cost > 0)
 
-    default_markup = get_markup(service_type, base_api_amount)
+    if markups_map is not None:
+        default_markup = get_markup(service_type, base_api_amount, markups_map=markups_map)
+    else:
+        default_markup = get_markup(service_type, base_api_amount)
     selling_price = (base_api_amount + default_markup).quantize(Decimal("0.01"))
     return selling_price, base_api_amount, True, False
 

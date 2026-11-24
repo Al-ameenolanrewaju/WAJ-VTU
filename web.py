@@ -371,13 +371,29 @@ def dashboard():
         from urllib.parse import quote
         whatsapp_link_url = f"https://wa.me/2348102314725?text={quote('LINK ' + whatsapp_link_token)}"
     from services.referral_service import get_user_referral_summary
-    from services.deal_service import generate_daily_deal, get_lagos_today
+    from services.deal_service import get_lagos_today
+    from models import MarketingContent
+
     referral_summary = get_user_referral_summary(user)
-    today_deal = None
-    try:
-        today_deal, _ = generate_daily_deal(target_date=get_lagos_today())
-    except Exception:
-        pass
+    today_date = get_lagos_today()
+    today_deal = MarketingContent.query.filter_by(
+        content_type="DAILY_DEAL", target_date=today_date
+    ).first()
+    if not today_deal:
+        today_deal = MarketingContent.query.filter_by(
+            content_type="DAILY_DEAL"
+        ).order_by(MarketingContent.target_date.desc()).first()
+        import threading
+        from flask import current_app
+        app_obj = current_app._get_current_object()
+        def _bg_generate():
+            with app_obj.app_context():
+                try:
+                    from services.deal_service import generate_daily_deal
+                    generate_daily_deal(target_date=today_date)
+                except Exception:
+                    pass
+        threading.Thread(target=_bg_generate, daemon=True).start()
     return render_template(
         "web/dashboard.html",
         user=user,
@@ -427,7 +443,7 @@ def receipt_image(reference):
 @login_required
 def buy_data():
     user = current_user()
-    from app import get_markup, resolve_plan_price, get_plan_overrides_map
+    from app import get_markup, resolve_plan_price, get_plan_overrides_map, get_markups_map
 
     if request.method == "GET":
         network = request.args.get("network", "MTN").upper()
@@ -436,13 +452,14 @@ def buy_data():
         phone_prefill = (request.args.get("phone") or "").strip()
         all_plans = {}
         overrides_map = get_plan_overrides_map()
+        markups_map = get_markups_map()
         for net in ("MTN", "AIRTEL", "GLO", "9MOBILE"):
             raw_plans = fetch_data_variations(net)
             plans_list = []
             for plan in raw_plans:
                 base_amount = Decimal(str(plan.get("variation_amount", "0")))
                 p_code = str(plan.get("variation_code"))
-                final_amt, effective_cost, is_active, _ = resolve_plan_price(f"DATA_{net}", p_code, base_amount, overrides_map)
+                final_amt, effective_cost, is_active, _ = resolve_plan_price(f"DATA_{net}", p_code, base_amount, overrides_map, markups_map)
                 if not is_active:
                     continue
                 plans_list.append({
@@ -537,16 +554,17 @@ def buy_airtime():
 @login_required
 def cable_page():
     user = current_user()
-    from app import get_markup, resolve_plan_price, get_plan_overrides_map
+    from app import get_markup, resolve_plan_price, get_plan_overrides_map, get_markups_map
 
     if request.method == "GET":
         provider = request.args.get("provider", "DSTV")
         cable_plans = []
         overrides_map = get_plan_overrides_map("CABLE")
+        markups_map = get_markups_map()
         for plan in fetch_cable_plans(provider):
             base_amount = Decimal(str(plan.get("amount", "0")))
             p_code = str(plan.get("code"))
-            final_amt, effective_cost, is_active, _ = resolve_plan_price("CABLE", p_code, base_amount, overrides_map)
+            final_amt, effective_cost, is_active, _ = resolve_plan_price("CABLE", p_code, base_amount, overrides_map, markups_map)
             if not is_active:
                 continue
             cable_plans.append({
@@ -675,15 +693,16 @@ def verify_betting_ajax():
 @login_required
 def education_page():
     user = current_user()
-    from app import get_markup, resolve_plan_price, get_plan_overrides_map
+    from app import get_markup, resolve_plan_price, get_plan_overrides_map, get_markups_map
 
     if request.method == "GET":
         plans = []
         overrides_map = get_plan_overrides_map("EDU")
+        markups_map = get_markups_map()
         for package in fetch_education_packages():
             base_amount = Decimal(str(package.get("amount", "0")))
             p_code = str(package.get("code"))
-            final_amt, effective_cost, is_active, _ = resolve_plan_price("EDU", p_code, base_amount, overrides_map)
+            final_amt, effective_cost, is_active, _ = resolve_plan_price("EDU", p_code, base_amount, overrides_map, markups_map)
             if not is_active:
                 continue
             plans.append({
