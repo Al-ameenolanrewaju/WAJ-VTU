@@ -217,13 +217,23 @@ def send_daily_deal_push(force=False):
         logger.warning("[push_service] Could not generate daily deal for push.")
         return {"status": "error", "reason": "No daily deal could be generated"}
 
+    # Avoid duplicate network prefix (e.g. "AIRTEL AIRTEL 5GB AWOOF")
+    plan_display_name = str(deal.plan_name or deal.data_size or "Data Plan").strip()
+    if plan_display_name.upper().startswith(deal.network.upper()):
+        full_display = plan_display_name
+    else:
+        full_display = f"{deal.network} {plan_display_name}"
+
     try:
         price_val = float(deal.price or 0)
     except (ValueError, TypeError):
         price_val = 0.0
 
-    title = f"🔥 {deal.network} {deal.plan_name} for ₦{price_val:,.0f}!"
-    body = deal.caption or f"Massive price crash on {deal.network} data! Top up instantly on WAJ VTU."
+    title = f"🔥 {full_display} for ₦{price_val:,.0f}!"
+    body = deal.caption or f"Special offer: {full_display} ({deal.validity or '30 Days'}) for just ₦{price_val:,.2f} on WAJ VTU!"
+    if f"₦{price_val:,.2f}" not in body and f"₦{price_val:,.0f}" not in body:
+        body = f"Special offer: {full_display} ({deal.validity or '30 Days'}) for just ₦{price_val:,.2f} on WAJ VTU!"
+
     target_url = f"/buy/data?utm_source=web_push&utm_campaign=daily_deal_{today_str}"
 
     result = broadcast_push(title=title, body=body, url=target_url)

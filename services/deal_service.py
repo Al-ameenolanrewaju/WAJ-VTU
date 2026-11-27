@@ -6,12 +6,15 @@ and maintains deal history idempotently.
 """
 import os
 import re
+import logging
 from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 from models import db, MarketingContent
 from provider import fetch_data_variations
 from services.marketing_settings import get_marketing_setting
+
+logger = logging.getLogger(__name__)
 
 LAGOS_TZ = ZoneInfo("Africa/Lagos")
 SUPPORTED_NETWORKS = ["MTN", "GLO", "AIRTEL", "9MOBILE"]
@@ -136,42 +139,52 @@ def score_plan_for_deal(plan, network, recent_deals):
 def collect_available_plans():
     """
     Fetches real, active plans across all supported networks from the provider layer.
-    Returns plans with the final customer-facing price (base cost + markup), exactly
-    as shown on the /buy/data page. Guarantees no duplicated or invented plans.
+    Returns plans with the final customer-facing selling price (effective cost + markup),
+    guaranteeing that manual cost overrides and percentage markups are fully applied.
     """
-    try:
-        from app import get_markup  # deferred to avoid circular import at module load
-    except Exception:
-        def get_markup(service_key, base_amount):
-            return Decimal("0.00")
+    from services.pricing_service import resolve_plan_price, get_markups_map, get_plan_overrides_map
 
+    overrides_map = get_plan_overrides_map()
+    markups_map = get_markups_map()
     all_plans = []
     for network in SUPPORTED_NETWORKS:
         try:
             variations = fetch_data_variations(network) or []
             for item in variations:
-                base_price = None
+                plan_code = str(item.get("variation_code", "")).strip()
+                if not plan_code or not item.get("name"):
+                    continue
+
                 try:
-                    base_price = Decimal(str(item.get("variation_amount", 0))).quantize(Decimal("0.01"))
+                    raw_api_cost = Decimal(str(item.get("variation_amount", 0))).quantize(Decimal("0.01"))
                 except Exception:
                     continue
 
-                if base_price > 0 and item.get("name") and item.get("variation_code"):
-                    # Apply the same markup used on the buy_data page so the
-                    # deal price shown in /marketing matches what customers pay
-                    try:
-                        markup = get_markup(f"DATA_{network}", base_price)
-                    except Exception:
-                        markup = Decimal("0.00")
-                    final_price = (base_price + markup).quantize(Decimal("0.01"))
-                    all_plans.append({
-                        "network": network,
-                        "name": item["name"],
-                        "variation_code": item["variation_code"],
-                        "price": final_price,
-                        "base_price": base_price,  # kept for scoring value-ratio only
-                    })
-        except Exception:
+                if raw_api_cost <= 0:
+                    continue
+
+                selling_price, effective_cost, is_active, is_custom = resolve_plan_price(
+                    f"DATA_{network}",
+                    plan_code,
+                    raw_api_cost,
+                    overrides_map=overrides_map,
+                    markups_map=markups_map,
+                )
+
+                # Skip disabled plans
+                if not is_active or selling_price is None or selling_price <= 0:
+                    continue
+
+                all_plans.append({
+                    "network": network,
+                    "name": item["name"],
+                    "variation_code": plan_code,
+                    "price": selling_price,
+                    "base_price": effective_cost,  # kept for scoring value-ratio only
+                    "api_cost": raw_api_cost,
+                })
+        except Exception as exc:
+            logger.warning("Could not collect data plans for %s: %s", network, exc)
             continue
     return all_plans
 
@@ -252,11 +265,17 @@ Do not wrap in markdown quotes. Return JSON only."""
         import json
         data = json.loads(content)
         if data.get("full_caption"):
-            return {
-                "headline": data.get("headline", "🔥 WAJ DATA DEAL OF THE DAY!"),
-                "caption": data.get("caption", f"Get {deal_facts['network']} {deal_facts['data_size']} at only ₦{deal_facts['price']:,.2f}!"),
-                "full_caption": data.get("full_caption")
-            }
+            price_naira = f"₦{deal_facts['price']:,.2f}"
+            price_round = f"₦{deal_facts['price']:,.0f}"
+            full_caption = data.get("full_caption", "")
+            caption = data.get("caption", "")
+            # Verify LLM didn't invent an arbitrary price
+            if (price_naira in full_caption or price_round in full_caption) and (price_naira in caption or price_round in caption or "₦" not in caption):
+                return {
+                    "headline": data.get("headline", "🔥 WAJ DATA DEAL OF THE DAY!"),
+                    "caption": caption,
+                    "full_caption": full_caption,
+                }
     except Exception:
         pass
     return None
@@ -294,13 +313,74 @@ def generate_deal_copy_template(deal_facts, website_url):
     }
 
 
+def sync_daily_deal_price(target_date=None, website_url=None):
+    """
+    Ensures the persisted daily deal record is kept in sync with the current
+    pricing configuration (manual cost overrides + percentage markups).
+    """
+    if target_date is None:
+        target_date = get_lagos_today()
+
+    existing = MarketingContent.query.filter_by(
+        content_type="DAILY_DEAL",
+        target_date=target_date
+    ).first()
+    if not existing:
+        return None
+
+    from services.pricing_service import resolve_plan_price
+    from provider import fetch_data_variations
+
+    # Fetch live provider variation amount for the existing plan
+    current_selling_price = None
+    try:
+        variations = fetch_data_variations(existing.network) or []
+        for v in variations:
+            if v.get("variation_code") == existing.plan_code:
+                raw_cost = Decimal(str(v.get("variation_amount", 0)))
+                sp, _, is_act, _ = resolve_plan_price(f"DATA_{existing.network}", existing.plan_code, raw_cost)
+                if is_act and sp is not None:
+                    current_selling_price = sp
+                break
+    except Exception as exc:
+        logger.warning("Could not sync live price for daily deal: %s", exc)
+
+    if current_selling_price is not None and (existing.price is None or existing.price != current_selling_price):
+        logger.info(
+            "Syncing daily deal %s (%s) price from ₦%s to ₦%s",
+            existing.id, existing.plan_code, existing.price, current_selling_price
+        )
+        existing.price = current_selling_price
+        if not website_url:
+            website_url = (get_marketing_setting("APP_BASE_URL", "") or "https://wajvtu.com.ng").rstrip("/")
+
+        deal_facts = {
+            "network": existing.network,
+            "plan_name": existing.plan_name,
+            "data_size": existing.data_size,
+            "validity": existing.validity or "30 Days",
+            "price": current_selling_price,
+        }
+        copy = generate_deal_copy_template(deal_facts, website_url)
+        existing.headline = copy["headline"]
+        existing.caption = copy["caption"]
+        existing.full_caption = copy["full_caption"]
+        existing.updated_at = datetime.now(timezone.utc)
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    return existing
+
+
 def generate_daily_deal(target_date=None, force=False, website_url=None):
     """
     Generates and persists the deal of the day.
     
     Idempotent:
     - Running multiple times on the same date will NOT create duplicate deals.
-    - If a deal already exists for target_date and force is False, returns existing.
+    - If a deal already exists for target_date and force is False, returns existing (syncing price if changed).
     - If force is True, updates the existing record with newly selected deal content.
     """
     if target_date is None:
@@ -312,6 +392,7 @@ def generate_daily_deal(target_date=None, force=False, website_url=None):
     ).first()
 
     if existing and not force:
+        sync_daily_deal_price(target_date=target_date, website_url=website_url)
         return existing, False
 
     if not website_url:
@@ -384,6 +465,8 @@ def generate_daily_deal(target_date=None, force=False, website_url=None):
             content_type="DAILY_DEAL",
             target_date=target_date
         ).first()
+        if existing:
+            sync_daily_deal_price(target_date=target_date, website_url=website_url)
         return existing, False
 
 

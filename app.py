@@ -894,73 +894,12 @@ def get_or_create_user(phone_number):
     return user
 
 
-def get_markups_map() -> dict:
-    """Returns a dict mapping service_type.upper() -> ServiceMarkup."""
-    try:
-        return {row.service_type.upper(): row for row in ServiceMarkup.query.all()}
-    except Exception:
-        return {}
-
-
-def get_markup(service_type, base_amount=Decimal("0.00"), markups_map=None):
-    from decimal import ROUND_HALF_UP
-    st = (service_type or "").upper()
-    if markups_map is not None:
-        markup = markups_map.get(st)
-    else:
-        markup = ServiceMarkup.query.filter_by(service_type=st).first()
-    percentage = Decimal(str(markup.markup_amount)) if markup else Decimal("0.00")
-    raw_markup = base_amount * percentage / Decimal("100")
-    total_amount = base_amount + raw_markup
-    rounded_total = total_amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-    return (rounded_total - base_amount).quantize(Decimal("0.01"))
-
-
-def get_plan_overrides_map(service_type: str = None) -> dict:
-    """Returns a dict mapping (service_type, plan_code) -> PlanPriceOverride"""
-    try:
-        query = PlanPriceOverride.query
-        if service_type:
-            query = query.filter_by(service_type=service_type)
-        return {(row.service_type, str(row.plan_code)): row for row in query.all()}
-    except Exception:
-        return {}
-
-
-def resolve_plan_price(service_type: str, plan_code: str, base_api_amount: Decimal, overrides_map: dict = None, markups_map: dict = None):
-    """
-    Returns tuple: (selling_price: Decimal | None, cost_price: Decimal, is_active: bool, is_custom: bool)
-    - cost_price is custom_cost if set and > 0, else base_api_amount.
-    - selling_price is cost_price + get_markup(service_type, cost_price).
-    """
-    plan_code_str = str(plan_code)
-    if overrides_map is not None:
-        override = overrides_map.get((service_type, plan_code_str))
-    else:
-        try:
-            override = PlanPriceOverride.query.filter_by(service_type=service_type, plan_code=plan_code_str).first()
-        except Exception:
-            override = None
-
-    if override:
-        effective_cost = Decimal(str(override.custom_cost)).quantize(Decimal("0.01")) if (override.custom_cost is not None and override.custom_cost > 0) else base_api_amount
-
-        if not override.is_active:
-            return None, effective_cost, False, False
-
-        if markups_map is not None:
-            default_markup = get_markup(service_type, effective_cost, markups_map=markups_map)
-        else:
-            default_markup = get_markup(service_type, effective_cost)
-        selling_price = (effective_cost + default_markup).quantize(Decimal("0.01"))
-        return selling_price, effective_cost, True, (override.custom_cost is not None and override.custom_cost > 0)
-
-    if markups_map is not None:
-        default_markup = get_markup(service_type, base_api_amount, markups_map=markups_map)
-    else:
-        default_markup = get_markup(service_type, base_api_amount)
-    selling_price = (base_api_amount + default_markup).quantize(Decimal("0.01"))
-    return selling_price, base_api_amount, True, False
+from services.pricing_service import (
+    get_markups_map,
+    get_markup,
+    get_plan_overrides_map,
+    resolve_plan_price,
+)
 
 
 
@@ -3722,6 +3661,11 @@ def admin_pricing():
                 ovr.custom_cost = None
                 ovr.custom_price = None
             db.session.commit()
+            try:
+                from services.deal_service import sync_daily_deal_price
+                sync_daily_deal_price()
+            except Exception:
+                pass
             record_admin_audit(ADMIN_USERNAME, "pricing_override_reset", True, f"Reset custom cost prices for {submitted_service} to auto API baseline")
             return redirect(url_for("admin_pricing", service=submitted_service, reset=1))
 
@@ -3760,6 +3704,11 @@ def admin_pricing():
                 override.is_active = is_active
 
         db.session.commit()
+        try:
+            from services.deal_service import sync_daily_deal_price
+            sync_daily_deal_price()
+        except Exception:
+            pass
         record_admin_audit(ADMIN_USERNAME, "pricing_override_save", True, f"Saved custom cost prices for {submitted_service}")
         return redirect(url_for("admin_pricing", service=submitted_service, saved=1))
 
@@ -4398,6 +4347,11 @@ def admin_settings():
             record_admin_audit(ADMIN_USERNAME, "pricing_update", False, "; ".join(errors[:5]))
         else:
             db.session.commit()
+            try:
+                from services.deal_service import sync_daily_deal_price
+                sync_daily_deal_price()
+            except Exception:
+                pass
             record_admin_audit(ADMIN_USERNAME, "pricing_update", True, "Service pricing and fee tiers updated")
 
     csrf_token = get_csrf_token()
